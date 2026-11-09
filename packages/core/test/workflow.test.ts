@@ -48,7 +48,7 @@ describe('package.yml release wiring', () => {
     expect(block).toMatch(/publish\.mjs --publish/);
   });
 
-  it('both release jobs have a timeout-minutes', () => {
+  it('both npm release jobs have a timeout-minutes', () => {
     expect(jobBlock('release-check')).toMatch(/timeout-minutes:\s*\d+/);
     expect(jobBlock('publish')).toMatch(/timeout-minutes:\s*\d+/);
   });
@@ -78,6 +78,53 @@ describe('package.yml release wiring', () => {
       expect(block, job).toMatch(new RegExp(`path: ${dry}\\b`));
       expect(block, job).toMatch(new RegExp(`publish\\.mjs --(check|publish) ${dry}\\b`));
     }
+  });
+
+  it('release-check pre-flights the GitHub release: installers and changelog, before publish', () => {
+    // Before publish's approval: npm publish cannot be undone, and github-release runs after it.
+    const block = jobBlock('release-check');
+    expect(block).toMatch(/pattern:\s*'gui-\*'/);
+    expect(block).toMatch(/merge-multiple:\s*true/);
+    const dir = /pattern:\s*'gui-\*',\s*merge-multiple:\s*true,\s*path:\s*(\S+?)\s*\}/.exec(block)?.[1];
+    expect(dir, 'the gui-* download path').toBeDefined();
+    expect(block).toMatch(new RegExp(`release-notes\\.mjs --check-installers ${dir} "\\$\\{GITHUB_REF_NAME#v\\}"`));
+    expect(block).toMatch(/scriv==1\.8\.1/);
+    expect(block).toMatch(/release-notes\.mjs --check-changelog "\$\{GITHUB_REF_NAME#v\}"/);
+  });
+
+  it('github-release: needs publish, contents: write only, full history, no environment', () => {
+    const block = jobBlock('github-release');
+    expect(block).toMatch(/if:\s*startsWith\(github\.ref, 'refs\/tags\/v'\)/);
+    expect(block).toMatch(/needs:\s*publish\b/);
+    // As a key (its comment says "No environment:" in prose).
+    expect(block).not.toMatch(/^\s*environment:/m);
+    expect(block).toMatch(/timeout-minutes:\s*\d+/);
+    expect(block).toMatch(/fetch-depth:\s*0\b/);
+    // Exactly one permission line under `permissions:`, and it is contents: write.
+    const perms = /\n    permissions:\n((?:      \S.*\n)+)/.exec(block)?.[1];
+    expect(perms, 'a permissions: block').toBeDefined();
+    expect(perms!.trimEnd().split('\n').map((l) => l.trim())).toEqual(['contents: write']);
+    expect(block).toMatch(/release-notes\.mjs --compose installers/);
+    expect(block).toMatch(/release-notes\.mjs --verify-release installers/);
+    // gh needs the token on every step that runs it.
+    for (const step of block.split(/\n      - /).filter((s) => /\bgh |release-notes\.mjs --(compose|verify-release)/.test(s))) {
+      expect(step).toMatch(/GH_TOKEN:\s*'\$\{\{ github\.token \}\}'/);
+    }
+  });
+
+  it('the every-push release-notes dry run comes after package:gui, with scriv installed', () => {
+    const block = jobBlock('package');
+    const steps = block.split(/\n      - /);
+    const at = (re: RegExp) => steps.findIndex((s) => re.test(s));
+    const gui = at(/run: npm run package:gui\b/);
+    const scriv = at(/run: pipx install scriv==1\.8\.1/);
+    const dry = at(/run: node scripts\/release-notes\.mjs --dry-run artifacts\/gui\b/);
+    expect(gui, 'package:gui').toBeGreaterThanOrEqual(0);
+    expect(scriv, 'scriv install').toBeGreaterThan(gui);
+    expect(dry, 'release-notes dry run').toBeGreaterThan(scriv);
+    // In the npm leg (ubuntu-latest, which also packages): one job, not every runner.
+    expect(steps[scriv]).toMatch(/^if:\s*matrix\.npm\n/);
+    expect(steps[dry]).toMatch(/^if:\s*matrix\.npm\n/);
   });
 
   it('publish asserts Node and npm versions rather than reinstalling npm over itself', () => {

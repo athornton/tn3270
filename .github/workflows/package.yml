@@ -31,14 +31,25 @@
 #
 # TRUSTED PUBLISHING (npm trusted publishing plan, Tasks 4-6; design:
 # docs/superpowers/specs/2026-11-09-npm-trusted-publishing-design.md). A `vX.Y.Z` tag push runs the
-# six matrix jobs above as any push does, then two more:
+# six matrix jobs above as any push does, then three more:
 #   release-check   no `environment:`, so a bad tag or mismatched tarball set fails before anyone
-#                   is asked to approve anything.
+#                   is asked to approve anything. It also pre-flights the GitHub release: the
+#                   run's gui-* artifacts must be exactly the seven installers of the tag's version
+#                   (release-notes.mjs --check-installers), and CHANGELOG.md must have that
+#                   version's entry with no fragment left uncollected (--check-changelog) -- here,
+#                   because npm publish cannot be undone and github-release runs after it.
 #   publish         `environment: npm`, which GATES on that GitHub environment's required reviewer
 #                   approval (and whose deployment policy admits only `v*.*.*` tags), then
 #                   publishes over OIDC (no npm token anywhere) and reads the registry back.
-# Both are `if: startsWith(github.ref, 'refs/tags/v')`, so a push to main/packaging or a pull
-# request runs neither -- only `--dry-run`, in the `npm` leg of the matrix job below, every time.
+#   github-release  after publish (GitHub release design:
+#                   docs/superpowers/specs/2026-11-09-github-release-and-changelog-design.md):
+#                   creates (or, on a re-run, updates) the GitHub release vX.Y.Z with the run's
+#                   installers, a SHA256SUMS and composed notes, then reads it back. NO
+#                   environment of its own: the one approval on publish covers it. Its
+#                   `contents: write` is this job's only write permission.
+# All three are `if: startsWith(github.ref, 'refs/tags/v')`, so a push to main/packaging or a pull
+# request runs none -- only the `--dry-run`s (publish.mjs and release-notes.mjs), in the `npm` leg
+# of the matrix job below, every time.
 #
 # NAMES THAT MUST NOT CHANGE: on npmjs.com, each of the eight `@tn3270/*` packages' trusted
 # publisher names THIS FILE by its name, `package.yml`, and environment `npm`. Renaming this
@@ -164,6 +175,16 @@ jobs:
         run: ${{ matrix.xvfb }} node scripts/package-smoke.mjs
         env:
           TN3270_PACKAGE_SMOKE_X64: ${{ matrix.x64witness }}
+      # After package:gui, which makes artifacts/gui: the GitHub release's notes and SHA256SUMS,
+      # composed for this runner's own installers with no tag and no network. Changelog problems
+      # (no entry for this version, uncollected fragments) are WARNINGS here -- normal between
+      # releases -- and refusals in release-check. scriv pinned, as release-check and
+      # github-release install it; pipx is on the ubuntu-latest image (runner-images, 2026-11-09).
+      - if: matrix.npm
+        run: pipx install scriv==1.8.1
+      - if: matrix.npm
+        name: release notes dry run (every push -- exercises scripts/release-notes.mjs continuously)
+        run: node scripts/release-notes.mjs --dry-run artifacts/gui
       # A capture that missed the golden is copied here by smoke-lib's judgeShot, so it can be
       # looked at. On Linux any miss fails; elsewhere a size-matching, non-blank capture also lands
       # here as the record of what that OS draws.
@@ -202,8 +223,9 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: package
     runs-on: ubuntu-latest
-    # Generous for a job that only reads a small artifact and runs one dependency-free script.
-    timeout-minutes: 10
+    # Generous for a job that downloads the tarballs and the installers (~0.5 GB), installs scriv,
+    # and runs two dependency-free scripts.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -211,6 +233,13 @@ jobs:
       - uses: actions/download-artifact@v8
         with: { name: npm-tarballs, path: tarballs }
       - run: node scripts/publish.mjs --check tarballs
+      # The GitHub release's installers and changelog, checked HERE -- before publish's approval
+      # and npm publish, which cannot be undone -- not first in github-release, after it.
+      - uses: actions/download-artifact@v8
+        with: { pattern: 'gui-*', merge-multiple: true, path: installers }
+      - run: node scripts/release-notes.mjs --check-installers installers "${GITHUB_REF_NAME#v}"
+      - run: pipx install scriv==1.8.1
+      - run: node scripts/release-notes.mjs --check-changelog "${GITHUB_REF_NAME#v}"
 
   publish:
     # Waits for the npm environment's required reviewer. OIDC: no token anywhere.
@@ -249,3 +278,40 @@ jobs:
       - uses: actions/download-artifact@v8
         with: { name: npm-tarballs, path: tarballs }
       - run: node scripts/publish.mjs --publish tarballs
+
+  github-release:
+    # The GitHub release vX.Y.Z, with this run's installers, SHA256SUMS and composed notes. After
+    # publish, so a release never exists without its npm packages. No environment: the one
+    # approval on publish covers it.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: publish
+    runs-on: ubuntu-latest
+    # Downloads ~0.5 GB of installers, uploads them again, reads the release back.
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      # fetch-depth 0: the tags and history, for the previous release tag and the commit list.
+      - uses: actions/checkout@v7
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v7
+        with: { node-version: '22' }
+      - run: pipx install scriv==1.8.1
+      - uses: actions/download-artifact@v8
+        with: { pattern: 'gui-*', merge-multiple: true, path: installers }
+      # Writes installers/SHA256SUMS and release-notes.md (in the repository root, this cwd).
+      - run: node scripts/release-notes.mjs --compose installers
+        env: { GH_TOKEN: '${{ github.token }}' }
+      # A re-run finds the release already there: edit its notes, re-upload with --clobber.
+      - name: Create or update the release
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" --notes-file release-notes.md
+            gh release upload "$GITHUB_REF_NAME" installers/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes-file release-notes.md installers/*
+          fi
+      - name: Read the release back
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: node scripts/release-notes.mjs --verify-release installers
