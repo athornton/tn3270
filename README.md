@@ -1592,11 +1592,14 @@ holds as one item.
 14. **Close out packaging.** The live checks by hand are **done** (the user, 2026-11-08: Apple Silicon
    macOS runs once permitted, the Linux arm64 `.deb`, Linux x64 AppImage and Windows 11 just run;
    Connect dialog used on each). The first
-   `npm publish` is **done** (0.1.0, 2026-11-08), and so is the icon (see *Installing*). **Next,
-   near-term: npm trusted publishing from GitHub Actions** — register the `package` workflow as each
-   `@tn3270/*` package's trusted publisher on npmjs.com, so a pushed `vX.Y.Z` tag publishes the
-   CI-built tarballs over OIDC, with provenance and no long-lived npm token anywhere; the manual
-   steps in `docs/releasing.md` become the fallback. **Signing and store
+   `npm publish` is **done** (0.1.0, 2026-11-08), and so is the icon (see *Installing*). **npm
+   trusted publishing from GitHub Actions is built** (2026-11-09, `trusted-publish`): a pushed
+   `vX.Y.Z` tag runs `.github/workflows/package.yml`'s `release-check` and `publish` jobs, which
+   publish the CI-built tarballs over OIDC after one approval in the `npm` GitHub environment, with
+   provenance and no long-lived npm token anywhere, then read the registry back to prove it landed.
+   **Proof owed: release 0.1.2**, tagged and approved by the user, with the registry checked against
+   that run's tarballs (`docs/releasing.md`). Until then the manual steps there remain the only
+   exercised path. **Signing and store
    distribution wait on the user's Apple Developer ID (and
    perhaps Windows code signing), timeline unknown.** Distributing outside the stores (Developer
    ID plus notarization, an Authenticode-signed NSIS installer) is a different path from the Mac
