@@ -167,6 +167,18 @@ depends on `core` and `frontend`; every front end (`cli`, `tui`, `web`, `gui`) d
 combination of all four. Publishing `core`, `frontend`, `node-files`, `canvas` in that order
 satisfies every one of those edges before any front end needs it.
 
+- **0.1.2 was never published; the version is skipped.** It was the first release by tag: the
+  run (42672755833) passed all six jobs and `release-check`, the user approved `publish`, and
+  `publish.mjs` then handed npm `tarballs/tn3270-core-0.1.2.tgz` -- a relative path with ONE slash,
+  which npm reads as GitHub shorthand, so it tried `git ls-remote ssh://git@github.com/tarballs/
+  tn3270-core-0.1.2.tgz.git` and failed. Nothing reached the registry (core failed first, and the
+  script stops at the first failure). A re-run replays the tagged commit's script, so it could not
+  be fixed in place; the fix (absolute paths, and the every-push dry run moved to the release jobs'
+  `tarballs/` directory) went to `main` and the `v0.1.2` tag was deleted. The run also met a GitHub
+  Actions outage (incident from 18:12 UTC): attempt 1 created only three of the six matrix jobs.
+- **0.1.3**, 2026-11-09: the first release published by the tag workflow. Same contents as 0.1.2
+  would have had (no user-facing change from 0.1.1 beyond the release machinery).
+
 **A first 0.1.1 attempt published nothing, quietly.** The publishing machine was not logged in
 (`npm whoami`: E401), so every `npm publish` in the loop failed, and an `npm unpublish` there
 appeared to succeed while the registry did not change; it was noticed only because the registry
