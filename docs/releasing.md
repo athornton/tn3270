@@ -122,12 +122,13 @@ The `github-release` job (`needs: publish`, so a release never exists without it
   `-linux-arm64.deb`, `-win-x64.exe` — exactly those seven, and `SHA256SUMS` over them
   (`sha256sum -c SHA256SUMS` compatible), written by `--compose`.
 - **Notes** (`--compose`, written to `release-notes.md`): a fixed header (the `npm install -g`
-  lines at X.Y.Z, which installer is for which system, a first-launch note, how to verify
-  `SHA256SUMS` and the npm provenance). **The first-launch note is still the unsigned one**:
-  `scripts/release-notes.mjs` writes "**The installers are unsigned.**" with the *Open Anyway* and
-  *Run anyway* workarounds, and `packages/core/test/releaseNotes.test.ts` requires that text. Both
-  must change before the first signed release, or its notes will contradict its installers (see
-  *Code signing* below). `## What changed`, the version's `CHANGELOG.md` entry
+  lines at X.Y.Z, which installer is for which system, a signing note, how to verify
+  `SHA256SUMS` and the npm provenance). **Fixed for the first signed release**:
+  `scripts/release-notes.mjs` now writes "**Signed.**", naming the Developer ID signature,
+  notarization and stapling on macOS, Azure Artifact Signing on Windows, and that the Linux
+  AppImage and `.deb` are not signed; the *Open Anyway*/*Run anyway* workarounds are gone from the
+  header, and `packages/core/test/releaseNotes.test.ts` requires the new wording instead. `## What
+  changed`, the version's `CHANGELOG.md` entry
   verbatim (`scriv print --version X.Y.Z`); `## Commits`, `git log --first-parent` since the
   previous release tag (the highest lower `vA.B.C` tag that is an ancestor), each subject
   markdown-escaped; `## Pull requests`, GitHub's generated list, only when it lists any (this

@@ -23,9 +23,10 @@ creates no deployment). Then the user creates the certificates, keys and Azure a
 `docs/releasing.md` *Code signing (release installers)*, which also has the 3 secrets and 10
 variables (Task 7). Then a signed proof dispatch, whose captures replace the PROVISIONAL fixtures
 and settle the *Not yet measured* list there (Task 8). Then the merge, which removes the
-environment's temporary `signing` branch rule (Task 10). **Also owed before the first signed
-release:** `scripts/release-notes.mjs`'s header still says "The installers are unsigned", and its
-test requires that text.
+environment's temporary `signing` branch rule (Task 10). **Fixed:** `scripts/release-notes.mjs`'s
+header now says the mac and Windows installers are signed (mac notarized), Linux is not, and the
+*Open Anyway*/*Run anyway* workarounds are gone; `packages/core/test/releaseNotes.test.ts` requires
+the new wording.
 
 **2026-11-09, PREVIOUS: THE GITHUB RELEASE AND THE CHANGELOG ARE BUILT, on branch `gh-release`, not
 yet merged.** Spec `docs/superpowers/specs/2026-11-09-github-release-and-changelog-design.md`, plan

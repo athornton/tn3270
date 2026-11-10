@@ -159,10 +159,14 @@ describe('release-notes.mjs', () => {
       expect(notes).not.toMatch(/npm install -g @tn3270\/\w+(?!@0\.1\.4)\s/);
     });
 
-    it('says the installers are unsigned, and how to verify the checksums and provenance', () => {
-      expect(notes).toMatch(/unsigned/i);
-      expect(notes).toContain('Open Anyway');
-      expect(notes).toContain('Run anyway');
+    it('says the mac and Windows installers are signed (mac notarized), Linux is not, and how to verify them', () => {
+      expect(notes).toContain('Developer ID');
+      expect(notes).toContain('notarized');
+      expect(notes).toContain('stapled');
+      expect(notes).toContain('Azure Artifact Signing');
+      expect(notes).toContain('Linux AppImage and `.deb` are not signed');
+      expect(notes).not.toContain('Open Anyway');
+      expect(notes).not.toContain('Run anyway');
       expect(notes).toContain('sha256sum -c SHA256SUMS');
       expect(notes).toContain('shasum -a 256 -c SHA256SUMS');
       expect(notes).toContain('npm audit signatures');
