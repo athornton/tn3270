@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -62,5 +63,28 @@ describe('signingOptions', () => {
 
   it('refuses signing mode on a platform with nothing to sign', () => {
     expect(() => signingOptions({ TN3270_SIGN: '1' }, 'linux', yes)).toThrow(/linux/);
+  });
+});
+
+describe('electron-builder.cjs', () => {
+  it('in unsigned mode (no TN3270_SIGN in the test env) has identity null, notarize false, no azureSignOptions', () => {
+    expect(process.env.TN3270_SIGN).toBeUndefined();
+    const cfg = createRequire(import.meta.url)(join(gui, 'electron-builder.cjs')) as {
+      mac: Record<string, unknown>; win: Record<string, unknown>;
+    };
+    expect(cfg.mac.identity).toBeNull();
+    expect(cfg.mac.notarize).toBe(false);
+    expect(cfg.mac.forceCodeSigning).toBeUndefined();
+    expect(cfg.win.azureSignOptions).toBeUndefined();
+    expect(cfg.win.forceCodeSigning).toBeUndefined();
+    expect(cfg.win.target).toEqual([{ target: 'nsis', arch: 'x64' }]); // the spread kept the rest
+  });
+
+  it('spreads signingOptions into mac and win rather than retyping either', () => {
+    const src = readFileSync(join(gui, 'electron-builder.cjs'), 'utf8');
+    expect(src).toMatch(/require\('\.\/signing\.cjs'\)\.signingOptions\(process\.env, process\.platform\)/);
+    expect(src).toMatch(/\.\.\.signing\.mac\b/);
+    expect(src).toMatch(/\.\.\.signing\.win\b/);
+    expect(src).not.toMatch(/identity:\s*null/);
   });
 });

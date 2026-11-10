@@ -1,6 +1,7 @@
 /**
  * electron-builder 26 configuration for the native GUI artifacts (packaging spec, section 1).
- * Unsigned this milestone. From the repository root:
+ * Unsigned unless TN3270_SIGN=1 (signing.cjs; code signing spec 2026-11-10). From the repository
+ * root:
  *
  *     npm run build && npm run package:gui -- --linux --x64
  *
@@ -15,6 +16,10 @@
  * Every key was checked against `node_modules/app-builder-lib/scheme.json` (26.18.0) and, where
  * the behaviour mattered, against its source; the notes say what each one decides.
  */
+// Signing mode or not, decided once from the environment (signing.cjs explains both modes).
+// process.platform, not a target flag: each OS is built (and signed) on its own runner.
+const signing = require('./signing.cjs').signingOptions(process.env, process.platform);
+
 module.exports = {
   appId: 'io.github.athornton.tn3270',
   // The name users see: window/menu name, .app bundle, install directory, artifact names. It does
@@ -73,11 +78,9 @@ module.exports = {
       { target: 'zip', arch: 'universal' },
     ],
     category: 'public.app-category.developer-tools',
-    // `null` skips signing entirely (scheme.json MacConfiguration.identity: "**`null`**: skip
-    // signing entirely"; unset searches the keychain and would sign with whatever certificate a
-    // CI runner happens to hold). The v26 code-signing-mac page gives this or
-    // CSC_IDENTITY_AUTO_DISCOVERY=false as the two ways; the config key needs no CI env to remember.
-    identity: null,
+    // identity/notarize/forceCodeSigning come from signing.cjs: unsigned mode skips signing with a
+    // null identity and turns notarization off; signing mode leaves identity to the CSC_LINK keychain.
+    ...signing.mac,
   },
 
   linux: {
@@ -120,7 +123,12 @@ module.exports = {
   // The .deb package name defaults to the product name when the npm name is scoped; Debian names are lowercase.
   deb: { packageName: 'tn3270-gui' },
 
-  win: { target: [{ target: 'nsis', arch: 'x64' }] },
+  win: {
+    target: [{ target: 'nsis', arch: 'x64' }],
+    // Signing mode only: azureSignOptions (Azure Artifact Signing) and forceCodeSigning. Present at
+    // all, azureSignOptions signs every Windows build, which is why it lives behind the switch.
+    ...signing.win,
+  },
 
   nsis: {
     oneClick: false,
