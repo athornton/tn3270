@@ -122,8 +122,12 @@ The `github-release` job (`needs: publish`, so a release never exists without it
   `-linux-arm64.deb`, `-win-x64.exe` — exactly those seven, and `SHA256SUMS` over them
   (`sha256sum -c SHA256SUMS` compatible), written by `--compose`.
 - **Notes** (`--compose`, written to `release-notes.md`): a fixed header (the `npm install -g`
-  lines at X.Y.Z, which installer is for which system, the unsigned-app workarounds, how to verify
-  `SHA256SUMS` and the npm provenance); `## What changed`, the version's `CHANGELOG.md` entry
+  lines at X.Y.Z, which installer is for which system, a first-launch note, how to verify
+  `SHA256SUMS` and the npm provenance). **The first-launch note is still the unsigned one**:
+  `scripts/release-notes.mjs` writes "**The installers are unsigned.**" with the *Open Anyway* and
+  *Run anyway* workarounds, and `packages/core/test/releaseNotes.test.ts` requires that text. Both
+  must change before the first signed release, or its notes will contradict its installers (see
+  *Code signing* below). `## What changed`, the version's `CHANGELOG.md` entry
   verbatim (`scriv print --version X.Y.Z`); `## Commits`, `git log --first-parent` since the
   previous release tag (the highest lower `vA.B.C` tag that is an ancestor), each subject
   markdown-escaped; `## Pull requests`, GitHub's generated list, only when it lists any (this
@@ -288,21 +292,331 @@ electron-builder's output (macOS universal `.dmg`/`.zip`, Linux x64 and arm64 Ap
 a Windows x64 NSIS installer) is uploaded by each packaging run as `gui-<os>` artifacts (one per
 uploading runner: `ubuntu-latest`, `ubuntu-24.04-arm`, `macos-latest`, `windows-latest` —
 `macos-26-intel` builds the same universal mac app and does not re-upload it). A tag run attaches
-them to the GitHub release `vX.Y.Z` (*The GitHub release* above). There is no auto-update.
+them to the GitHub release `vX.Y.Z` (*The GitHub release* above). On a tag run the mac and Windows
+installers are signed (*Code signing* below), and the Linux ones never are. There is no auto-update.
 
-## Unsigned-app notes, for whoever is attaching or receiving these
+## Code signing (release installers)
 
-Every native artifact is unsigned this milestone (`CSC_IDENTITY_AUTO_DISCOVERY: false` in CI,
-`identity: null` in `packages/gui/electron-builder.cjs`) — that disables mac code signing outright,
-it is not the same as an ad-hoc signature. Signing and notarization arrive with an Apple Developer
-ID; ad-hoc signing is the fallback under consideration before then.
+**Built 2026-11-10 on branch `signing`; not yet run signed.** Spec
+`docs/superpowers/specs/2026-11-10-code-signing-design.md`, plan
+`docs/superpowers/plans/2026-11-10-code-signing.md`. Two matrix jobs carry `sign: true`:
+`macos-latest` (the universal app) and `windows-latest` (the NSIS installer). They sign only on a
+`v*` tag push, or on a `workflow_dispatch` with the `sign` input ticked. That run puts the job in
+the GitHub environment `signing`, and every other run uses no environment. Every other job, and
+every other run of those two, builds exactly as before: unsigned.
+
+- **What decides it.** The package:gui step sets `TN3270_SIGN=1` and `packages/gui/signing.cjs`
+  turns on signing mode. Before electron-builder starts, it throws an error naming every missing
+  credential: `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_API_KEY`, `APPLE_API_KEY_ID` and
+  `APPLE_API_ISSUER` on macOS (with `APPLE_API_KEY` an existing file), and
+  `AZURE_SIGNING_ENDPOINT`, `AZURE_SIGNING_ACCOUNT`, `AZURE_SIGNING_PROFILE` and
+  `AZURE_SIGNING_PUBLISHER` on Windows. It also sets `forceCodeSigning`, so an identity that cannot
+  be found fails the build. Without it, electron-builder skips signing and notarization with no
+  error.
+- **What gets signed.** On macOS, the `.app` is signed with the Developer ID Application
+  certificate (hardened runtime), notarized and stapled before the `.dmg` and `.zip` are built
+  from it. **The `.dmg` itself is not signed**, by design: electron-builder's default, which its
+  schema says avoids notarization errors. On Windows, electron-builder runs
+  `Invoke-TrustedSigning` (the `TrustedSigning` PowerShell module, installed by app-builder-lib
+  26.18.0) on each file it signs: the installer and the exes inside it.
+- **What checks it.** `scripts/verify-signatures.mjs` runs after packaging on both jobs, on
+  **every** run. The ref and the input pick the mode, not `matrix.sign`, so a broken signing
+  expression fails a tag run instead of shipping unsigned installers. The mode is `--expect
+  signed` on a tag or a signing dispatch, and `--expect unsigned` everywhere else. On macOS it
+  checks the `TN3270.app` in both the `.zip` and the `.dmg`: `codesign --verify --deep --strict`,
+  a `Developer ID Application: … (APPLE_TEAM_ID)` leaf with that `TeamIdentifier` and the runtime
+  flag, `spctl` saying `source=Notarized Developer ID`, and `xcrun stapler validate`. On Windows
+  it checks the installer, then silent-installs it as package-smoke does and checks the installed
+  `TN3270.exe` and `Uninstall TN3270.exe`, then uninstalls. Each must be `Valid` with a signer
+  `CN=` **equal to** `AZURE_SIGNING_PUBLISHER`. Each artifact prints one line,
+  `ok <artifact>: signed` or `ok <artifact>: unsigned`. `VERIFY_SIGNATURES_ECHO=1` puts the raw
+  tool output in the log.
+
+**Not yet measured. The first signed run settles these. Write the answers here:**
+
+- Whether `Invoke-TrustedSigning` picks up the `azure/login` session. Microsoft documents
+  `DefaultAzureCredential`, which includes `AzureCliCredential`, for its signing clients. That page
+  covers SignTool's dlib, not the `TrustedSigning` module by name. If it does not, the fallback is a
+  client secret through `EnvironmentCredential`: a new `signing` secret `AZURE_CLIENT_SECRET`,
+  plus `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` and `AZURE_CLIENT_SECRET` in the package:gui step's
+  env, with the `azure/login` step removed. That is a workflow change, planned separately.
+- Whether `azure/login` (OIDC, with `subscription-id`) succeeds when the app's only role
+  assignment is on a certificate profile, not on the subscription.
+- How many signatures a release costs: the number of `Invoke-TrustedSigning` calls in the Windows
+  log. Write the count here.
+- The exact signed wording of `codesign -dv`, `spctl` and `xcrun stapler validate`, and of the
+  unsigned stapler answer. The verifier's patterns, and the fixtures marked PROVISIONAL, are still
+  from memory. The run's captures replace them.
+- Whether `environment: ''` really means no environment, so that no `signing` deployment is
+  recorded on an ordinary push. This is the first push of this branch (plan Task 6).
+
+### One-time setup: Apple
+
+You need the Account Holder role for the certificate and an Admin account in App Store Connect for
+the API key. Do this on a Mac, because the private key is made in, and exported from, your login
+keychain.
+
+1. **Certificate signing request.** Open Keychain Access (`/Applications/Utilities`) and choose
+   **Keychain Access → Certificate Assistant → Request a Certificate From a Certificate
+   Authority**. For **User Email Address** use your address, for **Common Name** something like
+   `tn3270 Developer ID`, and leave **CA Email Address** empty. Choose **Saved to disk** →
+   **Continue**. This writes a `.certSigningRequest` file. The private key stays in the login
+   keychain.
+2. **Developer ID Application certificate.** Go to developer.apple.com → Account →
+   **Certificates, Identifiers & Profiles** → **Certificates** → **+**. Under **Software**, select
+   **Developer ID** → **Continue** → **Developer ID Application** → **Continue**. If you are asked
+   for a *Developer ID Certificate Intermediary*, choose **G2 Sub-CA (Xcode 11.4.1 or later)**.
+   **Choose File** (the CSR) → **Continue** → **Download** (a `.cer`). Double-click the `.cer` and
+   it appears under **My Certificates** in the login keychain, named
+   `Developer ID Application: <Name> (<TEAMID>)`. A team can hold up to five at a time.
+   **Validity:** Apple's *Replace Developer ID certificates* page says "Certificates issued from G2
+   are valid for one year and must be renewed annually" (checked 2026-11-10). The plan assumed
+   five years. Read the actual expiry date off the certificate in Keychain Access and record it
+   under *Rotation* below.
+3. **Export the `.p12`.** In Keychain Access → login → **My Certificates**, expand the certificate
+   and check that a private key is under it. If there is none, the export holds no key and signing
+   fails. Right-click the certificate → **Export** → format **Personal Information Exchange
+   (.p12)** → set a password. The base64 of that file is `MAC_CERT_P12_BASE64`, and the password
+   is `MAC_CERT_PASSWORD` (commands under *GitHub* below). Delete the `.p12` once both are set.
+4. **Team ID.** This is the ten characters in parentheses in the certificate's name:
+   `APPLE_TEAM_ID`. The verifier requires the leaf authority to end in `(<TEAMID>)` and
+   `TeamIdentifier` to equal it.
+5. **App Store Connect API key, for notarization.** Go to appstoreconnect.apple.com → **Users and
+   Access** → **Integrations** tab → **App Store Connect API** (left column) → **Team Keys** →
+   **Generate API Key** (or **+** if a key already exists). Name it `tn3270-notarize`, set
+   **Access** to **Developer**, and click **Generate**. Click **Download API Key** to get
+   `AuthKey_<KEYID>.p8`. **It can be downloaded once only.** Apple keeps no copy, so a lost key
+   means revoking it and generating another. The file's contents are `APPLE_API_KEY_P8`, the
+   key's **Key ID** is `APPLE_API_KEY_ID`, and the **Issuer ID** shown on the same Team Keys page
+   is `APPLE_API_ISSUER`. *Not confirmed:* Apple's pages say only that "the key ID and other
+   information appear on the page" without placing the Issuer ID, and none of the pages read here
+   names the minimum role notarization needs. *Developer* is the plan's choice. If notarization is
+   refused for permissions, that is the first thing to check.
+
+### One-time setup: Azure
+
+The identity validation is already approved. You need Contributor (or Owner) on the Artifact
+Signing account to create the profile, and Owner or User Access Administrator to assign the role.
+
+1. **Check the validation.** Go to portal.azure.com, search for **Artifact Signing Accounts**, and
+   open the account → **Objects** → **Identity validations**. Its status must be **Completed**,
+   and it must be a **Public** validation, because only those can back a *Public Trust* profile.
+2. **Certificate profile.** In the same account → **Objects** → **Certificate profiles** →
+   **Create** → **Public Trust**. Enter a **Certificate Profile Name** (5-100 alphanumeric
+   characters, unique in the account): `AZURE_SIGNING_PROFILE`. Leave **Program Type** at *None*.
+   For **Verified CN and O**, pick the completed validation. Leave *Include street address* and
+   *Include postal code* off unless you want them in every signature. Click **Create**.
+   - The account's name is `AZURE_SIGNING_ACCOUNT`.
+   - `AZURE_SIGNING_ENDPOINT` is the endpoint of the region the account was created in, in the
+     form `https://<region code>.codesigning.azure.net`, for example `https://eus.codesigning.azure.net`
+     for East US or `https://wus2.codesigning.azure.net` for West US 2. Microsoft's quickstart has
+     the full table. The plan called this the account's *Account URI*, and if the account's
+     **Overview** shows one, it should be the same URL. Microsoft's docs give only the region
+     table, so check the two against each other. A region mismatch fails signing with
+     `403 Forbidden`.
+3. **Publisher.** The profile's **Certificate Subject Preview** (also on the profile's page once it
+   is created) shows `CN=…`. Everything after `CN=`, up to the comma and exactly as written, is
+   `AZURE_SIGNING_PUBLISHER`. electron-builder requires it as `azureSignOptions.publisherName`.
+   app-builder-lib 26.18.0 does not pass it to `Invoke-TrustedSigning`, so the verifier is what
+   holds it to the certificate: the signer's `CN=` must **equal** it.
+4. **App registration.** Go to entra.microsoft.com (or portal → **Microsoft Entra ID**) → **App
+   registrations** → **New registration**. Name it `tn3270-signing`, choose single tenant, add no
+   redirect URI, and click **Register**. On its **Overview**, **Application (client) ID** is
+   `AZURE_CLIENT_ID` and **Directory (tenant) ID** is `AZURE_TENANT_ID`. The ID of the subscription
+   holding the Artifact Signing account (portal → **Subscriptions**) is `AZURE_SUBSCRIPTION_ID`.
+   Create **no client secret** (but see *Not yet measured*).
+5. **Federated credential.** In the app → **Certificates & secrets** → **Federated credentials**
+   tab → **Add credential**:
+   - **Federated credential scenario:** *GitHub Actions deploying Azure resources*.
+   - **Organization** `athornton`, **Repository** `tn3270`.
+   - **Entity type** *Environment*, **GitHub environment name** `signing`.
+   - **Name** `tn3270-signing-environment`.
+
+   The subject fills itself in as `repo:athornton/tn3270:environment:signing`, with audience
+   `api://AzureADTokenExchange`. Click **Add**. A wrong subject is accepted here without complaint
+   and only fails at the token exchange, so check that it reads exactly this. Because the
+   credential trusts only that environment, a token from any other job is refused.
+6. **Role on the certificate profile.** The role is **Artifact Signing Certificate Profile
+   Signer**. That is Microsoft's name for it since the rename from Trusted Signing (*Tutorial:
+   Assign roles in Artifact Signing*, updated 2026-08-03). Before the rename it was *Trusted
+   Signing Certificate Profile Signer*. **Write down the name the portal actually shows.**
+   Microsoft's tutorial gives the portal route only at **account** scope (account → **Access
+   control (IAM)** → **Add** → **Add role assignment**), which would let the app sign with every
+   profile in the account. For the profile alone, it gives the Azure CLI:
+
+   ```sh
+   az role assignment create --assignee-object-id <service principal object ID> \
+     --assignee-principal-type ServicePrincipal \
+     --role "Artifact Signing Certificate Profile Signer" \
+     --scope "/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.CodeSigning/codeSigningAccounts/<account>/certificateProfiles/<profile>"
+   ```
+
+   The service principal's object ID is under **Enterprise applications** → `tn3270-signing` →
+   **Object ID**. It is *not* the Object ID on the app registration's Overview. If the profile's
+   own page in the portal has **Access control (IAM)**, assigning the role there does the same
+   thing.
+
+### One-time setup: GitHub
+
+**The environment** `signing` has **no required reviewer**: a signing run must not wait for
+anyone. Its deployment refs are limited to tags `v*.*.*` and branch `main`, plus a **temporary**
+`signing` branch rule while this branch is being proven, removed at merge (plan Task 10):
+
+```sh
+/usr/bin/gh api -X PUT repos/athornton/tn3270/environments/signing \
+  -F 'deployment_branch_policy[protected_branches]=false' -F 'deployment_branch_policy[custom_branch_policies]=true'
+/usr/bin/gh api -X POST repos/athornton/tn3270/environments/signing/deployment-branch-policies -f name='v*.*.*' -f type=tag
+/usr/bin/gh api -X POST repos/athornton/tn3270/environments/signing/deployment-branch-policies -f name=main -f type=branch
+/usr/bin/gh api -X POST repos/athornton/tn3270/environments/signing/deployment-branch-policies -f name=signing -f type=branch   # TEMPORARY
+```
+
+**The secrets.** Set them on the Mac that holds the files. `gh secret set` reads the value from
+stdin when there is no `--body`, so no value appears in shell history or in the process list:
+
+```sh
+base64 -i tn3270-devid.p12 | /usr/bin/gh secret set MAC_CERT_P12_BASE64 --env signing
+/usr/bin/gh secret set MAC_CERT_PASSWORD --env signing          # prompts for the .p12 password
+/usr/bin/gh secret set APPLE_API_KEY_P8 --env signing < AuthKey_XXXXXXXXXX.p8
+```
+
+**The variables.** None of these are secret. The team ID and the publisher are in every
+signature, and the Azure IDs and names grant nothing without a token from this environment's
+federated credential.
+
+```sh
+/usr/bin/gh variable set APPLE_TEAM_ID           --env signing --body XXXXXXXXXX
+/usr/bin/gh variable set APPLE_API_KEY_ID        --env signing --body XXXXXXXXXX
+/usr/bin/gh variable set APPLE_API_ISSUER        --env signing --body xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+/usr/bin/gh variable set AZURE_CLIENT_ID         --env signing --body xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+/usr/bin/gh variable set AZURE_TENANT_ID         --env signing --body xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+/usr/bin/gh variable set AZURE_SUBSCRIPTION_ID   --env signing --body xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+/usr/bin/gh variable set AZURE_SIGNING_ENDPOINT  --env signing --body https://<region>.codesigning.azure.net
+/usr/bin/gh variable set AZURE_SIGNING_ACCOUNT   --env signing --body <account name>
+/usr/bin/gh variable set AZURE_SIGNING_PROFILE   --env signing --body <profile name>
+/usr/bin/gh variable set AZURE_SIGNING_PUBLISHER --env signing --body '<CN, exactly>'
+```
+
+Check the names (never the values): `/usr/bin/gh secret list --env signing` must list exactly the
+3 secrets, and `/usr/bin/gh variable list --env signing` exactly the 10 variables.
+
+| Name | Kind | What it is | Read by (in `.github/workflows/package.yml` unless noted) |
+| --- | --- | --- | --- |
+| `MAC_CERT_P12_BASE64` | **secret** | base64 of the exported Developer ID Application `.p12` (certificate and private key) | package:gui step, as `CSC_LINK`. electron-builder decodes it into a temporary keychain. `signing.cjs` requires it. |
+| `MAC_CERT_PASSWORD` | **secret** | the `.p12` export password | package:gui step, as `CSC_KEY_PASSWORD`. `signing.cjs` requires it. |
+| `APPLE_API_KEY_P8` | **secret** | contents of `AuthKey_<KEYID>.p8` | step *notarization key (.p8) into RUNNER_TEMP*, which writes `$RUNNER_TEMP/AuthKey.p8` and exports its **path** as `APPLE_API_KEY`. `signing.cjs` requires that path to exist. Notarization uses it. |
+| `APPLE_TEAM_ID` | variable | the ten-character team ID | *verify signatures* step only: the leaf's `(<TEAMID>)` and `TeamIdentifier` must match |
+| `APPLE_API_KEY_ID` | variable | the API key's Key ID | package:gui step. `signing.cjs` requires it. Notarization uses it. |
+| `APPLE_API_ISSUER` | variable | the Team Keys page's Issuer ID | package:gui step. `signing.cjs` requires it. Notarization uses it. |
+| `AZURE_CLIENT_ID` | variable | the app registration's Application (client) ID | *Azure login (OIDC) for Artifact Signing* step (`azure/login`) |
+| `AZURE_TENANT_ID` | variable | Directory (tenant) ID | *Azure login* step |
+| `AZURE_SUBSCRIPTION_ID` | variable | the subscription holding the Artifact Signing account | *Azure login* step |
+| `AZURE_SIGNING_ENDPOINT` | variable | the account region's endpoint, `https://<region>.codesigning.azure.net` | package:gui step → `signing.cjs` → `azureSignOptions.endpoint` → `Invoke-TrustedSigning` |
+| `AZURE_SIGNING_ACCOUNT` | variable | the Artifact Signing account name | package:gui step → `signing.cjs` → `codeSigningAccountName` |
+| `AZURE_SIGNING_PROFILE` | variable | the certificate profile name | package:gui step → `signing.cjs` → `certificateProfileName` |
+| `AZURE_SIGNING_PUBLISHER` | variable | the validated CN, exactly as on the certificate | package:gui step → `signing.cjs` → `publisherName`. Also the *verify signatures* step, where the signer's `CN=` must equal it. |
+
+`azure/login` is pinned to commit `a641126d1b8aa4d1fa005f4f92df94a3a4c4c906` (v3.1.0), not a
+tag. It is the workflow's only third-party action, and it is handed an OIDC token. The job's
+`id-token: write` permission exists for it.
+
+### A signing proof, without a release
+
+```sh
+/usr/bin/gh workflow run package.yml --ref <branch> -f sign=true
+/usr/bin/gh run list --workflow package.yml --branch <branch> --limit 1    # then: /usr/bin/gh run watch <id> --exit-status
+```
+
+`<branch>` must be one the `signing` environment allows: `main`, or `signing` while its temporary
+rule exists. On any other branch, the two signing jobs fail on the environment's branch rule. Expect the mac and Windows jobs green,
+with `ok …: signed` for the zip's app, the dmg's app, the installer, `TN3270.exe` and
+`Uninstall TN3270.exe`, and package-smoke passing on the signed artifacts. The other four jobs are
+unaffected. A dispatch publishes nothing: `release-check`, `publish` and `github-release` run only
+on a tag.
+
+### Rotation and revocation
+
+- **Developer ID certificate.** It expires one year after issue according to Apple's page for G2
+  (see Apple step 2). Record the real date here at setup. Before it expires, repeat Apple steps
+  1-3 and re-set `MAC_CERT_P12_BASE64` and `MAC_CERT_PASSWORD`. Apps signed and notarized before
+  the expiry keep installing and running. A new certificate is needed only to sign new builds. To
+  **revoke** it (because the `.p12` leaked), go to Certificates, Identifiers & Profiles →
+  **Certificates** → the certificate → **Revoke** (Account Holder or Admin). **Revocation is
+  retroactive: Apple says a Developer ID app signed with a revoked certificate "can no longer be
+  installed nor launch if it's already installed"**. Every released mac build signed with it stops
+  working, so revoke only for a compromise, and cut a new release signed with the new certificate.
+- **App Store Connect API key.** It has no expiry. Revoke it from **Users and Access** → the API
+  keys list → **Revoke Key**. Apple's revocation page still says the **Keys** tab, while its
+  key-creation page says **Integrations → App Store Connect API → Team Keys**, so use whichever
+  the site shows. Then generate a new key (Apple step 5) and re-set `APPLE_API_KEY_P8`,
+  `APPLE_API_KEY_ID` and, if it changed, `APPLE_API_ISSUER`.
+- **Azure.** There is no long-lived secret to rotate: every run gets a fresh OIDC token, and
+  Artifact Signing's certificates last three days, so each signature carries a timestamp
+  (app-builder-lib's default, `http://timestamp.acs.microsoft.com`). To **stop CI from signing**, delete the federated credential (app →
+  Certificates & secrets → Federated credentials → delete) or remove the role assignment. Both
+  take effect without any repository change. Deleting the certificate profile also "stops any
+  signing that's associated with" it. If the client-secret fallback is ever adopted, that secret
+  has an expiry and is rotated in the app's **Certificates & secrets → Client secrets**.
+- **GitHub.** Removing a secret or variable from the environment makes the next signing run fail at
+  package:gui, with `signing.cjs` naming the missing variable. The plan's Task 8 uses that as a
+  mutation check.
+
+### Sources (checked 2026-11-10)
+
+- Apple, *Create a certificate signing request*:
+  <https://developer.apple.com/help/account/certificates/create-a-certificate-signing-request/>
+- Apple, *Create Developer ID certificates*:
+  <https://developer.apple.com/help/account/certificates/create-developer-id-certificates/>
+- Apple, *Replace Developer ID certificates* (G2 Sub-CA choice, one-year validity):
+  <https://developer.apple.com/help/account/certificates/replace-developer-id-certificates>
+- Apple, *Certificates overview* (Account Holder or Admin creates distribution certificates):
+  <https://developer.apple.com/help/account/certificates/certificates-overview/>
+- Apple, *Revoke a certificate*: <https://developer.apple.com/help/account/certificates/revoke-a-certificate/>
+- Apple, *Developer ID* (revocation stops installed apps):
+  <https://developer.apple.com/support/developer-id/>, and *Certificates* (expiry does not):
+  <https://developer.apple.com/support/certificates/>
+- Apple, *Creating API keys for App Store Connect API* (path, Admin, download once):
+  <https://developer.apple.com/documentation/appstoreconnectapi/creating-api-keys-for-app-store-connect-api>,
+  and *Revoking API keys*: <https://developer.apple.com/documentation/appstoreconnectapi/revoking-api-keys>
+- Apple, *App Store Connect API* help (Team Keys roles):
+  <https://developer.apple.com/help/app-store-connect/get-started/app-store-connect-api/>
+- Microsoft, *Quickstart: Set up Artifact Signing* (profiles, regional endpoints; updated
+  2026-10-08): <https://learn.microsoft.com/en-us/azure/artifact-signing/quickstart>
+- Microsoft, *Tutorial: Assign roles in Artifact Signing* (role names, scopes; updated 2026-08-03):
+  <https://learn.microsoft.com/en-us/azure/artifact-signing/tutorial-assign-roles>
+- Microsoft, *Set up signing integrations* (endpoint must match region, `DefaultAzureCredential`,
+  three-day certificates): <https://learn.microsoft.com/en-us/azure/artifact-signing/how-to-signing-integrations>
+- Microsoft Entra, *Create a trust relationship … external identity provider* (GitHub federated
+  credential fields and subject): <https://learn.microsoft.com/en-us/entra/workload-id/workload-identity-federation-create-trust>
+- `azure/login` README (OIDC inputs, `id-token: write`): <https://github.com/Azure/login>
+
+The installed electron-builder (app-builder-lib 26.18.0, `node_modules/app-builder-lib/out`) was
+read for `CSC_LINK` base64 decoding, the `APPLE_API_*` notarization variables and the
+`TrustedSigning` module and `Invoke-TrustedSigning` call (with its default timestamp server).
+Microsoft's integrations page now points to a PowerShell module named `ArtifactSigning`, but
+app-builder-lib 26.18.0 still installs `TrustedSigning`.
+
+## Unsigned-app notes: CI artifacts, and the dmg
+
+**Release installers are signed** (*Code signing* above) from the first release built with this
+setup. **Everything else is unsigned:** the `gui-*` artifacts of a push to main, a PR, any branch
+push and a dispatch without `sign`. So are the Linux AppImages and `.deb`s in every case, and any
+local `npm run package:gui`. Unsigned mode sets `identity: null` (from `signing.cjs`) and
+`CSC_IDENTITY_AUTO_DISCOVERY: false` (the workflow's global env). That disables mac code signing
+outright, which is not the same as an ad-hoc signature. The verifier's `--expect unsigned` accepts
+either no signature or an ad-hoc one.
+
+**The `.dmg` itself is never signed**, even in a release. That is electron-builder's default, kept
+on purpose. The `TN3270.app` inside it, like the one in the `.zip`, is signed, notarized and
+stapled. Gatekeeper judges the app, so a signed release needs none of the steps below.
+
+For the unsigned builds, the workarounds still apply:
 
 - **macOS**: Gatekeeper blocks a downloaded unsigned app. The route on current macOS is System
   Settings → Privacy & Security → *Open Anyway* after the first blocked launch, or
   `xattr -dr com.apple.quarantine /Applications/TN3270.app`. Checked by the user on 2026-11-08 on
-  Apple Silicon: the fully unsigned build runs once permitted via *Open Anyway* — cumbersome, but
-  not refused, so ad-hoc signing is not needed as a fallback.
-- **Windows**: SmartScreen flags the installer; *More info → Run anyway* gets past it.
+  Apple Silicon: the fully unsigned build runs once permitted via *Open Anyway*. It is cumbersome,
+  but not refused.
+- **Windows**: SmartScreen flags the installer, and *More info → Run anyway* gets past it.
 
 ## Release history
 

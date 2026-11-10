@@ -25,10 +25,11 @@ gateway, which serves the GUI's own renderer to a browser over a WebSocket.
 
 **Packaging is out.** All four front ends are on npm (since 0.1.0, 2026-11-08; released by tag
 from GitHub Actions with provenance since 0.1.3), and native installers (macOS, Linux, Windows) are
-built and smoke-tested in CI on five runners. The installers are UNSIGNED until an Apple Developer
-ID (and perhaps Windows code signing) is in place — see *Installing* below and
-`docs/releasing.md`. Started with no arguments, the GUI
-now opens a Connect dialog (host, model, TLS) instead of refusing to run; given a host it still
+built and smoke-tested in CI on five runners. **From the next release, the macOS and Windows
+release installers are signed**: the mac app with a Developer ID, notarized and stapled, and the
+Windows installer and app through Azure Artifact Signing. Releases up to 0.1.4, and every CI
+artifact from main and PRs, are unsigned. See *Installing* below and `docs/releasing.md`.
+Started with no arguments, the GUI now opens a Connect dialog (host, model, TLS) instead of refusing to run; given a host it still
 takes it on the command line exactly as the other front ends do. It also has a menu bar — Edit for
 copy and paste, View for the keypad and keyboard, and Model for the model and oversize (picked while
 disconnected, applied at the next connect; `Alt-M` pops it up; its first item, Disconnect,
@@ -39,8 +40,10 @@ the honest part of this file.
 
 ## Installing
 
-**On npm since 0.1.0 (2026-11-08), currently 0.1.3 (2026-11-09, the first published by the tag workflow, with provenance); the native installers are unsigned** and come from a green run
-of `.github/workflows/package.yml` (see `docs/releasing.md`).
+**On npm since 0.1.0 (2026-11-08), currently 0.1.4 (2026-11-10, the first with a GitHub release;
+published by the tag workflow, with provenance, since 0.1.3); the native installers come from a
+green run of `.github/workflows/package.yml`, and are signed from the next release** (see
+`docs/releasing.md`).
 
 ```sh
 npm install -g @tn3270/cli    # tn3270-cli -- the s3270-style scripting client
@@ -68,15 +71,20 @@ each version's GitHub release** (the repository's *Releases* page, tag `vX.Y.Z`)
 built and tested by that tag's CI run, with a `SHA256SUMS` beside them (`sha256sum -c SHA256SUMS`
 on Linux, `shasum -a 256 -c SHA256SUMS` on macOS; `--ignore-missing` to check only the ones you
 downloaded) and notes quoting that version's `CHANGELOG.md` entry. Earlier versions' installers
-were CI artifacts only. They are **unsigned
-this milestone**: no Apple Developer ID, no Windows code signing. macOS Gatekeeper blocks a
-downloaded unsigned app; the way through is System Settings → Privacy & Security → *Open Anyway*
-after the first blocked launch, or `xattr -dr com.apple.quarantine /Applications/TN3270.app`.
-**Checked by hand by the user on 2026-11-08:** on Apple Silicon the fully unsigned build runs
-once permitted through *Open Anyway* (a cumbersome step, but not a refusal), and the Linux arm64
-`.deb`, Linux x64 AppImage and Windows 11 installer all just run, each through the Connect dialog. electron-builder's `identity: null` means no signature was applied, not an
-ad-hoc one; signing waits on an Apple Developer ID. Windows can show SmartScreen; *More info →
-Run anyway* gets past it.
+were CI artifacts only. **From the next release, a release's mac and Windows installers are
+signed**: the `TN3270.app` in the `.dmg` and `.zip` with a Developer ID, notarized and stapled
+(the `.dmg` file itself is not signed, by design), and the Windows installer, `TN3270.exe` and
+its uninstaller through Azure Artifact Signing. The release CI checks each signature
+(`scripts/verify-signatures.mjs`). The Linux packages are not signed. **Unsigned:** releases up to
+0.1.4, and every CI artifact from main, PRs and branch pushes. For those, macOS Gatekeeper blocks
+a downloaded unsigned app, and the way through is System Settings → Privacy & Security → *Open
+Anyway* after the first blocked launch, or `xattr -dr com.apple.quarantine
+/Applications/TN3270.app`. **Checked by hand by the user on 2026-11-08:** on Apple Silicon the
+fully unsigned build runs once permitted through *Open Anyway* (a cumbersome step, but not a
+refusal), and the Linux arm64 `.deb`, Linux x64 AppImage and Windows 11 installer all just run,
+each through the Connect dialog. electron-builder's `identity: null` (the unsigned config) means
+no signature was applied, not an ad-hoc one. On an unsigned Windows installer, SmartScreen
+warns, and *More info → Run anyway* gets past it.
 
 **Minimum OS**, from Electron 44.10.2's own stated platform support
 (`node_modules/electron/README.md`, "Platform support"): macOS Ventura (13) and up; Windows 10 and
@@ -1577,11 +1585,11 @@ can reuse whatever the drawing layer turns out to be. **Cheap is not the same as
    packages for all four front ends (`@tn3270/cli`, `@tn3270/tui`, `@tn3270/web`, `@tn3270/gui`,
    lockstep version, Node ≥20.19 since 0.1.1), and native installers via electron-builder: macOS universal
    `.dmg`/`.zip`, Linux x64 and arm64 AppImage/`.deb`, a Windows x64 NSIS installer — all unsigned
-   this milestone. Build, test, pack, smoke and package all run on five CI runners (ubuntu-latest,
+   in that milestone (signing came later: item 14). Build, test, pack, smoke and package all run on five CI runners (ubuntu-latest,
    ubuntu-24.04-arm, macos-latest, macos-26-intel, windows-latest), and all five passed on
    2026-11-06 (run 6), and again on the merge commit — see `docs/HANDOFF.md`. **Published to npm as
    0.1.0 on 2026-11-08** (the registry's tarballs are byte-identical to CI run 42504570737's, on tag
-   `v0.1.0`); nothing is signed. The hand checks were done by the user on 2026-11-08: macOS on Apple Silicon
+   `v0.1.0`); nothing was signed then. The hand checks were done by the user on 2026-11-08: macOS on Apple Silicon
    runs once permitted (*Open Anyway*), and the Linux arm64 `.deb`, Linux x64 AppImage and
    Windows 11 all just run, each through the Connect dialog (on Linux launched from a shell, as
    neither box has a desktop environment).
@@ -1610,12 +1618,12 @@ holds as one item.
    release 0.1.4): a `github-release` job after `publish` attaches the run's seven native
    installers and a `SHA256SUMS`, with notes from the version's `CHANGELOG.md` entry, which scriv
    collects from a fragment written with each functional change (`docs/releasing.md`).
-   **Signing and store
-   distribution wait on the user's Apple Developer ID (and
-   perhaps Windows code signing), timeline unknown.** Distributing outside the stores (Developer
-   ID plus notarization, an Authenticode-signed NSIS installer) is a different path from the Mac
-   App Store (which needs App Sandbox and its own certificate) or the Microsoft Store (MSIX);
-   choose when the IDs exist.
+   **Code signing is built** (2026-11-10, branch `signing`, not yet merged or proven by a signed
+   run). A tag run signs the mac app with a Developer ID, notarizes and staples it, and signs the
+   Windows installer and app through Azure Artifact Signing, then verifies every signature
+   (`docs/releasing.md`, *Code signing*). Store distribution is a different path and is still
+   undecided: the Mac App Store needs App Sandbox and its own certificate, and the Microsoft Store
+   needs MSIX.
 15. **The rest of the GUI ("milestone B").** `File` → `Connect…` in a running window (which means
    hoisting the startup block's once-only IPC handlers and quit hook), recent hosts, a config file
    and preferences, light and dark modes, font choice. Moved up from the "super-terminal" stretch
@@ -1897,7 +1905,7 @@ worse than one that says which quarter is missing.
   bar and a Connect dialog for a launch with no host, but still **no preferences store** and no
   `File` → `Connect…` for a session already running — a launch given a host still takes it, and
   every flag, from the command line, exactly as the TUI does. Packaging exists (see *Installing*):
-  on npm since 0.1.0, the native installers unsigned.
+  on npm since 0.1.0, the native installers signed from the next release (unsigned up to 0.1.4).
 - **The web gateway is a first slice too, and shares fewer flags.** It renders live screens
   from both Hercules systems and takes typed input (see *Verification*), but like the GUI it has
   **no connect dialog, no menus and no preferences**. It also does **not**

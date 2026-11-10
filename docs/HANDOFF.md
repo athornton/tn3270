@@ -1,4 +1,4 @@
-# Handoff — state as of 2026-11-10 (0.1.4 RELEASED: npm by the tag workflow with provenance, and the first GitHub release with the seven installers, SHA256SUMS and scriv notes; native installers UNSIGNED; next: README *Remaining* item 15)
+# Handoff — state as of 2026-11-10 (0.1.4 RELEASED: npm by the tag workflow with provenance, and the first GitHub release with the seven installers, SHA256SUMS and scriv notes; CODE SIGNING BUILT on branch `signing`, not yet run signed, so released installers are still UNSIGNED; next: credentials and the signed proof run, then README *Remaining* item 15)
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
@@ -9,7 +9,25 @@ documentation pass).
 
 ## START HERE — PACKAGING IS MERGED (`5669a3a`); NEXT IS THE ROADMAP IN README *Remaining* 14-22
 
-**2026-11-09, LATEST: THE GITHUB RELEASE AND THE CHANGELOG ARE BUILT, on branch `gh-release`, not
+**2026-11-10, LATEST: CODE SIGNING IS BUILT, on branch `signing`, not pushed, not merged.** Spec
+`docs/superpowers/specs/2026-11-10-code-signing-design.md`, plan
+`docs/superpowers/plans/2026-11-10-code-signing.md` (10 tasks; 1-5 and 9 done). A `v*` tag run, or a
+`workflow_dispatch` with `sign` ticked, signs on `macos-latest` and `windows-latest` in the GitHub
+environment `signing`. The mac app gets a Developer ID and is notarized and stapled. The Windows
+installer and its exes go through Azure Artifact Signing (electron-builder's `azureSignOptions`,
+behind `azure/login` OIDC). `packages/gui/signing.cjs` (`TN3270_SIGN=1`) refuses to start
+with any credential missing. `scripts/verify-signatures.mjs` checks every mac/Windows artifact on
+**every** run: `--expect signed` on a tag or signing dispatch, `--expect unsigned` otherwise.
+**Owed, in order:** push and measure the unsigned run (Task 6, including that `environment: ''`
+creates no deployment). Then the user creates the certificates, keys and Azure app by
+`docs/releasing.md` *Code signing (release installers)*, which also has the 3 secrets and 10
+variables (Task 7). Then a signed proof dispatch, whose captures replace the PROVISIONAL fixtures
+and settle the *Not yet measured* list there (Task 8). Then the merge, which removes the
+environment's temporary `signing` branch rule (Task 10). **Also owed before the first signed
+release:** `scripts/release-notes.mjs`'s header still says "The installers are unsigned", and its
+test requires that text.
+
+**2026-11-09, PREVIOUS: THE GITHUB RELEASE AND THE CHANGELOG ARE BUILT, on branch `gh-release`, not
 yet merged.** Spec `docs/superpowers/specs/2026-11-09-github-release-and-changelog-design.md`, plan
 `docs/superpowers/plans/2026-11-09-github-release-and-changelog.md` (6 tasks). A tag run's new
 `github-release` job, after `publish` and covered by its approval, creates the GitHub release with
@@ -87,8 +105,8 @@ runners. The merge tree is byte-identical to the branch tip CI run 6 tested.
 Recorded in full in the README, *Remaining* items 14-22. In order: (14) close out packaging (live
 checks, icon and 0.1.0 publish DONE 2026-11-08; npm trusted publishing from GitHub Actions
 PROVEN by release 0.1.3 (2026-11-09; 0.1.2 skipped); a GitHub release with the installers and a
-scriv changelog BUILT on branch `gh-release` (2026-11-10), proof owed via release 0.1.4; signing when the user has an
-Apple Developer ID); (15) the rest of the GUI (`File` →
+scriv changelog PROVEN by release 0.1.4 (2026-11-10); code signing BUILT on branch `signing`
+(2026-11-10), proof owed via a signed dispatch); (15) the rest of the GUI (`File` →
 `Connect…`, preferences, light/dark, fonts); (16) code pages (only `cp037` exists); (17)
 click-to-place-cursor, then the light pen; (18) text printing (SCS / LU3, checked against
 `pr3287`); (19) Programmed Symbols, tested with our own `gif2ps` converter; (20) printer graphics
@@ -127,8 +145,10 @@ The rest of this section is the branch's state as of the merge, kept for its det
   box (Rocky 9) the sandbox runs fine without it, and forcing it on would weaken every system that
   does not need the workaround. Where Chromium's sandbox cannot start, it prints both remedies
   (`chown`/`chmod` on `chrome-sandbox`, or `--no-sandbox`).
-- **Native artifacts** via electron-builder (`packages/gui/electron-builder.cjs`), **unsigned this
-  milestone** (`identity: null`, `CSC_IDENTITY_AUTO_DISCOVERY: false` in CI): macOS universal
+- **Native artifacts** via electron-builder (`packages/gui/electron-builder.cjs`), **unsigned in
+  this milestone** (`identity: null`, `CSC_IDENTITY_AUTO_DISCOVERY: false` in CI; since branch
+  `signing`, still the config for every local build and every CI run except a tag or a signing
+  dispatch, see START HERE): macOS universal
   `.dmg` + `.zip`; Linux x64 and arm64 AppImage + `.deb` (package `tn3270-gui`, executable
   `tn3270-gui`, under `/opt/TN3270`); Windows x64 NSIS installer (per-user, chosen directory).
   Artifact names `TN3270-<version>-<os>-<arch>.<ext>`. Our own icon since 2026-11-08
@@ -225,7 +245,10 @@ double-click is the only launch path not exercised. Only the registry install re
 
 - **macOS by hand**: launch the `.dmg`/`.zip` on a real Mac. Gatekeeper's path (System Settings →
   Privacy & Security → *Open Anyway*, or `xattr -dr com.apple.quarantine`) is written up in
-  `docs/releasing.md` and the README but untested here. Whether a fully unsigned `arm64` build
+  `docs/releasing.md` and the README but untested here. (Since branch `signing`, that path is
+  for unsigned CI artifacts only: releases are signed and notarized. A signed release dmg, zip
+  and exe on a real Mac and a real Windows machine is a new hand check, owed after the first
+  signed release.) Whether a fully unsigned `arm64` build
   launches on Apple Silicon **at all** is open — `identity: null` means no signature was applied,
   not that one was applied ad-hoc, and nobody has tried the launch yet.
 - **The Windows NSIS installer**, on the user's own Windows machine — CI's `windows-latest` job
