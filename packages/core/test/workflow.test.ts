@@ -159,4 +159,75 @@ describe('package.yml release wiring', () => {
     expect(block).not.toMatch(/npm install -g npm/);
     expect(block).toMatch(/npm >= 11\.5\.1/);
   });
+
+  // Code signing (code signing plan, Task 5; spec section 2). "This run signs", verbatim
+  // everywhere it is used; the verify step's mode is the same text WITHOUT `matrix.sign && `.
+  const SIGNS = "matrix.sign && (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.sign))";
+  const reEscape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  /** The package job's lines that are not comments: prose may name an expression it does not use. */
+  const packageCode = () => jobBlock('package').split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+
+  it('marks exactly macos-latest and windows-latest as signing runners', () => {
+    // The matrix only: from `include:` to the job's `runs-on:`, so no step text is read as an entry.
+    const block = jobBlock('package');
+    const matrix = block.slice(block.indexOf('        include:\n'), block.indexOf('\n    runs-on:'));
+    const entries = matrix.split(/\n          - (?:os|name): /).slice(1);
+    expect(entries.length, 'matrix entries').toBe(6);
+    const signing = entries.filter((e) => /\n\s+sign: true\b/.test(e)).map((e) => e.split('\n')[0]!.trim());
+    expect(signing.sort()).toEqual(['macos-latest', 'windows-latest']);
+  });
+
+  it('has a boolean sign input on workflow_dispatch, default false', () => {
+    // The input's own lines (indented under `      sign:`), so a `default: false` elsewhere cannot pass.
+    const m = /\n  workflow_dispatch:\n    inputs:\n(?:      \S.*\n(?:        .*\n)*)*?      sign:\n((?:        .*\n)+)/.exec(wf);
+    expect(m, 'workflow_dispatch input sign').not.toBeNull();
+    const body = m![1]!.split('\n').map((l) => l.trim());
+    expect(body).toContain('type: boolean');
+    expect(body).toContain('default: false');
+  });
+
+  it('every "this run signs" expression is the one expression, verbatim', () => {
+    const block = jobBlock('package');
+    // Up to the first `))`, which is where SIGNS ends; a lazy match to ` &&` would stop inside it.
+    const uses = [...block.matchAll(/\$\{\{ (matrix\.sign && \(.*?\)\)) && /g)].map((m) => m[1]);
+    expect(uses.length).toBe(5); // environment, the .p8 step, azure/login, TN3270_SIGN, auto-discovery
+    for (const u of uses) expect(u).toBe(SIGNS);
+    expect(block).toMatch(new RegExp(`\\n    environment: \\$\\{\\{ ${reEscape(SIGNS)} && 'signing' \\|\\| '' \\}\\}\\n`));
+    // No sixth, differently written test of the input: those five plus the verify step's mode.
+    expect(packageCode().match(/\binputs\.sign\b/g)?.length).toBe(6);
+  });
+
+  it('the verify step decides its mode from the ref and the input alone, never matrix.sign', () => {
+    const step = jobBlock('package').split(/\n      - /).find((s) => s.includes('verify-signatures.mjs'));
+    expect(step, 'no verify-signatures step').toBeDefined();
+    expect(step).toMatch(/^if: matrix\.sign\n/);
+    const run = /run: (.*verify-signatures\.mjs.*)/.exec(step!)![1]!;
+    expect(run).not.toMatch(/matrix\.sign/);
+    const mode = SIGNS.replace('matrix.sign && ', '');
+    expect(run).toBe(`node scripts/verify-signatures.mjs --expect \${{ ${mode} && 'signed' || 'unsigned' }} artifacts/gui`);
+  });
+
+  it('the verify step runs after package:gui and before package-smoke', () => {
+    const steps = jobBlock('package').split(/\n      - /);
+    const at = (re: RegExp) => steps.findIndex((s) => re.test(s));
+    const gui = at(/run: npm run package:gui\b/);
+    const verify = at(/run: node scripts\/verify-signatures\.mjs\b/);
+    const smoke = at(/run: .*node scripts\/package-smoke\.mjs\b/);
+    for (const [name, i] of Object.entries({ gui, verify, smoke })) expect(i, name).toBeGreaterThanOrEqual(0);
+    expect(gui).toBeLessThan(verify);
+    expect(verify).toBeLessThan(smoke);
+  });
+
+  it('the package job may mint an OIDC token, and reads contents -- nothing else', () => {
+    // A job-level `permissions:` sets every permission it does not list to none.
+    const perms = /\n    permissions:\n((?:      \S.*\n)+)/.exec(jobBlock('package'))?.[1];
+    expect(perms, 'a permissions: block').toBeDefined();
+    expect(perms!.trimEnd().split('\n').map((l) => l.trim()).sort()).toEqual(['contents: read', 'id-token: write']);
+  });
+
+  it('pins azure/login by full commit SHA', () => {
+    // The COMMIT v3.1.0 points at. v3.1.0 is an annotated tag: refs/tags/v3.1.0 names the tag
+    // object 053f7285..., which is not a commit (gh api, 2026-11-10).
+    expect(wf).toMatch(/uses: azure\/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3\.1\.0\n/);
+  });
 });
