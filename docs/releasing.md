@@ -338,3 +338,16 @@ What changed for users in each release is `CHANGELOG.md`; this records how each 
   GitHub-hosted runner and run 42691997098; and `npm audit signatures` on a fresh install of
   `@tn3270/tui@0.1.3` reports verified registry signatures and verified attestations for all four
   packages it pulls in. No user-facing change from 0.1.1 beyond the release machinery.
+- **0.1.4**, 2026-11-10: **the first release with a GitHub release**, and the proof of it. Tag
+  `v0.1.4` (`64ab680`), run 42747736953. All eight npm packages went up on the first approval
+  (each `+ @tn3270/...@0.1.4`, with provenance), but `publish`'s read-back FAILED for core, web and
+  gui: the registry recorded them 2.5–3 minutes after `npm publish` reported them, past the old
+  2-minute deadline. "Re-run failed jobs" plus a second approval recovered it as designed —
+  `publish` skipped all eight as identical, its read-back passed, and `github-release` ran. The
+  read-back deadline is now ten minutes (`scripts/publish.mjs`). Verified independently: every
+  registry `dist.shasum` equals the run's tarball; the release `v0.1.4` (published, not a draft;
+  the repository's latest) holds the seven installers and `SHA256SUMS`, which passes
+  `sha256sum -c`, every installer byte-identical to the run's `gui-*` artifact; its notes hold
+  the install header, the 0.1.4 `CHANGELOG.md` entry and the first-parent commits since v0.1.3.
+  The `macos-26-intel` job had flaked once on `main` for this commit (`hdiutil: couldn't eject ...
+  Resource busy` building the `.dmg`; a re-run passed) but passed first time on the tag run.

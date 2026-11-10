@@ -385,6 +385,26 @@ describe('publish.mjs', () => {
       expect(clock).toBeLessThan(120_000 + 50_000);
     });
 
+    it('by default waits several minutes for npm, which took ~3 to show 0.1.4 (2026-11-10)', async () => {
+      // The v0.1.4 run's read-back gave up at its old 2-minute deadline; the registry recorded
+      // core/web/gui 2.5-3 minutes after `npm publish` reported them. A version that appears at
+      // 4 minutes must still be found with the DEFAULTS.
+      const set = tarballs([['core', '0.1.2', {}]]);
+      let clock = 0;
+      const late = fakeFetch(() => (clock >= 240_000 ? { versions: { '0.1.2': { dist: { shasum: set[0]!.sha1 } } } } : 404));
+      const left = await verifyReadBack(late, set, '0.1.2', {
+        now: () => clock, sleep: async (ms) => { clock += ms; },
+      });
+      expect(left).toEqual([]);
+      // ...and a version that never appears is given up on within ~10 minutes, inside the publish
+      // job's timeout-minutes (20) with room for the publishes themselves.
+      let clock2 = 0;
+      const never = fakeFetch(() => 404);
+      await verifyReadBack(never, set, '0.1.2', { now: () => clock2, sleep: async (ms) => { clock2 += ms; } });
+      expect(clock2).toBeGreaterThanOrEqual(240_000);
+      expect(clock2).toBeLessThanOrEqual(600_000);
+    });
+
     it('counts a failing fetch as not yet there, not as a crash', async () => {
       const set = tarballs([['core', '0.1.2', {}]]);
       let n = 0;
@@ -657,7 +677,7 @@ describe('publish.mjs', () => {
       const x = io({ tag: 'v0.1.2', neverReadBack: true });
       expect(await main(['--publish', dir!], x.args)).toBe(1);
       expect(x.runs).toHaveLength(8);
-      expect(x.sleeps).toHaveLength(23);
+      expect(x.sleeps).toHaveLength(59);   // the default 60 attempts, 10 s apart (ten minutes)
       expect(x.logs.at(-1)).toMatch(/registry does not hold 0\.1\.2 .*@tn3270\/core, @tn3270\/frontend/);
     });
   });
