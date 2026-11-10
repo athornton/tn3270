@@ -23,10 +23,11 @@ deliberately: see *What is not implemented*.)
 **There are FOUR front ends**: the scripting CLI, the TUI, the Electron GUI, and the web
 gateway, which serves the GUI's own renderer to a browser over a WebSocket.
 
-**Packaging exists, but not yet in anyone's hands.** It is merged into `main` (2026-11-06): npm
-packages for all four front ends, and native installers (macOS, Linux, Windows) built and
-smoke-tested in CI on five runners. None of it is published or signed yet — see *Installing* below and
-`docs/releasing.md` for exactly what is missing before it is. Started with no arguments, the GUI
+**Packaging is out.** All four front ends are on npm (since 0.1.0, 2026-11-08; released by tag
+from GitHub Actions with provenance since 0.1.3), and native installers (macOS, Linux, Windows) are
+built and smoke-tested in CI on five runners. The installers are UNSIGNED until an Apple Developer
+ID (and perhaps Windows code signing) is in place — see *Installing* below and
+`docs/releasing.md`. Started with no arguments, the GUI
 now opens a Connect dialog (host, model, TLS) instead of refusing to run; given a host it still
 takes it on the command line exactly as the other front ends do. It also has a menu bar — Edit for
 copy and paste, View for the keypad and keyboard, and Model for the model and oversize (picked while
@@ -62,7 +63,12 @@ first `tn3270-gui` prints `Downloading Electron binary...` and takes a while; th
 not a hang. See `packages/gui/README.md`.
 
 **Native installers** (macOS universal `.dmg`/`.zip`, Linux x64 and arm64 AppImage/`.deb`, a
-Windows x64 NSIS installer) come from `npm run package:gui` via electron-builder, and are **unsigned
+Windows x64 NSIS installer) come from `npm run package:gui` via electron-builder. **From 0.1.4 on,
+each version's GitHub release** (the repository's *Releases* page, tag `vX.Y.Z`) carries all seven,
+built and tested by that tag's CI run, with a `SHA256SUMS` beside them (`sha256sum -c SHA256SUMS`
+on Linux, `shasum -a 256 -c SHA256SUMS` on macOS; `--ignore-missing` to check only the ones you
+downloaded) and notes quoting that version's `CHANGELOG.md` entry. Earlier versions' installers
+were CI artifacts only. They are **unsigned
 this milestone**: no Apple Developer ID, no Windows code signing. macOS Gatekeeper blocks a
 downloaded unsigned app; the way through is System Settings → Privacy & Security → *Open Anyway*
 after the first blocked launch, or `xattr -dr com.apple.quarantine /Applications/TN3270.app`.
@@ -1599,8 +1605,12 @@ holds as one item.
    provenance and no long-lived npm token anywhere, then read the registry back to prove it landed.
    **Proven by release 0.1.3** (0.1.2 was skipped, a path bug in the publish job): published by
    "GitHub Actions", every shasum equal to the run's tarballs, an SLSA provenance attestation per
-   package, `npm audit signatures` verified (`docs/releasing.md`, *Release history*). **Next,
-   near-term: the same tag run also cuts a GitHub release carrying the native installers.** **Signing and store
+   package, `npm audit signatures` verified (`docs/releasing.md`, *Release history*). **The same tag
+   run now also cuts the GitHub release** (built 2026-11-09, branch `gh-release`; proof owed:
+   release 0.1.4): a `github-release` job after `publish` attaches the run's seven native
+   installers and a `SHA256SUMS`, with notes from the version's `CHANGELOG.md` entry, which scriv
+   collects from a fragment written with each functional change (`docs/releasing.md`).
+   **Signing and store
    distribution wait on the user's Apple Developer ID (and
    perhaps Windows code signing), timeline unknown.** Distributing outside the stores (Developer
    ID plus notarization, an Authenticode-signed NSIS installer) is a different path from the Mac

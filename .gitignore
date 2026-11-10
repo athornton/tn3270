@@ -17,3 +17,5 @@ artifacts/
 
 # The release jobs download npm-tarballs here, and the every-push dry run stages it here.
 tarballs/
+# Written by scripts/release-notes.mjs --compose (the github-release job; or by hand, docs/releasing.md).
+release-notes.md
