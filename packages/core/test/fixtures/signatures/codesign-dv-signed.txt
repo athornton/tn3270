@@ -1,0 +1,15 @@
+# PROVISIONAL: hand-written; replace with a capture (plan Task 8)
+Executable=/private/tmp/x/TN3270.app/Contents/MacOS/TN3270
+Identifier=io.github.athornton.tn3270
+Format=app bundle with Mach-O universal (x86_64 arm64)
+CodeDirectory v=20500 size=1234 flags=0x10000(runtime) hashes=28+7 location=embedded
+Signature size=9000
+Authority=Developer ID Application: Adam Thornton (ABCDE12345)
+Authority=Developer ID Certification Authority
+Authority=Apple Root CA
+Timestamp=10 Nov 2026 at 12:00:00
+Notarization Ticket=stapled
+TeamIdentifier=ABCDE12345
+Runtime Version=15.0.0
+Sealed Resources version=2 rules=13 files=40
+Internal requirements count=1 size=200

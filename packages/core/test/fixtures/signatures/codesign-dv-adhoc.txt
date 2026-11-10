@@ -1,0 +1,9 @@
+# PROVISIONAL: hand-written; replace with a capture (plan Task 8)
+Executable=/private/tmp/x/TN3270.app/Contents/MacOS/TN3270
+Identifier=io.github.athornton.tn3270
+Format=app bundle with Mach-O universal (x86_64 arm64)
+CodeDirectory v=20400 size=1234 flags=0x20002(adhoc,linker-signed) hashes=28+0 location=embedded
+Signature=adhoc
+Info.plist entries=30
+TeamIdentifier=not set
+Sealed Resources=none

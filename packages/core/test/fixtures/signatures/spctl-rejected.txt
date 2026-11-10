@@ -1,0 +1,2 @@
+# PROVISIONAL: hand-written; replace with a capture (plan Task 8)
+/private/tmp/x/TN3270.app: rejected
