@@ -247,8 +247,20 @@ describe('release-notes.mjs', () => {
 
   describe('escapeMarkdown and commitList', () => {
     it('neutralises HTML, headings, emphasis, links, tables, strikes and mentions', () => {
-      expect(escapeMarkdown('#x <y> @z *w*')).toBe('\\#x &lt;y&gt; \\@z \\*w\\*');
+      // `@` is broken with an EMPTY HTML COMMENT, not a backslash: measured through GitHub's renderer
+      // (gfm, context athornton/tn3270, 2026-11-10), `\\@athornton` and `&#64;athornton` still
+      // render as user-mention links; `@<!-- -->athornton` renders as plain text and copies cleanly.
+      expect(escapeMarkdown('#x <y> @z *w*')).toBe('\\#x &lt;y&gt; @<!-- -->z \\*w\\*');
       expect(escapeMarkdown('a & b [l](u) `c` _u_ |t| ~s~ \\')).toBe('a &amp; b \\[l\\](u) \\`c\\` \\_u\\_ \\|t\\| \\~s\\~ \\\\');
+    });
+
+    it('a subject that starts like a list item cannot nest a list (measured: `- `, `+ `, `1. ` did)', () => {
+      expect(escapeMarkdown('- dash')).toBe('\\- dash');
+      expect(escapeMarkdown('+ plus')).toBe('\\+ plus');
+      expect(escapeMarkdown('1. one')).toBe('1\\. one');
+      expect(escapeMarkdown('12) twelve')).toBe('12\\) twelve');
+      // Only at the START: the same characters mid-subject are left alone.
+      expect(escapeMarkdown('a - b + c 1. d')).toBe('a - b + c 1. d');
     });
 
     it('keeps a real subject whose <userid> GitHub would swallow as a tag (2d0041c)', () => {
@@ -258,7 +270,7 @@ describe('release-notes.mjs', () => {
 
     it('makes one bullet per line, hash last, and a leading # cannot become a heading', () => {
       expect(commitList('#x <y> @z *w*\x00abc1234\nrelease: 0.1.4\x00def5678\n\n'))
-        .toBe('- \\#x &lt;y&gt; \\@z \\*w\\* (abc1234)\n- release: 0.1.4 (def5678)\n');
+        .toBe('- \\#x &lt;y&gt; @<!-- -->z \\*w\\* (abc1234)\n- release: 0.1.4 (def5678)\n');
       expect(commitList('')).toBe('');
     });
   });

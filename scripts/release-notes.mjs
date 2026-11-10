@@ -192,7 +192,14 @@ function pullList(body) {
 export function escapeMarkdown(text) {
   return text
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/[\\`*_[\]#|~@]/g, (c) => `\\${c}`);
+    .replace(/[\\`*_[\]#|~]/g, (c) => `\\${c}`)
+    // A leading list marker would nest a list inside the bullet (measured through GitHub's renderer).
+    .replace(/^([-+])(?=\s)/, '\\$1').replace(/^(\d+)([.)])(?=\s)/, '$1\\$2')
+    // `@` LAST, and broken with an EMPTY HTML COMMENT -- after the `<`/`>` escaping, so the comment
+    // is not escaped itself. A backslash does NOT stop a mention: measured 2026-11-10 through
+    // GitHub's renderer, `\\@athornton` and `&#64;athornton` still render as user-mention links
+    // (and would notify), while `@<!-- -->athornton` renders as plain text and copies cleanly.
+    .replace(/@/g, '@<!-- -->');
 }
 
 /** `git log --format=%s%x00%h` -> `- subject (hash)` lines, each subject escaped. */
