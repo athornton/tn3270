@@ -15,7 +15,7 @@ const SIGNED_MAC = () => ({
 });
 const UNSIGNED_MAC = () => ({
   verify: no('code has no resources but signature indicates they must be present'),
-  display: ok(fx('codesign-dv-adhoc.txt')), spctl: no(fx('spctl-rejected.txt')), stapler: no('does not have a ticket stapled to it'),
+  display: ok(fx('codesign-dv-adhoc.txt')), spctl: no(fx('spctl-rejected.txt')), stapler: no('/scratch/zip/TN3270.app does not have a ticket stapled to it.'),
 });
 
 describe('parseCodesignDisplay (provisional fixtures)', () => {
@@ -40,7 +40,7 @@ describe('judgeMacApp (provisional fixtures)', () => {
     ['runtime', { display: ok(fx('codesign-dv-signed.txt').replace('(runtime)', '(none)')) }, /hardened runtime/],
     ['spctl', { spctl: no(fx('spctl-rejected.txt')) }, /spctl/],
     ['notarized source', { spctl: ok(fx('spctl-notarized.txt').replace('Notarized ', '')) }, /Notarized Developer ID/],
-    ['stapler', { stapler: no('does not have a ticket stapled to it') }, /stapler/],
+    ['stapler', { stapler: no('/scratch/zip/TN3270.app does not have a ticket stapled to it.') }, /stapler/],
   ])('fails --expect signed on a bad %s', (_n, patch, msg) => {
     const team = _n === 'team' ? 'ZZZZZ99999' : 'ABCDE12345';
     const problems = judgeMacApp({ ...SIGNED_MAC(), ...patch }, 'signed', team);
@@ -81,6 +81,10 @@ describe('judgeMacApp --expect unsigned: only recognised shapes pass (provisiona
     ['spctl failing without ": rejected"', { spctl: no('xcrun: error: invalid active developer path') }, /unrecognised spctl answer.*spctl exit 1: xcrun: error/],
     ['spctl accepting with Gatekeeper off', { spctl: ok('/private/tmp/x/TN3270.app: accepted\noverride=security disabled') }, /unrecognised spctl answer.*Gatekeeper assessments are DISABLED/],
     ['stapler exiting 0', { stapler: ok('The validate action worked!') }, /unrecognised xcrun stapler/],
+    ['stapler saying "no ticket" with exit 0', { stapler: ok('/scratch/zip/TN3270.app does not have a ticket stapled to it.') }, /unrecognised xcrun stapler.*exit 0/],
+    ['stapler failing with no output', { stapler: no('') }, /unrecognised xcrun stapler.*xcrun stapler exit 1: \(no output\)/],
+    ['stapler killed by a signal', { stapler: no('[killed by SIGSEGV]\n') }, /unrecognised xcrun stapler.*killed by SIGSEGV/],
+    ['stapler failing with another error', { stapler: { status: 70, stdout: '', text: 'Operation not permitted' } }, /unrecognised xcrun stapler.*exit 70: Operation not permitted/],
     ['stapler failing as xcrun itself', { stapler: no('xcrun: error: invalid active developer path (/Library/Developer/CommandLineTools)') }, /unrecognised xcrun stapler.*xcrun: error/],
   ])('FAILs %s', (_n, patch, msg) => {
     expect(judgeMacApp({ ...UNSIGNED_MAC(), ...patch }, 'unsigned', undefined).join('\n')).toMatch(msg);
@@ -126,7 +130,7 @@ function fakeRun(answers: Record<string, Ran | ((args: string[]) => Ran)>) {
 }
 /** What an ad-hoc-signed, unnotarized app answers (provisional fixtures). */
 const UNSIGNED_ANSWERS = () => ({
-  'codesign -dv': ok(fx('codesign-dv-adhoc.txt')), spctl: no(fx('spctl-rejected.txt')), 'codesign --verify': no('invalid'), stapler: no('no ticket'),
+  'codesign -dv': ok(fx('codesign-dv-adhoc.txt')), spctl: no(fx('spctl-rejected.txt')), 'codesign --verify': no('invalid'), stapler: no('/scratch/zip/TN3270.app does not have a ticket stapled to it.'),
 });
 const MAC_FILES = ['TN3270-0.1.5-mac-universal.dmg', 'TN3270-0.1.5-mac-universal.zip', 'TN3270-0.1.5-mac-universal.dmg.blockmap'];
 /** The path inside a pwsh call's `-LiteralPath '...'`, with `''` undoubled. */

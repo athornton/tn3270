@@ -18,10 +18,10 @@
  * Windows: the one `TN3270-*-win-x64.exe` is checked, then silent-installed exactly as
  * package-smoke does (`/S /D=<dir>`, `/D=` last and unquoted, verbatim arguments), and the
  * installed `TN3270.exe` and `Uninstall TN3270.exe` are checked too; then it is uninstalled
- * (`/S _?=<dir>`, which waits), best effort. (The spec said to extract app-64.7z with 7zz instead; 7zip-bin is not a dependency
- * here, and the installed files are what users run.) Each check is `Get-AuthenticodeSignature`
- * through pwsh, projected to `{"Status","Subject"}` JSON on stdout; `unsigned` accepts only
- * `NotSigned`.
+ * (`/S _?=<dir>`, which waits), best effort. (The spec said to extract app-64.7z with 7zz
+ * instead; 7zip-bin is not a dependency here, and the installed files are what users run.) Each
+ * check is `Get-AuthenticodeSignature` through pwsh, projected to `{"Status","Subject"}` JSON
+ * on stdout; `unsigned` accepts only `NotSigned`.
  *
  * Exit 0: every artifact is as expected (`ok <artifact>: <mode>`). 1: problems, each printed as
  * `FAIL <artifact>: <problem>`. 2: usage -- a bad or missing `--expect`, an unsupported platform,
@@ -68,7 +68,7 @@ const gatekeeper = (text) => (text.includes('override=security disabled')
  * `unsigned` passes ONLY on recognised shapes, so a broken tool is never read as "unsigned":
  * `codesign -dv` exits non-zero saying `code object is not signed at all`, or exits 0 with an
  * ad-hoc signature (no authorities, no team); AND `spctl` exits non-zero with a `: rejected`
- * line; AND `stapler` exits non-zero, and not with xcrun's own `xcrun: error:` (no Xcode tools).
+ * line; AND `stapler` exits non-zero saying `does not have a ticket stapled to it`.
  */
 export function judgeMacApp(r, expect, teamId) {
   const d = parseCodesignDisplay(r.display.text);
@@ -82,7 +82,10 @@ export function judgeMacApp(r, expect, teamId) {
     if (r.spctl.status === 0 || !lines(r.spctl.text).some((l) => l.endsWith(': rejected'))) {
       p.push(`unrecognised spctl answer: expected a non-zero exit and a ": rejected" line ${said('spctl', r.spctl)}${gatekeeper(r.spctl.text)}`);
     }
-    if (r.stapler.status === 0 || r.stapler.text.includes('xcrun: error:')) {
+    // PROVISIONAL wording, from memory: confirm against the Task 8 capture. Positive on purpose:
+    // an empty failure, a signal, `Operation not permitted` or xcrun's own `xcrun: error:` (no
+    // developer tools) are not "no ticket".
+    if (r.stapler.status === 0 || !r.stapler.text.includes('does not have a ticket stapled to it')) {
       p.push(`unrecognised xcrun stapler validate answer: expected it to find no ticket ${said('xcrun stapler', r.stapler)}`);
     }
     return p;
@@ -302,8 +305,9 @@ export function main(argv, io) {
     for (const line of err.message.split('\n')) io.log(`verify-signatures: ${line}`);
     return 2;
   } finally {
-    // Only our own: an injected scratch belongs to the caller. Best effort (a Windows install
-    // directory can still be busy while the uninstaller runs from %TEMP%).
+    // Only our own: an injected scratch belongs to the caller. The uninstaller has finished by now
+    // (`_?=` waits), but a failure here is still only logged: a file held open by, say, an
+    // antivirus scan, or a dmg that would not detach, must not turn a verdict into a crash.
     if (work !== undefined && !io.scratch) {
       try { rmSync(work, { recursive: true, force: true }); } catch (e) { io.log(`verify-signatures: left ${work}: ${e.message}`); }
     }
