@@ -713,8 +713,10 @@ describe('release-notes.mjs', () => {
         const logs: string[] = [];
         const args = { env: { SCRIV: found()!.join(' ') }, run: runCommand, log: (l: string) => { logs.push(l); }, root };
         expect(main(['--check-changelog', '0.1.3'], args)).toBe(0);
-        expect(main(['--check-changelog', '0.1.4'], args)).toBe(1);
-        expect(logs.at(-1)).toBe('release-notes: refused: CHANGELOG.md has no entry for 0.1.4: run uvx scriv collect --version 0.1.4 and commit it');
+        // A version that can never be in the real CHANGELOG.md: this test reads the repo's own copy,
+        // and its first "missing" example, 0.1.4, stopped being missing at the 0.1.4 release.
+        expect(main(['--check-changelog', '999.0.0'], args)).toBe(1);
+        expect(logs.at(-1)).toBe('release-notes: refused: CHANGELOG.md has no entry for 999.0.0: run uvx scriv collect --version 999.0.0 and commit it');
       } finally {
         rmSync(root, { recursive: true, force: true });
       }

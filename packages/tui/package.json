@@ -1,6 +1,6 @@
 {
   "name": "@tn3270/tui",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "A c3270-style terminal front end for TN3270 hosts, with a keypad overlay and an IND$FILE transfer form.",
   "license": "MIT",
   "author": "Adam Thornton <athornton@gmail.com>",
@@ -18,9 +18,9 @@
   "engines": { "node": ">=20.19" },
   "publishConfig": { "access": "public" },
   "dependencies": {
-    "@tn3270/core": "0.1.3",
-    "@tn3270/frontend": "0.1.3",
-    "@tn3270/node-files": "0.1.3"
+    "@tn3270/core": "0.1.4",
+    "@tn3270/frontend": "0.1.4",
+    "@tn3270/node-files": "0.1.4"
   },
   "scripts": {
     "build": "tsc --build"

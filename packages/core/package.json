@@ -1,6 +1,6 @@
 {
   "name": "@tn3270/core",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "TN3270 protocol core: telnet negotiation, the 3270 data stream, screen buffer, and IND$FILE transfer, with no runtime dependencies.",
   "license": "MIT",
   "author": "Adam Thornton <athornton@gmail.com>",
