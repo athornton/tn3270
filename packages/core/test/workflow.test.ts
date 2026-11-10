@@ -112,19 +112,46 @@ describe('package.yml release wiring', () => {
     }
   });
 
-  it('the every-push release-notes dry run comes after package:gui, with scriv installed', () => {
+  it('scriv is installed before vitest; the release-notes dry run comes after package:gui', () => {
     const block = jobBlock('package');
     const steps = block.split(/\n      - /);
     const at = (re: RegExp) => steps.findIndex((s) => re.test(s));
     const gui = at(/run: npm run package:gui\b/);
     const scriv = at(/run: pipx install scriv==1\.8\.1/);
+    const vitest = at(/run: npx vitest run\b/);
     const dry = at(/run: node scripts\/release-notes\.mjs --dry-run artifacts\/gui\b/);
     expect(gui, 'package:gui').toBeGreaterThanOrEqual(0);
-    expect(scriv, 'scriv install').toBeGreaterThan(gui);
-    expect(dry, 'release-notes dry run').toBeGreaterThan(scriv);
+    // Before vitest, so the real-scriv tests run in CI instead of skipping (review, 2026-11-10).
+    expect(scriv, 'scriv install').toBeGreaterThanOrEqual(0);
+    expect(scriv, 'scriv install before vitest').toBeLessThan(vitest);
+    expect(dry, 'release-notes dry run after package:gui').toBeGreaterThan(gui);
+    expect(dry, 'release-notes dry run after the scriv install').toBeGreaterThan(scriv);
     // In the npm leg (ubuntu-latest, which also packages): one job, not every runner.
     expect(steps[scriv]).toMatch(/^if:\s*matrix\.npm\n/);
     expect(steps[dry]).toMatch(/^if:\s*matrix\.npm\n/);
+  });
+
+  it('github-release creates, or on a re-run repairs, the release in the right order', () => {
+    const steps = jobBlock('github-release').split(/\n      - /);
+    const at = (re: RegExp) => steps.findIndex((s) => re.test(s));
+    const scriv = at(/run: pipx install scriv==1\.8\.1/);
+    const download = at(/download-artifact@[\s\S]*pattern:\s*'gui-\*'/);
+    const compose = at(/release-notes\.mjs --compose installers/);
+    const create = at(/gh release create /);
+    const verify = at(/release-notes\.mjs --verify-release installers/);
+    for (const [name, i] of Object.entries({ scriv, download, compose, create, verify })) {
+      expect(i, name).toBeGreaterThanOrEqual(0);
+    }
+    expect([scriv, download, compose, create, verify]).toEqual([...[scriv, download, compose, create, verify]].sort((a, b) => a - b));
+    const step = steps[create]!;
+    expect(step).toMatch(/gh release create "\$GITHUB_REF_NAME" --verify-tag .*--notes-file release-notes\.md installers\/\*/);
+    // The re-run branch: upload BEFORE the edit, and the edit publishes a draft left by a create
+    // killed mid-upload -- `edit` alone keeps a draft a draft, and the read-back sees only published
+    // releases (review of gh's release/create/create.go, 2026-11-10).
+    const upload = step.indexOf('gh release upload "$GITHUB_REF_NAME" installers/* --clobber');
+    const edit = step.indexOf('gh release edit "$GITHUB_REF_NAME" --notes-file release-notes.md --draft=false');
+    expect(upload, 'upload --clobber').toBeGreaterThanOrEqual(0);
+    expect(edit, 'edit --draft=false').toBeGreaterThan(upload);
   });
 
   it('publish asserts Node and npm versions rather than reinstalling npm over itself', () => {

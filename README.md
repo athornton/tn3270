@@ -23,10 +23,11 @@ deliberately: see *What is not implemented*.)
 **There are FOUR front ends**: the scripting CLI, the TUI, the Electron GUI, and the web
 gateway, which serves the GUI's own renderer to a browser over a WebSocket.
 
-**Packaging exists, but not yet in anyone's hands.** It is merged into `main` (2026-11-06): npm
-packages for all four front ends, and native installers (macOS, Linux, Windows) built and
-smoke-tested in CI on five runners. None of it is published or signed yet — see *Installing* below and
-`docs/releasing.md` for exactly what is missing before it is. Started with no arguments, the GUI
+**Packaging is out.** All four front ends are on npm (since 0.1.0, 2026-11-08; released by tag
+from GitHub Actions with provenance since 0.1.3), and native installers (macOS, Linux, Windows) are
+built and smoke-tested in CI on five runners. The installers are UNSIGNED until an Apple Developer
+ID (and perhaps Windows code signing) is in place — see *Installing* below and
+`docs/releasing.md`. Started with no arguments, the GUI
 now opens a Connect dialog (host, model, TLS) instead of refusing to run; given a host it still
 takes it on the command line exactly as the other front ends do. It also has a menu bar — Edit for
 copy and paste, View for the keypad and keyboard, and Model for the model and oversize (picked while

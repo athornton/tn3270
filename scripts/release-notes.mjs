@@ -186,8 +186,9 @@ function pullList(body) {
 
 /**
  * `text` safe as markdown prose: `&`, `<`, `>` as entities (a `<userid>` would be an HTML tag and
- * vanish), and `\ ` * _ [ ] # | ~ @` backslash-escaped (no emphasis, link, heading, table, strike
- * or `@login` mention -- a mention would NOTIFY that user).
+ * vanish); `\ ` * _ [ ] # | ~` backslash-escaped (no emphasis, link, heading, table or strike); a
+ * leading list marker escaped (no nested list); and every `@` followed by an empty HTML comment,
+ * because a backslash does NOT stop an `@login` mention, which would NOTIFY that user.
  */
 export function escapeMarkdown(text) {
   return text

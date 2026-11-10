@@ -83,8 +83,9 @@ runners. The merge tree is byte-identical to the branch tip CI run 6 tested.
 ### NEXT: THE ROADMAP, AGREED 2026-11-06
 
 Recorded in full in the README, *Remaining* items 14-22. In order: (14) close out packaging (live
-checks, icon and 0.1.0 publish DONE 2026-11-08; npm trusted publishing from GitHub Actions BUILT
-2026-11-09 on branch `trusted-publish`, proof owed via release 0.1.2; signing when the user has an
+checks, icon and 0.1.0 publish DONE 2026-11-08; npm trusted publishing from GitHub Actions
+PROVEN by release 0.1.3 (2026-11-09; 0.1.2 skipped); a GitHub release with the installers and a
+scriv changelog BUILT on branch `gh-release` (2026-11-10), proof owed via release 0.1.4; signing when the user has an
 Apple Developer ID); (15) the rest of the GUI (`File` →
 `Connect…`, preferences, light/dark, fonts); (16) code pages (only `cp037` exists); (17)
 click-to-place-cursor, then the light pen; (18) text printing (SCS / LU3, checked against

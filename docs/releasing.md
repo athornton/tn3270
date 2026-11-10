@@ -159,10 +159,25 @@ at the tagged commit. Fix it on `main` and release a new patch version, or publi
 run's artifact by hand (*Fallback* below).
 
 **If `github-release` fails** (npm publishing has already succeeded): "Re-run failed jobs" again.
-The job is safe to repeat — it finds the release it may have half-made, rewrites the notes and
-re-uploads every asset with `--clobber` — and it uses the run's original `gui-*` artifacts, the
-installers that run tested. Its read-back names an asset on the release that this run did not make
+It re-runs only that job, with no second approval (`publish` holds the environment). The job is
+safe to repeat — it finds the release it may have half-made, even one left a DRAFT by a create
+killed mid-upload, re-uploads every asset with `--clobber`, then rewrites the notes with
+`--draft=false` — and it uses the run's original `gui-*` artifacts, the installers that run
+tested. Its read-back names an asset on the release that this run did not make
 (`gh release delete-asset vX.Y.Z NAME` removes it).
+
+**If the `github-release` job itself is broken** (its YAML or `scripts/release-notes.mjs` at the
+tagged commit), a re-run cannot help, and npm already holds X.Y.Z. Cut the release by hand from
+the run's own artifacts, in a checkout of the tag:
+
+```sh
+gh run download RUN_ID -R athornton/tn3270 -p 'gui-*' -D installers   # then flatten installers/*/* into installers/
+GITHUB_REF_NAME=vX.Y.Z GITHUB_REF_TYPE=tag GITHUB_REPOSITORY=athornton/tn3270 \
+  node scripts/release-notes.mjs --compose installers        # needs scriv 1.8.1 on PATH, and gh logged in
+gh release create vX.Y.Z --verify-tag --title vX.Y.Z --notes-file release-notes.md installers/*
+GITHUB_REF_NAME=vX.Y.Z GITHUB_REF_TYPE=tag GITHUB_REPOSITORY=athornton/tn3270 \
+  node scripts/release-notes.mjs --verify-release installers
+```
 
 ## Why a tarball packed on a dev box can't match CI's byte-for-byte
 
