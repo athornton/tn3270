@@ -1,7 +1,10 @@
 /** Types for `verify-signatures.mjs`, so the tests that import it are typechecked too. */
 export type Expect = 'signed' | 'unsigned';
-/** A command's exit status and its stdout+stderr together (codesign and spctl report on stderr). */
-export interface Ran { status: number; text: string }
+/**
+ * A command's exit status, its stdout+stderr together in `text` (codesign and spctl report on
+ * stderr), and stdout alone (what the Authenticode JSON is parsed from).
+ */
+export interface Ran { status: number; stdout: string; text: string }
 export function parseCodesignDisplay(text: string): { authorities: string[]; teamId: string | undefined; runtime: boolean; adhoc: boolean };
 export function judgeMacApp(r: { verify: Ran; display: Ran; spctl: Ran; stapler: Ran }, expect: Expect, teamId: string | undefined): string[];
 export function parseAuthenticode(text: string): { status: string; subject: string };
@@ -17,3 +20,8 @@ export function main(argv: string[], io: {
   exists?: (path: string) => boolean;
 }): number;
 export const runCommand: Run;
+/** runCommand's spawnSync options (exported so the 10-minute timeout is pinned by a test). */
+export function spawnOptions(cmd: string, opts?: { verbatim?: boolean }): {
+  encoding: 'utf8'; timeout: number; windowsHide: boolean; maxBuffer: number;
+  windowsVerbatimArguments?: boolean; argv0?: string;
+};
