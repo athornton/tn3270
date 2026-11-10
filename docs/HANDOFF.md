@@ -1,4 +1,4 @@
-# Handoff — state as of 2026-11-09 (0.1.3 PUBLISHED by the tag workflow over OIDC with provenance, tag `v0.1.3` on `ebd2100`; 0.1.2 skipped; native installers UNSIGNED; the GitHub release with the installers and a scriv CHANGELOG built on branch `gh-release`, proof owed by release 0.1.4; then README *Remaining* item 15)
+# Handoff — state as of 2026-11-10 (0.1.4 RELEASED: npm by the tag workflow with provenance, and the first GitHub release with the seven installers, SHA256SUMS and scriv notes; native installers UNSIGNED; next: README *Remaining* item 15)
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
@@ -19,8 +19,10 @@ and a version with no `CHANGELOG.md` entry or uncollected fragments. **The habit
 scriv fragment (`uvx scriv create`, in `changelog.d/`) with each functional change, collected at
 release (`uvx scriv collect --version X.Y.Z`); `docs/releasing.md` has the procedure. **Proof
 owed: release 0.1.4** -- the release exists, its assets match the run's artifacts byte for byte,
-`SHA256SUMS` verifies, and its notes hold the scriv entry and the commits since v0.1.3. Merging
-and cutting 0.1.4 are the user's calls; then README *Remaining* item 15.
+`SHA256SUMS` verifies, and its notes hold the scriv entry and the commits since v0.1.3. **DONE
+2026-11-10: 0.1.4 released, all of that verified** (`docs/releasing.md`, *Release history*; the
+read-back deadline went from 2 to 10 minutes after npm took ~3 to show three packages). Next:
+README *Remaining* item 15.
 
 **2026-11-09, LATER: 0.1.3 IS PUBLISHED BY THE TAG WORKFLOW** -- trusted publishing proven: OIDC,
 provenance attested, registry read back (`docs/releasing.md`, *Release history*; 0.1.2 was skipped,

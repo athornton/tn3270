@@ -252,7 +252,7 @@ jobs:
     # A GitHub Actions job's timeout-minutes clock does not start until the job leaves "waiting"
     # for its environment's required reviewer -- i.e. the approval wait above is free. What DOES
     # count: checkout, setup-node, the version check, downloading the artifact, and
-    # `publish.mjs --publish` itself (up to eight `npm publish`s plus its own ~2-minute read-back
+    # `publish.mjs --publish` itself (up to eight `npm publish`s plus its own ~10-minute read-back
     # deadline). 20 minutes covers that with room for a slow runner or a slow registry.
     timeout-minutes: 20
     environment: npm

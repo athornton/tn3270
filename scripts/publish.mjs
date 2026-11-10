@@ -152,13 +152,17 @@ const realSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * Polls until every tarball's `version` is on the registry with its sha1, for up to `attempts`
- * rounds `delayMs` apart AND no longer than `deadlineMs` of wall clock (default: two minutes
+ * rounds `delayMs` apart AND no longer than `deadlineMs` of wall clock (default: ten minutes
  * either way; the clock bounds it when fetches are slow, each up to `timeoutMs`), and returns
  * the names still wrong (`[]`: all there). A failed fetch counts as "not there yet" for that
  * round, not as a crash. Once the deadline passes, nothing more is fetched.
  */
 export async function verifyReadBack(fetchFn, tarballs, version,
-  { attempts = 24, delayMs = 5000, deadlineMs = 120_000, timeoutMs = 15_000, sleep = realSleep, now = Date.now } = {}) {
+  // TEN minutes, not two: the v0.1.4 run's read-back gave up at two (2026-11-10) while the registry
+  // recorded core, web and gui 2.5-3 minutes after `npm publish` had reported them -- all eight were
+  // in fact published, identical, and the re-run's read-back passed at once. Still inside the
+  // publish job's timeout-minutes (20) with the publishes themselves (~3 minutes).
+  { attempts = 60, delayMs = 10_000, deadlineMs = 600_000, timeoutMs = 15_000, sleep = realSleep, now = Date.now } = {}) {
   const end = now() + deadlineMs;
   let pending = [...tarballs];
   for (let i = 1; i <= attempts; i++) {
