@@ -9,6 +9,14 @@
 #   x64witness  TN3270_PACKAGE_SMOKE_X64 for package-smoke.mjs (see its "macOS" notes)
 #   npm         upload the npm tarballs (one job, so they are not uploaded five times)
 #   gui         upload this job's native artifacts
+#   sign        a SIGNING runner (code signing plan, Task 5; spec docs/superpowers/specs/
+#               2026-11-10-code-signing-design.md, section 2): macos-latest only, the one that
+#               uploads the mac installers. It signs only on a `v*` tag or a dispatch with `sign`
+#               ticked, and always runs verify-signatures.mjs (--expect unsigned otherwise)
+#   verify      a FIXED verify-signatures.mjs mode for a runner that never signs: windows-latest,
+#               `unsigned` on every run, tags included (spec amendment 2026-11-11: Windows CI
+#               signing is dropped; a Microsoft Store MSIX route is planned). A Windows installer
+#               that came out signed anyway -- a half-configured signing setup -- fails the run.
 #   pty         run packages/tui/scripts/pty-smoke.py (default, --oversize-auto, --prompt) after
 #               the build -- a real pty and a fork, which only Linux runners here give it cheaply;
 #               the two ubuntu jobs (the parity runner and the Node floor) carry it, so both the
@@ -62,8 +70,15 @@ on:
     tags: ['v*.*.*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      sign:
+        description: 'Sign and notarize the macOS app (uses environment signing; Windows is never signed)'
+        type: boolean
+        default: false
 env:
-  # Unsigned this milestone: never sign with whatever certificate a runner's keychain holds.
+  # Unsigned unless a signing run, whose package:gui step overrides this. `false` with no identity
+  # leaves the app unsigned with no error (app-builder-lib codeSign/macCodeSign.js findIdentity), so
+  # no run ever signs with whatever certificate a runner's keychain happens to hold.
   CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 defaults:
   run:
@@ -99,6 +114,8 @@ jobs:
             x64witness: native
             node: '22'
             gui: true
+            # Signs the universal app (macos-26-intel below stays unsigned: never uploaded).
+            sign: true
           - os: macos-26-intel
             # Builds the universal app too, so its package smoke runs the x86_64 slice natively.
             # Not uploaded: it would duplicate macos-latest's universal artifacts.
@@ -108,6 +125,8 @@ jobs:
             builder: --win --x64
             node: '22'
             gui: true
+            # Never signed in CI (spec amendment 2026-11-11), so verified unsigned on EVERY run.
+            verify: unsigned
           - name: ubuntu-latest-node20.19
             os: ubuntu-latest
             xvfb: 'xvfb-run -a -s "-screen 0 1280x1024x24"'
@@ -118,6 +137,16 @@ jobs:
             # but only behind this flag (global from 22). The gateway itself does not use it.
             nodeopts: --experimental-websocket
     runs-on: ${{ matrix.os }}
+    # Signing runs only (code signing spec, section 2): v* tags, or a dispatch with sign ticked,
+    # on the one runner that builds the mac installers. '' = no environment (MEASURED in Task 6).
+    environment: ${{ matrix.sign && (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.sign)) && 'signing' || '' }}
+    # contents: read is all the steps need: checkout reads the repository; setup-node's npm
+    # cache, actions/cache and upload-artifact use the runner's own ACTIONS_RUNTIME_TOKEN, not
+    # GITHUB_TOKEN; package:gui is `--publish never`; the release-notes dry run calls no gh. No
+    # id-token: mac signing uses secrets, not OIDC (azure/login, its one user, is gone with
+    # Windows signing); publish mints its own.
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -174,8 +203,40 @@ jobs:
             TN3270_GUI_MAIN=app ${{ matrix.xvfb }} node "packages/gui/scripts/$h.mjs"
             echo "::endgroup::"
           done
+      - if: ${{ matrix.sign && (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.sign)) && runner.os == 'macOS' }}
+        name: notarization key (.p8) into RUNNER_TEMP; APPLE_API_KEY is its PATH
+        run: |
+          printf '%s\n' "$APPLE_API_KEY_P8" > "$RUNNER_TEMP/AuthKey.p8"
+          echo "APPLE_API_KEY=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
       - if: matrix.builder
         run: npm run package:gui -- ${{ matrix.builder }}
+        env:
+          TN3270_SIGN: ${{ matrix.sign && (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.sign)) && '1' || '' }}
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ matrix.sign && (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.sign)) && 'true' || 'false' }}
+          # Empty outside environment signing; signing.cjs refuses signing mode without them.
+          CSC_LINK: ${{ secrets.MAC_CERT_P12_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+          APPLE_API_KEY_ID: ${{ vars.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ vars.APPLE_API_ISSUER }}
+      # Fail-closed both ways (spec section 3). The MODE comes from the ref and the input alone, not
+      # matrix.sign, so a broken signing expression fails a tag run rather than passing it unsigned.
+      - if: matrix.sign
+        name: verify signatures
+        run: node scripts/verify-signatures.mjs --expect ${{ (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.sign)) && 'signed' || 'unsigned' }} artifacts/gui
+        env:
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          # Raw codesign/spctl/Authenticode text in the log: what a failure is diagnosed from,
+          # and where the test fixtures are captured from (Tasks 6 and 8).
+          VERIFY_SIGNATURES_ECHO: '1'
+      # A runner that never signs (windows-latest): its matrix `verify` mode, on every run, tags
+      # included -- never the ref, which would expect `signed` from a build nothing signs.
+      - if: matrix.verify
+        name: verify signatures (fixed mode)
+        run: node scripts/verify-signatures.mjs --expect ${{ matrix.verify }} artifacts/gui
+        env:
+          VERIFY_SIGNATURES_ECHO: '1'
       - if: matrix.builder
         run: ${{ matrix.xvfb }} node scripts/package-smoke.mjs
         env:

@@ -1,0 +1,31 @@
+# Captured: CI run 42959265358, 2026-11-11 (macos, signed+notarized build, --expect signed), exit 0.
+# codesign -dv --verbose=4 <zip>/TN3270.app
+Executable=/private/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/tn3270-sig-B4gkbO/zip/TN3270.app/Contents/MacOS/TN3270
+Identifier=io.github.athornton.tn3270
+Format=app bundle with Mach-O universal (x86_64 arm64)
+CodeDirectory v=20500 size=454 flags=0x10000(runtime) hashes=3+7 location=embedded
+VersionPlatform=1
+VersionMin=851968
+VersionSDK=1705216
+Hash type=sha256 size=32
+CandidateCDHash sha256=a0341e69ffd46dca0842f00347d243b2f79fdf75
+CandidateCDHashFull sha256=a0341e69ffd46dca0842f00347d243b2f79fdf75cc39289fc8a75cc63e5b9bb7
+Hash choices=sha256
+CMSDigest=a0341e69ffd46dca0842f00347d243b2f79fdf75cc39289fc8a75cc63e5b9bb7
+CMSDigestType=2
+Executable Segment base=0
+Executable Segment limit=16384
+Executable Segment flags=0x1
+Page size=16384
+CDHash=a0341e69ffd46dca0842f00347d243b2f79fdf75
+Signature size=9063
+Authority=Developer ID Application: ADAM JUSTEI- THORNTON (H68TN685J4)
+Authority=Developer ID Certification Authority
+Authority=Apple Root CA
+Timestamp=Nov 11, 2026 at 4:30:16 AM
+Notarization Ticket=stapled
+Info.plist entries=32
+TeamIdentifier=H68TN685J4
+Runtime Version=26.5.0
+Sealed Resources version=2 rules=13 files=13
+Internal requirements count=1 size=188

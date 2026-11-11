@@ -1,0 +1,5 @@
+# Captured: CI run 42959265358, 2026-11-11 (macos, signed+notarized build, --expect signed), exit 0.
+# spctl -a -t exec -vv <zip>/TN3270.app
+/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/tn3270-sig-B4gkbO/zip/TN3270.app: accepted
+source=Notarized Developer ID
+origin=Developer ID Application: ADAM JUSTEI- THORNTON (H68TN685J4)
