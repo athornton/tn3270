@@ -354,31 +354,62 @@ every other run of those two, builds exactly as before: unsigned.
 ### One-time setup: Apple
 
 You need the Account Holder role for the certificate and an Admin account in App Store Connect for
-the API key. Do this on a Mac, because the private key is made in, and exported from, your login
-keychain.
+the API key. Steps 1-3 use `openssl` on the command line, NOT Keychain Access: Keychain Access is
+gone in macOS 27 (its replacement, Passwords, is not documented here as making CSRs or exporting
+`.p12`s), and the command line works on any macOS or Linux. Work in a private directory and delete
+it at the end (step 3); `tn3270-devid.key` is the signing key itself.
 
-1. **Certificate signing request.** Open Keychain Access (`/Applications/Utilities`) and choose
-   **Keychain Access → Certificate Assistant → Request a Certificate From a Certificate
-   Authority**. For **User Email Address** use your address, for **Common Name** something like
-   `tn3270 Developer ID`, and leave **CA Email Address** empty. Choose **Saved to disk** →
-   **Continue**. This writes a `.certSigningRequest` file. The private key stays in the login
-   keychain.
+1. **Private key and certificate signing request.** Apple requires a 2048-bit RSA key.
+
+   ```
+   mkdir -m 700 ~/devid && cd ~/devid
+   openssl genrsa -out tn3270-devid.key 2048
+   openssl req -new -key tn3270-devid.key -out tn3270-devid.csr \
+     -subj "/emailAddress=you@example.com/CN=tn3270 Developer ID/C=US"
+   ```
+
+   The CSR's subject only identifies the request; Apple writes its own subject into the
+   certificate.
 2. **Developer ID Application certificate.** Go to developer.apple.com → Account →
    **Certificates, Identifiers & Profiles** → **Certificates** → **+**. Under **Software**, select
    **Developer ID** → **Continue** → **Developer ID Application** → **Continue**. If you are asked
    for a *Developer ID Certificate Intermediary*, choose **G2 Sub-CA (Xcode 11.4.1 or later)**.
-   **Choose File** (the CSR) → **Continue** → **Download** (a `.cer`). Double-click the `.cer` and
-   it appears under **My Certificates** in the login keychain, named
-   `Developer ID Application: <Name> (<TEAMID>)`. A team can hold up to five at a time.
-   **Validity:** Apple's *Replace Developer ID certificates* page says "Certificates issued from G2
-   are valid for one year and must be renewed annually" (checked 2026-11-10). The plan assumed
-   five years. Read the actual expiry date off the certificate in Keychain Access and record it
-   under *Rotation* below.
-3. **Export the `.p12`.** In Keychain Access → login → **My Certificates**, expand the certificate
-   and check that a private key is under it. If there is none, the export holds no key and signing
-   fails. Right-click the certificate → **Export** → format **Personal Information Exchange
-   (.p12)** → set a password. The base64 of that file is `MAC_CERT_P12_BASE64`, and the password
-   is `MAC_CERT_PASSWORD` (commands under *GitHub* below). Delete the `.p12` once both are set.
+   **Choose File** (`tn3270-devid.csr`) → **Continue** → **Download** (a DER `.cer`, typically
+   `developerID_application.cer`; move it into `~/devid`). A team can hold up to five at a time.
+   Check it, and fetch Apple's G2 intermediate so the `.p12` carries the whole chain:
+
+   ```
+   openssl x509 -inform DER -in developerID_application.cer -out tn3270-devid.pem
+   openssl x509 -in tn3270-devid.pem -noout -subject -enddate
+   curl -fsSLO https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer
+   openssl x509 -inform DER -in DeveloperIDG2CA.cer -out DeveloperIDG2CA.pem
+   ```
+
+   The subject's CN must read `Developer ID Application: <Name> (<TEAMID>)`. **Validity:** Apple's
+   *Replace Developer ID certificates* page says "Certificates issued from G2 are valid for one year
+   and must be renewed annually" (checked 2026-11-10). Record the `notAfter` date printed above
+   under *Rotation* below. The intermediate, measured 2026-11-11: subject
+   `CN=Developer ID Certification Authority, OU=G2`, issuer Apple Root CA, notAfter 2031-09-17,
+   SHA-256 `F1:6C:D3:C5:4C:7F:83:CE:A4:BF:1A:3E:6A:08:19:C8:AA:A8:E4:A1:52:8F:D1:44:71:5F:35:06:43:D2:DF:3A`.
+3. **Make the `.p12`.** It must hold the key, the certificate and the intermediate, and it must
+   use the legacy SHA1/3DES encryption, because macOS `security import` (which electron-builder
+   uses to load `CSC_LINK` into its temporary keychain) has historically refused OpenSSL 3's
+   default AES/PBKDF2 `.p12`s. Find out which `openssl` you have with `openssl version`:
+   - **LibreSSL** (macOS's own `/usr/bin/openssl`), which defaults to the legacy algorithms:
+
+     ```
+     openssl pkcs12 -export -inkey tn3270-devid.key -in tn3270-devid.pem \
+       -certfile DeveloperIDG2CA.pem -name "tn3270 Developer ID" -out tn3270-devid.p12
+     ```
+
+   - **OpenSSL 3** (Homebrew, Linux): the same command with `-legacy` added after `-export`.
+
+   It prompts for an export password: that is `MAC_CERT_PASSWORD`, and the base64 of the file is
+   `MAC_CERT_P12_BASE64` (commands under *GitHub* below). Check the bundle before uploading it:
+   `openssl pkcs12 -in tn3270-devid.p12 -info -noout` (add `-legacy` on OpenSSL 3) must ask for
+   the password and report a shrouded key bag and two certificates. Once both secrets are set,
+   keep `tn3270-devid.key` and `tn3270-devid.p12` somewhere offline if you want to re-use them
+   for the year, and `rm -rf ~/devid`. A lost key only means making a new certificate.
 4. **Team ID.** This is the ten characters in parentheses in the certificate's name:
    `APPLE_TEAM_ID`. The verifier requires the leaf authority to end in `(<TEAMID>)` and
    `TeamIdentifier` to equal it.
