@@ -567,8 +567,10 @@ on a tag.
 
 ### Rotation and revocation
 
-- **Developer ID certificate.** It expires one year after issue according to Apple's page for G2
-  (see Apple step 2). Record the real date here at setup. Before it expires, repeat Apple steps
+- **Developer ID certificate.** Apple's page for G2 says one year (see Apple step 2); the one
+  actually issued on 2026-11-11 (03:16 UTC) has `notAfter=Dec 11 03:16:32 2027 GMT`, i.e.
+  **13 months**. **Renew before 2027-12-11**, and record each new certificate's date here. Before
+  it expires, repeat Apple steps
   1-3 and re-set `MAC_CERT_P12_BASE64` and `MAC_CERT_PASSWORD`. Apps signed and notarized before
   the expiry keep installing and running. A new certificate is needed only to sign new builds. To
   **revoke** it (because the `.p12` leaked), go to Certificates, Identifiers & Profiles →
