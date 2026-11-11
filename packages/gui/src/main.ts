@@ -25,6 +25,7 @@ import { buildMenuTemplate, modelMenuStates, applyChoiceStates, type GeometryMen
 import { createTransferController } from './transferWindow.js';
 import { layoutFor } from './appRoot.js';
 import { stripElectronSwitches } from './electronSwitches.js';
+import { probeLine } from './probe.js';
 
 /**
  * Electron main: the Session, the socket and the window live here.
@@ -378,6 +379,15 @@ function explain(err: unknown, target?: ConnectTarget): string {
 }
 
 app.whenReady().then(async () => {
+  /*
+    A TENTH TEST SEAM: `TN3270_GUI_PROBE=1` prints the process's OWN confinement signals -- macOS's
+    `APP_SANDBOX_CONTAINER_ID` and Electron's `process.windowsStore` -- as one `probe: ...` stdout
+    line that scripts/store-probe.mjs judges (store-probe spec, section 2). It is the very first
+    thing app-ready does, before any window work, so the line still appears if a later step throws.
+  */
+  if (process.env['TN3270_GUI_PROBE'] === '1') {
+    process.stdout.write(`${probeLine(process.env, process as unknown as { windowsStore: boolean | undefined; mas: boolean | undefined })}\n`);
+  }
   /*
     macOS ignores a window's `icon`: the Dock shows the .app bundle's icon, which electron-builder
     makes from the same PNG. An UNPACKAGED run (`tn3270-gui` from npm, or `electron dist/main.js`)
