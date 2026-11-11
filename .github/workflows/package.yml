@@ -402,7 +402,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
+        # Round 3: macOS only. Windows was fully answered by run 43112504521 (SDK signtool, install,
+        # alias on PATH, alias and direct launches windowsStore=true, golden MATCH); its steps and
+        # scripts/spike/win-appx.ps1 stay, unchanged, for the record.
+        os: [macos-latest]
     runs-on: ${{ matrix.os }}
     # 60, not 45: round 2 adds the mas build (two more Electron zips, x64 and arm64, and a universal merge).
     timeout-minutes: 60
@@ -453,7 +456,7 @@ jobs:
               echo "SPIKE: package:gui mas (identity -): FAILED rc=$?"
             fi
           fi
-          echo "SPIKE: mas build downloaded: $(grep -o 'electron-v[^ ]*mas[^ ]*\.zip' "$RUNNER_TEMP/mas-build.log" | sort -u | tr '\n' ' ')"
+          echo "SPIKE: mas build packaged: $(grep -o 'platform=mas arch=[a-z0-9]*' "$RUNNER_TEMP/mas-build.log" | sort -u | tr '\n' ' ')"
           echo "SPIKE: mas build outputs: $(find artifacts/gui -maxdepth 2 \( -name '*.pkg' -o -name '*.app' \) | tr '\n' ' ')"
           echo "SPIKE: duration package:gui mas: $(( $(date +%s) - t0 ))s"
       # The appx ONLY (`-c.win.target=appx` replaces the config's nsis array: builder-util-runtime

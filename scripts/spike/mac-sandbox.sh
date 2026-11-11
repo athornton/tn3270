@@ -11,6 +11,16 @@
 #   B  ordinary Electron + com.apple.security.application-groups [TEAM.bundle id];
 #   C  Electron's MAS build (electron-builder `mas` target, unsigned) + B's entitlements + the
 #      ElectronTeamID Info.plist key Electron's MAS-submission guide pairs with that group.
+#
+# ROUND 2 (run 43112504521): A is answered -- every launch FATAL in mach_port_rendezvous_mac.cc:159.
+# B and C were INVALID: the group key lived in a variable named GROUPS, which is a BASH SPECIAL
+# ARRAY (the user's group ids) -- the assignment was silently ignored and "$GROUPS" expanded to
+# `20` (staff), so the B plists failed plutil -lint, signing failed, and B and C ran UNSANDBOXED
+# (probe `sandbox=none`). ROUND 3: B and C again, plus D (Electron's documented split: groups in the
+# MAIN app only). A variant whose plists fail lint, whose signing fails, or whose signature lacks
+# app-sandbox is INVALID and launches nothing; a golden counts only when the probe line names the
+# container (`sandbox=io.github.athornton.tn3270`).
+#
 # and per variant four launches, to separate what triggers a crash: bare, --user-data-dir only,
 # replay/shot env only, the full golden; plus the outside-read NEGATIVE only when the golden matched.
 #
@@ -132,16 +142,25 @@ launch() {
     if [ "$kind" = stay ]; then state="alive"; else state="hung (killed after ${secs}s)"; fi
   else
     wait "$p"; rc=$?
-    if [ "$kind" = exit ] && [ "$rc" = 0 ]; then state="exited rc=0"; else state="crashed rc=$rc after ~${n}s"; fi
+    if [ "$kind" = exit ] && [ "$rc" = 0 ]; then state="exited rc=0"
+    elif [ "$rc" = 0 ]; then state="exited early rc=0 after ~${n}s"
+    else state="crashed rc=$rc after ~${n}s"; fi
   fi
   reap
   echo "SPIKE: duration $label: $(( $(date +%s) - t0 ))s"
-  local probe golden got shot=''
+  local probe golden got shot='' sboxed
   probe="$(grep -m1 '^probe: ' "$out" || echo NONE)"
+  case "$probe" in
+    "probe: sandbox=$BUNDLE_ID "*) sboxed=YES; VARIANT_SANDBOXED=YES ;;
+    NONE) sboxed=unknown ;;
+    *) sboxed=NO; VARIANT_UNSANDBOXED=YES ;;
+  esac
   for e in "${envs[@]}"; do case "$e" in TN3270_GUI_SHOT=*) shot="${e#TN3270_GUI_SHOT=}" ;; esac; done
   if [ -n "$shot" ]; then
     got="$(cat "$shot.sha256" 2>/dev/null || echo '')"
     if [ -z "$got" ]; then golden=none; elif [ "$got" = "$WANT" ]; then golden=MATCH; else golden=DIFFERS; fi
+    # A golden counts only from a process that reported the container (round 2's B/C lesson).
+    if [ "$golden" = MATCH ] && [ "$sboxed" != YES ]; then golden="MATCH-UNSANDBOXED(does not count)"; fi
     echo "SPIKE: $label sha256: got=${got:-no-sha256-file} want=$WANT"
     echo "SPIKE: $label shot line: $(grep -m1 'shot: ' "$out" || echo NONE)"
   else
@@ -151,6 +170,7 @@ launch() {
   echo "::group::$label output"; cat "$out"; echo "::endgroup::"
   case "$state" in crashed*) crash_reports "$label" "$mark" ;; esac
   deny_lines "$label" "$start"
+  echo "SPIKE: $v $l sandboxed (probe): $sboxed"
   echo "SPIKE: $v $l: $state, probe=$probe, golden=$golden"
   LAST_GOLDEN=$golden
 }
@@ -164,7 +184,7 @@ plist() { # file, then extra <key>...</key><...> lines
     for k in "$@"; do echo "$k"; done
     echo '</dict></plist>'
   } > "$f"
-  plutil -lint "$f" || echo "SPIKE: plutil -lint $f FAILED"
+  plutil -lint "$f" || { echo "SPIKE: plutil -lint $f FAILED"; return 1; }
 }
 SANDBOX='<key>com.apple.security.app-sandbox</key><true/>'
 MAIN_KEYS="<key>com.apple.security.network.client</key><true/>
@@ -172,12 +192,18 @@ MAIN_KEYS="<key>com.apple.security.network.client</key><true/>
 <key>com.apple.security.cs.allow-jit</key><true/>
 <key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>"
 INHERIT='<key>com.apple.security.inherit</key><true/>'
-GROUPS="<key>com.apple.security.application-groups</key><array><string>$TEAM_ID.$BUNDLE_ID</string></array>"
+# NOT `GROUPS`: that is a bash special array (round 2's bug, see the header).
+APPGROUPS="<key>com.apple.security.application-groups</key><array><string>$TEAM_ID.$BUNDLE_ID</string></array>"
 
 # A fresh copy of $2 as variant $1, signed inside-out with $3 (main) and $4 (inherit); a 5th
 # argument `teamid` also sets ElectronTeamID in Info.plist BEFORE signing. Sets APP and EXE.
 prepare() {
-  local v=$1 src=$2 main=$3 inherit=$4 extra=${5:-}
+  local v=$1 src=$2 main=$3 inherit=$4 extra=${5:-} bad=''
+  echo "SPIKE: $v main entitlements: $(tr -d '\n' < "$main" | sed 's/.*<dict>//; s#</dict>.*##')"
+  echo "SPIKE: $v inherit entitlements: $(tr -d '\n' < "$inherit" | sed 's/.*<dict>//; s#</dict>.*##')"
+  plutil -lint "$main" || bad="$bad main plist fails plutil -lint;"
+  plutil -lint "$inherit" || bad="$bad inherit plist fails plutil -lint;"
+  if [ -n "$bad" ]; then echo "SPIKE: $v: INVALID ($bad)"; return 1; fi
   rm_container
   rm -rf "$W/$v"; mkdir -p "$W/$v"
   APP="$W/$v/TN3270.app"; EXE="$APP/Contents/MacOS/TN3270"
@@ -190,11 +216,11 @@ prepare() {
     echo "SPIKE: $v ElectronTeamID set: $(/usr/libexec/PlistBuddy -c 'Print :ElectronTeamID' "$APP/Contents/Info.plist" 2>&1)"
   fi
   echo "SPIKE: $v Frameworks: $(ls "$APP/Contents/Frameworks" | tr '\n' ' ')"
-  find "$APP/Contents/Frameworks" -name '*.dylib' -print0 | xargs -0 -n1 codesign --force -s - || echo "SPIKE: $v dylib signing rc=$?"
+  find "$APP/Contents/Frameworks" -name '*.dylib' -print0 | xargs -0 -n1 codesign --force -s - || { echo "SPIKE: $v dylib signing rc=$?"; bad="$bad dylib signing failed;"; }
   # --deep on frameworks only: Electron Framework.framework nests executables (Helpers/chrome_crashpad_handler).
-  find "$APP/Contents/Frameworks" -maxdepth 1 -name '*.framework' -print0 | xargs -0 -n1 codesign --force --deep -s - || echo "SPIKE: $v framework signing rc=$?"
-  find "$APP/Contents/Frameworks" -maxdepth 1 -name '*.app' -print0 | xargs -0 -n1 codesign --force -s - --entitlements "$inherit" || echo "SPIKE: $v helper signing rc=$?"
-  codesign --force -s - --entitlements "$main" "$APP" || echo "SPIKE: $v app signing rc=$?"
+  find "$APP/Contents/Frameworks" -maxdepth 1 -name '*.framework' -print0 | xargs -0 -n1 codesign --force --deep -s - || { echo "SPIKE: $v framework signing rc=$?"; bad="$bad framework signing failed;"; }
+  find "$APP/Contents/Frameworks" -maxdepth 1 -name '*.app' -print0 | xargs -0 -n1 codesign --force -s - --entitlements "$inherit" || { echo "SPIKE: $v helper signing rc=$?"; bad="$bad helper signing failed;"; }
+  codesign --force -s - --entitlements "$main" "$APP" || { echo "SPIKE: $v app signing rc=$?"; bad="$bad app signing failed;"; }
   codesign -d --entitlements :- "$APP" > "$W/$v.ent" 2>&1 || true
   cat "$W/$v.ent"
   echo "SPIKE: $v app-sandbox in signature: $(has com.apple.security.app-sandbox "$W/$v.ent")"
@@ -206,11 +232,15 @@ prepare() {
   done
   codesign --verify --deep --strict --verbose=2 "$APP" 2>&1; echo "SPIKE: $v codesign --verify --deep --strict rc=$?"
   codesign -dv "$APP" 2>&1 | grep -E '^(Identifier|Signature|Format)=' || true
+  grep -q com.apple.security.app-sandbox "$W/$v.ent" || bad="$bad no app-sandbox in the app's signature;"
+  if [ -n "$bad" ]; then echo "SPIKE: $v: INVALID ($bad)"; return 1; fi
+  echo "SPIKE: $v: valid (plists lint, signing rc=0, app-sandbox signed)"
 }
 
 # The variant's launches, in order. The bare launch makes the container; the trace is staged into it.
 launches() {
   local v=$1 D="$C/Data"
+  VARIANT_SANDBOXED=NO; VARIANT_UNSANDBOXED=NO
   launch "$v" bare stay 20 TN3270_GUI_PROBE=1 -- --disable-gpu
   if [ -d "$D" ]; then echo "SPIKE: $v container appeared: YES"; else echo "SPIKE: $v container appeared: NO"; mkdir -p "$D"; fi
   if cp "$TRACE" "$D/"; then echo "SPIKE: $v staging into the container: OK"; else echo "SPIKE: $v staging into the container: FAILED rc=$?"; fi
@@ -224,10 +254,16 @@ launches() {
     launch "$v" outside exit 60 TN3270_GUI_PROBE=1 "TN3270_GUI_REPLAY=$TRACE" "TN3270_GUI_SHOT=$D/shot-outside.png" TN3270_GUI_SHOT_MS=2500 \
       -- $SHOT_SWITCHES "--user-data-dir=$D/ud-outside" $HOST_ARGS
     echo "SPIKE: $v outside read denied (EPERM in output): $(grep -m1 -E 'EPERM|Operation not permitted|EACCES' "$W/$v-outside.out" || echo 'NO such line')"
+    # deny.txt is the outside launch's own (deny_lines rewrites it per launch).
+    echo "SPIKE: $v outside read denied (kernel deny naming the trace): $(grep -m1 'synthetic-ispf-like.trace' "$W/deny.txt" || echo 'NO such line')"
+    echo "SPIKE: $v outside golden (must NOT be MATCH): $LAST_GOLDEN"
   else
     echo "SPIKE: $v outside launch: SKIPPED (golden was $LAST_GOLDEN)"
   fi
   ls -la "$D" 2>&1 || true
+  # YES only if some launch reported the container and none reported sandbox=none.
+  if [ "$VARIANT_SANDBOXED" = YES ] && [ "$VARIANT_UNSANDBOXED" = NO ]; then echo "SPIKE: $v sandboxed (probe): YES"
+  else echo "SPIKE: $v sandboxed (probe): NO (container id seen: $VARIANT_SANDBOXED; sandbox=none seen: $VARIANT_UNSANDBOXED)"; fi
 }
 
 # ---------------------------------------------------------------------------------------------
@@ -249,29 +285,33 @@ for a in "$W/zip/TN3270.app" "$MAS_SRC"; do
 done
 plist "$W/A-main.plist" "$SANDBOX" "$MAIN_KEYS"
 plist "$W/A-inherit.plist" "$SANDBOX" "$INHERIT"
-plist "$W/B-main.plist" "$SANDBOX" "$MAIN_KEYS" "$GROUPS"
-plist "$W/B-inherit.plist" "$SANDBOX" "$INHERIT" "$GROUPS"
+plist "$W/B-main.plist" "$SANDBOX" "$MAIN_KEYS" "$APPGROUPS"
+plist "$W/B-inherit.plist" "$SANDBOX" "$INHERIT" "$APPGROUPS"
+# D: Electron's Mac App Store submission guide (docs/tutorial/mac-app-store-submission-guide.md,
+# electron/electron main, fetched 2026-11-11): application-groups in the PARENT (main app) file
+# ONLY; the child file is exactly app-sandbox + inherit. Our main keeps network.client,
+# user-selected and the JIT keys on top of the guide's two.
+plist "$W/D-main.plist" "$SANDBOX" "$MAIN_KEYS" "$APPGROUPS"
+plist "$W/D-inherit.plist" "$SANDBOX" "$INHERIT"
 end setup
 
 # ---------------------------------------------------------------------------------------------
-begin variant-A
-prepare A "$W/zip/TN3270.app" "$W/A-main.plist" "$W/A-inherit.plist"
-launches A
-end variant-A
+echo "SPIKE: variant A: SKIPPED in round 3 (answered by run 43112504521: every launch FATAL in mach_port_rendezvous_mac.cc:159)"
 
 begin variant-B
-prepare B "$W/zip/TN3270.app" "$W/B-main.plist" "$W/B-inherit.plist"
-launches B
+if prepare B "$W/zip/TN3270.app" "$W/B-main.plist" "$W/B-inherit.plist"; then launches B; fi
 end variant-B
 
-begin variant-C
-if [ -d "$MAS_SRC" ]; then
-  prepare C "$MAS_SRC" "$W/B-main.plist" "$W/B-inherit.plist" teamid
-  launches C
-else
-  echo "SPIKE: variant C: SKIPPED (no mas app; see the mas package step)"
-fi
-end variant-C
+for v in C D; do
+  begin "variant-$v"
+  if [ -d "$MAS_SRC" ]; then
+    ent=B; [ "$v" = D ] && ent=D   # C: B's plists (groups in both); D: the guide's split
+    if prepare "$v" "$MAS_SRC" "$W/$ent-main.plist" "$W/$ent-inherit.plist" teamid; then launches "$v"; fi
+  else
+    echo "SPIKE: variant $v: SKIPPED (no mas app; see the mas package step)"
+  fi
+  end "variant-$v"
+done
 
 rm_container
 reap
