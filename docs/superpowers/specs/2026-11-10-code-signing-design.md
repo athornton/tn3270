@@ -168,3 +168,36 @@ GitHub release with no new wiring.
 
 Linux signing (AppImage/deb GPG), the Microsoft Store/MSIX, auto-update signature verification,
 and signing the dmg.
+
+## Amendment 2026-11-11: Windows CI signing dropped
+
+**Decision (the owner, 2026-11-11):** Windows is not signed in CI. The design above signed the
+NSIS installer through Azure Artifact Signing, but the owner has no Azure subscription and has
+decided not to use Azure. Windows is instead to ship through the **Microsoft Store as an MSIX**,
+which Microsoft signs: a later, separately designed project (this spec's *Out of scope* listed
+it). The unsigned NSIS `.exe` stays a GitHub release artifact for people who prefer it.
+
+**Why it had to change now, not later:** with `sign: true` on `windows-latest`, every `v*` tag run
+would have run `azure/login` with no Azure app behind it, failed the package job, and so blocked
+the release, because `release-check` `needs: package`.
+
+**What changes** (supersedes the Windows parts of sections 2-4 and of *Testing*):
+
+- `windows-latest` loses `sign: true` and gets a new matrix key, `verify: unsigned`. A separate
+  verify step (`if: matrix.verify`) runs `verify-signatures.mjs --expect ${{ matrix.verify }}` on
+  every run, tags included, so a half-configured signing setup that signs anyway is a failure.
+  macOS is unchanged: `sign: true` on `macos-latest`, and its verify mode still comes from the ref
+  and the dispatch input alone, never `matrix.sign`.
+- The `azure/login` step, the `AZURE_SIGNING_*` env on package:gui and the verify step, and the
+  package job's `id-token: write` (azure/login was its only user; `publish` has its own) are
+  removed.
+- Kept, inert and unit-tested: `signing.cjs`'s win32 branch (`azureSignOptions`) and the
+  verifier's Windows `signed` mode. Both say in their comments that CI does not use them.
+- The release-notes header says the Windows installer is unsigned, with SmartScreen's *More info
+  → Run anyway*. The docs move the Azure walkthrough to an *Abandoned* note
+  (`docs/releasing.md`).
+- The *Owed live* check is now the signed mac dmg and zip only; the Azure billing risk under
+  *Known gaps* no longer applies.
+
+macOS signing is unaffected and proven: CI run 42959265358 signed, notarized, stapled, verified
+and launched the app.
