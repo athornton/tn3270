@@ -28,9 +28,10 @@ runs on every run: on mac, `--expect signed` on a tag or signing dispatch and `-
 otherwise (from the ref and input, never `matrix.sign`); on Windows, always `--expect unsigned`.
 `scripts/release-notes.mjs`'s header says the mac app is signed (notarized, stapled; dmg unsigned
 by design), the Windows installer is unsigned (SmartScreen: *More info* → *Run anyway*) and Linux
-is unsigned; `packages/core/test/releaseNotes.test.ts` requires that wording. **Owed, in order:**
-confirm `environment: ''` creates no deployment (Task 6); then the merge, which removes the
-environment's temporary `signing` branch rule (Task 10). The Developer ID certificate expires
+is unsigned; `packages/core/test/releaseNotes.test.ts` requires that wording. Measured: `environment: ''`
+creates no deployment (run 42947618085), and a missing `APPLE_API_ISSUER` fails the mac build at
+config time (run 43060308089). **Owed:** the merge, which removes the environment's temporary
+`signing` branch rule (Task 10); then the Store/MSIX design. The Developer ID certificate expires
 2027-12-11 (`docs/releasing.md`, *Rotation*).
 
 **2026-11-09, PREVIOUS: THE GITHUB RELEASE AND THE CHANGELOG ARE BUILT, on branch `gh-release`, not

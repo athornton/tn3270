@@ -345,10 +345,11 @@ that signed it anyway fails the run instead of going unnoticed.
 
 **Measured by the signed mac run (42959265358):** the exact signed wording of `codesign -dv`,
 `codesign --verify`, `spctl` and `xcrun stapler validate`; its captures replaced the provisional
-mac fixtures (commit 07a64aa). **Still not measured:**
-
-- Whether `environment: ''` really means no environment, so that no `signing` deployment is
-  recorded on an ordinary push (plan Task 6).
+mac fixtures (commit 07a64aa). **Also measured:** `environment: ''` means no environment: after
+the unsigned run 42947618085 the `signing` environment had zero deployments. And a signing run
+with the `APPLE_API_ISSUER` variable deleted (run 43060308089) failed at
+`package:gui` with `TN3270_SIGN=1 but APPLE_API_ISSUER is not set`, before anything was signed or
+sent to Apple.
 
 ### One-time setup: Apple
 
