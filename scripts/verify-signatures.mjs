@@ -6,6 +6,8 @@
  *
  * `signed` needs APPLE_TEAM_ID (macOS) or AZURE_SIGNING_PUBLISHER (Windows). `unsigned` runs on
  * every non-release push, so the checks are shown to REJECT an unsigned build continuously.
+ * Windows `signed` is kept and unit-tested but unused: CI never signs Windows (spec amendment
+ * 2026-11-11), so package.yml runs Windows `unsigned` on every run, tags included.
  *
  * macOS: the one `TN3270-*-mac-universal.zip` is unpacked with `ditto -x -k` (as package-smoke
  * does; it keeps the bundle's symlinks) and the one `.dmg` is mounted read-only; the `TN3270.app`

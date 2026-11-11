@@ -167,14 +167,28 @@ describe('package.yml release wiring', () => {
   /** The package job's lines that are not comments: prose may name an expression it does not use. */
   const packageCode = () => jobBlock('package').split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
 
-  it('marks exactly macos-latest and windows-latest as signing runners', () => {
-    // The matrix only: from `include:` to the job's `runs-on:`, so no step text is read as an entry.
+  /** The matrix entries, from `include:` to the job's `runs-on:`, so no step text is read as one. */
+  const matrixEntries = () => {
     const block = jobBlock('package');
     const matrix = block.slice(block.indexOf('        include:\n'), block.indexOf('\n    runs-on:'));
-    const entries = matrix.split(/\n          - (?:os|name): /).slice(1);
+    return matrix.split(/\n          - (?:os|name): /).slice(1);
+  };
+  const entryName = (e: string) => e.split('\n')[0]!.trim();
+
+  it('marks exactly macos-latest as a signing runner', () => {
+    // Windows CI signing is dropped (spec amendment 2026-11-11): a `sign: true` on windows-latest
+    // would send every tag run to a signing setup that does not exist, and block the release.
+    const entries = matrixEntries();
     expect(entries.length, 'matrix entries').toBe(6);
-    const signing = entries.filter((e) => /\n\s+sign: true\b/.test(e)).map((e) => e.split('\n')[0]!.trim());
-    expect(signing.sort()).toEqual(['macos-latest', 'windows-latest']);
+    const signing = entries.filter((e) => /\n\s+sign:/.test(e)).map(entryName);
+    expect(signing).toEqual(['macos-latest']);
+    expect(entries.find((e) => entryName(e) === 'macos-latest')).toMatch(/^\s+sign: true$/m);
+  });
+
+  it('windows-latest, and only it, verifies in a FIXED mode: unsigned', () => {
+    const verifying = matrixEntries().filter((e) => /\n\s+verify:/.test(e));
+    expect(verifying.map(entryName)).toEqual(['windows-latest']);
+    expect(verifying[0]).toMatch(/^\s+verify: unsigned$/m);
   });
 
   it('has a boolean sign input on workflow_dispatch, default false', () => {
@@ -190,15 +204,21 @@ describe('package.yml release wiring', () => {
     const block = jobBlock('package');
     // Up to the first `))`, which is where SIGNS ends; a lazy match to ` &&` would stop inside it.
     const uses = [...block.matchAll(/\$\{\{ (matrix\.sign && \(.*?\)\)) && /g)].map((m) => m[1]);
-    expect(uses.length).toBe(5); // environment, the .p8 step, azure/login, TN3270_SIGN, auto-discovery
+    expect(uses.length).toBe(4); // environment, the .p8 step, TN3270_SIGN, auto-discovery
     for (const u of uses) expect(u).toBe(SIGNS);
     expect(block).toMatch(new RegExp(`\\n    environment: \\$\\{\\{ ${reEscape(SIGNS)} && 'signing' \\|\\| '' \\}\\}\\n`));
-    // No sixth, differently written test of the input: those five plus the verify step's mode.
-    expect(packageCode().match(/\binputs\.sign\b/g)?.length).toBe(6);
+    // No fifth, differently written test of the input: those four plus the verify step's mode.
+    expect(packageCode().match(/\binputs\.sign\b/g)?.length).toBe(5);
+  });
+
+  const verifySteps = () => jobBlock('package').split(/\n      - /).filter((s) => s.includes('verify-signatures.mjs'));
+
+  it('there are exactly two verify steps: the signing runner one, and the fixed-mode one', () => {
+    expect(verifySteps().map((s) => s.split('\n')[0])).toEqual(['if: matrix.sign', 'if: matrix.verify']);
   });
 
   it('the verify step decides its mode from the ref and the input alone, never matrix.sign', () => {
-    const step = jobBlock('package').split(/\n      - /).find((s) => s.includes('verify-signatures.mjs'));
+    const step = verifySteps().find((s) => s.startsWith('if: matrix.sign\n'));
     expect(step, 'no verify-signatures step').toBeDefined();
     expect(step).toMatch(/^if: matrix\.sign\n/);
     const run = /run: (.*verify-signatures\.mjs.*)/.exec(step!)![1]!;
@@ -207,27 +227,36 @@ describe('package.yml release wiring', () => {
     expect(run).toBe(`node scripts/verify-signatures.mjs --expect \${{ ${mode} && 'signed' || 'unsigned' }} artifacts/gui`);
   });
 
+  it('the fixed-mode verify step takes its mode from matrix.verify alone, never the ref or the input', () => {
+    const step = verifySteps().find((s) => s.startsWith('if: matrix.verify\n'));
+    expect(step, 'no fixed-mode verify-signatures step').toBeDefined();
+    const run = /run: (.*verify-signatures\.mjs.*)/.exec(step!)![1]!;
+    expect(run).toBe('node scripts/verify-signatures.mjs --expect ${{ matrix.verify }} artifacts/gui');
+  });
+
   it('the verify step runs after package:gui and before package-smoke', () => {
     const steps = jobBlock('package').split(/\n      - /);
     const at = (re: RegExp) => steps.findIndex((s) => re.test(s));
     const gui = at(/run: npm run package:gui\b/);
-    const verify = at(/run: node scripts\/verify-signatures\.mjs\b/);
     const smoke = at(/run: .*node scripts\/package-smoke\.mjs\b/);
-    for (const [name, i] of Object.entries({ gui, verify, smoke })) expect(i, name).toBeGreaterThanOrEqual(0);
-    expect(gui).toBeLessThan(verify);
-    expect(verify).toBeLessThan(smoke);
+    const verifies = steps.flatMap((s, i) => (/run: node scripts\/verify-signatures\.mjs\b/.test(s) ? [i] : []));
+    expect(verifies.length, 'verify steps').toBe(2);
+    for (const [name, i] of Object.entries({ gui, smoke })) expect(i, name).toBeGreaterThanOrEqual(0);
+    for (const verify of verifies) {
+      expect(gui).toBeLessThan(verify);
+      expect(verify).toBeLessThan(smoke);
+    }
   });
 
-  it('the package job may mint an OIDC token, and reads contents -- nothing else', () => {
-    // A job-level `permissions:` sets every permission it does not list to none.
+  it('the package job reads contents -- nothing else, and no OIDC token', () => {
+    // A job-level `permissions:` sets every permission it does not list to none. id-token went
+    // with azure/login (Windows signing dropped, spec amendment 2026-11-11).
     const perms = /\n    permissions:\n((?:      \S.*\n)+)/.exec(jobBlock('package'))?.[1];
     expect(perms, 'a permissions: block').toBeDefined();
-    expect(perms!.trimEnd().split('\n').map((l) => l.trim()).sort()).toEqual(['contents: read', 'id-token: write']);
+    expect(perms!.trimEnd().split('\n').map((l) => l.trim())).toEqual(['contents: read']);
   });
 
-  it('pins azure/login by full commit SHA', () => {
-    // The COMMIT v3.1.0 points at. v3.1.0 is an annotated tag: refs/tags/v3.1.0 names the tag
-    // object 053f7285..., which is not a commit (gh api, 2026-11-10).
-    expect(wf).toMatch(/uses: azure\/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3\.1\.0\n/);
+  it('wires no Azure signing: no azure/login, no AZURE_* variable', () => {
+    expect(packageCode()).not.toMatch(/azure\/login|AZURE_/);
   });
 });

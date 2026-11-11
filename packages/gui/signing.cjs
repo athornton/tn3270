@@ -10,6 +10,12 @@
  *  - with no identity and CSC_IDENTITY_AUTO_DISCOVERY=false the app is left unsigned with no error
  *    (codeSign/macCodeSign.js findIdentity). `forceCodeSigning` turns that, and its Windows
  *    equivalent (winPackager.js), into a failure.
+ *
+ * WINDOWS SIGNING IS NOT WIRED IN CI (spec amendment 2026-11-11). The win32 branch below (Azure
+ * Artifact Signing) is kept, unit-tested, but nothing sets TN3270_SIGN=1 on Windows: there is no
+ * Azure subscription, package.yml has no azure/login and passes no AZURE_SIGNING_* variable, and
+ * windows-latest verifies its installer `unsigned` on every run. Windows is planned to ship signed
+ * through the Microsoft Store as an MSIX (Microsoft signs it), a separate design.
  */
 const fs = require('node:fs');
 

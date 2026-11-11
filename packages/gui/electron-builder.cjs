@@ -127,6 +127,7 @@ module.exports = {
     target: [{ target: 'nsis', arch: 'x64' }],
     // Signing mode only: azureSignOptions (Azure Artifact Signing) and forceCodeSigning. Present at
     // all, azureSignOptions signs every Windows build, which is why it lives behind the switch.
+    // CI never turns it on: Windows signing is not wired (signing.cjs header).
     ...signing.win,
   },
 

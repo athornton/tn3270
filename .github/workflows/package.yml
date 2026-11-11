@@ -10,9 +10,13 @@
 #   npm         upload the npm tarballs (one job, so they are not uploaded five times)
 #   gui         upload this job's native artifacts
 #   sign        a SIGNING runner (code signing plan, Task 5; spec docs/superpowers/specs/
-#               2026-11-10-code-signing-design.md, section 2): macos-latest and windows-latest, the
-#               two that upload mac/Windows installers. It signs only on a `v*` tag or a dispatch
-#               with `sign` ticked, and always runs verify-signatures.mjs (--expect unsigned otherwise)
+#               2026-11-10-code-signing-design.md, section 2): macos-latest only, the one that
+#               uploads the mac installers. It signs only on a `v*` tag or a dispatch with `sign`
+#               ticked, and always runs verify-signatures.mjs (--expect unsigned otherwise)
+#   verify      a FIXED verify-signatures.mjs mode for a runner that never signs: windows-latest,
+#               `unsigned` on every run, tags included (spec amendment 2026-11-11: Windows CI
+#               signing is dropped; a Microsoft Store MSIX route is planned). A Windows installer
+#               that came out signed anyway -- a half-configured signing setup -- fails the run.
 #   pty         run packages/tui/scripts/pty-smoke.py (default, --oversize-auto, --prompt) after
 #               the build -- a real pty and a fork, which only Linux runners here give it cheaply;
 #               the two ubuntu jobs (the parity runner and the Node floor) carry it, so both the
@@ -32,10 +36,6 @@
 # download v8.0.2 -- bumped to @actions/artifact 6.3.1 together for the same fix); nothing in either
 # changelog back to the v4 artifact-service rewrite says a download major requires the matching
 # upload major, so v8 reads what upload-artifact@v7 (used throughout this file) writes.
-# azure/login, a third-party action (the only one here) that is handed an OIDC token, is pinned by
-# full COMMIT SHA, not a major: v3.1.0, releases/latest on 2026-11-10. Its tag is annotated, so
-# refs/tags/v3.1.0 names the tag object 053f7285eb20bf5469ef084617b0b24d3cec53fc; the commit it
-# points at is a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 (gh api .../git/tags/<sha>, 2026-11-10).
 #
 # TRUSTED PUBLISHING (npm trusted publishing plan, Tasks 4-6; design:
 # docs/superpowers/specs/2026-11-09-npm-trusted-publishing-design.md). A `vX.Y.Z` tag push runs the
@@ -72,7 +72,7 @@ on:
   workflow_dispatch:
     inputs:
       sign:
-        description: 'Sign and notarize the macOS and Windows installers (uses environment signing)'
+        description: 'Sign and notarize the macOS app (uses environment signing; Windows is never signed)'
         type: boolean
         default: false
 env:
@@ -125,8 +125,8 @@ jobs:
             builder: --win --x64
             node: '22'
             gui: true
-            # Signs the installer and the exes it installs, through Azure Artifact Signing.
-            sign: true
+            # Never signed in CI (spec amendment 2026-11-11), so verified unsigned on EVERY run.
+            verify: unsigned
           - name: ubuntu-latest-node20.19
             os: ubuntu-latest
             xvfb: 'xvfb-run -a -s "-screen 0 1280x1024x24"'
@@ -138,16 +138,15 @@ jobs:
             nodeopts: --experimental-websocket
     runs-on: ${{ matrix.os }}
     # Signing runs only (code signing spec, section 2): v* tags, or a dispatch with sign ticked,
-    # on the two runners that build mac/Windows installers. '' = no environment (MEASURED in Task 6).
+    # on the one runner that builds the mac installers. '' = no environment (MEASURED in Task 6).
     environment: ${{ matrix.sign && (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.sign)) && 'signing' || '' }}
-    # id-token: azure/login's OIDC exchange. The federated credential trusts only
-    # repo:athornton/tn3270:environment:signing, so a token from any other job is refused.
-    # contents: read is all the other steps need: checkout reads the repository; setup-node's npm
+    # contents: read is all the steps need: checkout reads the repository; setup-node's npm
     # cache, actions/cache and upload-artifact use the runner's own ACTIONS_RUNTIME_TOKEN, not
-    # GITHUB_TOKEN; package:gui is `--publish never`; the release-notes dry run calls no gh.
+    # GITHUB_TOKEN; package:gui is `--publish never`; the release-notes dry run calls no gh. No
+    # id-token: mac signing uses secrets, not OIDC (azure/login, its one user, is gone with
+    # Windows signing); publish mints its own.
     permissions:
       contents: read
-      id-token: write
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -211,13 +210,6 @@ jobs:
           echo "APPLE_API_KEY=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
         env:
           APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
-      - if: ${{ matrix.sign && (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.sign)) && runner.os == 'Windows' }}
-        name: Azure login (OIDC) for Artifact Signing
-        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
-        with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
       - if: matrix.builder
         run: npm run package:gui -- ${{ matrix.builder }}
         env:
@@ -228,10 +220,6 @@ jobs:
           CSC_KEY_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
           APPLE_API_KEY_ID: ${{ vars.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ vars.APPLE_API_ISSUER }}
-          AZURE_SIGNING_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
-          AZURE_SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
-          AZURE_SIGNING_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
-          AZURE_SIGNING_PUBLISHER: ${{ vars.AZURE_SIGNING_PUBLISHER }}
       # Fail-closed both ways (spec section 3). The MODE comes from the ref and the input alone, not
       # matrix.sign, so a broken signing expression fails a tag run rather than passing it unsigned.
       - if: matrix.sign
@@ -239,9 +227,15 @@ jobs:
         run: node scripts/verify-signatures.mjs --expect ${{ (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.sign)) && 'signed' || 'unsigned' }} artifacts/gui
         env:
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
-          AZURE_SIGNING_PUBLISHER: ${{ vars.AZURE_SIGNING_PUBLISHER }}
           # Raw codesign/spctl/Authenticode text in the log: what a failure is diagnosed from,
           # and where the test fixtures are captured from (Tasks 6 and 8).
+          VERIFY_SIGNATURES_ECHO: '1'
+      # A runner that never signs (windows-latest): its matrix `verify` mode, on every run, tags
+      # included -- never the ref, which would expect `signed` from a build nothing signs.
+      - if: matrix.verify
+        name: verify signatures (fixed mode)
+        run: node scripts/verify-signatures.mjs --expect ${{ matrix.verify }} artifacts/gui
+        env:
           VERIFY_SIGNATURES_ECHO: '1'
       - if: matrix.builder
         run: ${{ matrix.xvfb }} node scripts/package-smoke.mjs
