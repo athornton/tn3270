@@ -1,0 +1,24 @@
+# Captured: CI run 42959265358, 2026-11-11 (macos, signed+notarized build, --expect signed), exit 0.
+# codesign --verify --deep --strict --verbose=2 <zip>/TN3270.app
+--prepared:/private/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/tn3270-sig-B4gkbO/zip/TN3270.app/Contents/Frameworks/ReactiveObjC.framework/Versions/Current/.
+--validated:/private/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/tn3270-sig-B4gkbO/zip/TN3270.app/Contents/Frameworks/ReactiveObjC.framework/Versions/Current/.
+--prepared:/private/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/tn3270-sig-B4gkbO/zip/TN3270.app/Contents/Frameworks/TN3270 Helper (Renderer).app
+--validated:/private/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/tn3270-sig-B4gkbO/zip/TN3270.app/Contents/Frameworks/TN3270 Helper (Renderer).app
+--prepared:/private/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/tn3270-sig-B4gkbO/zip/TN3270.app/Contents/Frameworks/TN3270 Helper.app
+--validated:/private/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/tn3270-sig-B4gkbO/zip/TN3270.app/Contents/Frameworks/TN3270 Helper.app
+--prepared:/private/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/tn3270-sig-B4gkbO/zip/TN3270.app/Contents/Frameworks/Squirrel.framework/Versions/Current/.
+--validated:/private/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/tn3270-sig-B4gkbO/zip/TN3270.app/Contents/Frameworks/Squirrel.framework/Versions/Current/.
+--prepared:/private/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/tn3270-sig-B4gkbO/zip/TN3270.app/Contents/Frameworks/TN3270 Helper (Plugin).app
+--validated:/private/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/tn3270-sig-B4gkbO/zip/TN3270.app/Contents/Frameworks/TN3270 Helper (Plugin).app
+--prepared:/private/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/tn3270-sig-B4gkbO/zip/TN3270.app/Contents/Frameworks/Mantle.framework/Versions/Current/.
+--prepared:/private/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/tn3270-sig-B4gkbO/zip/TN3270.app/Contents/Frameworks/TN3270 Helper (GPU).app
+--validated:/private/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/tn3270-sig-B4gkbO/zip/TN3270.app/Contents/Frameworks/Mantle.framework/Versions/Current/.
+--validated:/private/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/tn3270-sig-B4gkbO/zip/TN3270.app/Contents/Frameworks/TN3270 Helper (GPU).app
+--prepared:/private/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/tn3270-sig-B4gkbO/zip/TN3270.app/Contents/Frameworks/Electron Framework.framework/Versions/Current/.
+--prepared:/private/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/tn3270-sig-B4gkbO/zip/TN3270.app/Contents/Frameworks/Electron Framework.framework/Versions/Current/Helpers/app_shim_loader
+--validated:/private/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/tn3270-sig-B4gkbO/zip/TN3270.app/Contents/Frameworks/Electron Framework.framework/Versions/Current/Helpers/app_shim_loader
+--prepared:/private/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/tn3270-sig-B4gkbO/zip/TN3270.app/Contents/Frameworks/Electron Framework.framework/Versions/Current/Helpers/chrome_crashpad_handler
+--validated:/private/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/tn3270-sig-B4gkbO/zip/TN3270.app/Contents/Frameworks/Electron Framework.framework/Versions/Current/Helpers/chrome_crashpad_handler
+--validated:/private/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/tn3270-sig-B4gkbO/zip/TN3270.app/Contents/Frameworks/Electron Framework.framework/Versions/Current/.
+/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/tn3270-sig-B4gkbO/zip/TN3270.app: valid on disk
+/var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/tn3270-sig-B4gkbO/zip/TN3270.app: satisfies its Designated Requirement

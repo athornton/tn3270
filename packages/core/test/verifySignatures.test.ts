@@ -10,11 +10,18 @@ const fx = (n: string) => readFileSync(fileURLToPath(new URL(`./fixtures/signatu
 /** `text` is stdout+stderr; by default it is all stdout. */
 const ok = (text = '', stdout = text): Ran => ({ status: 0, stdout, text });
 const no = (text = '', stdout = text): Ran => ({ status: 1, stdout, text });
-const SIGNED_MAC = () => ({
-  verify: ok(), display: ok(fx('codesign-dv-signed.txt')), spctl: ok(fx('spctl-notarized.txt')), stapler: ok('The validate action worked!'),
-});
 /** `status` and a fixture's text, all on stdout (the split only matters to pwsh). */
 const ran = (status: number, text: string): Ran => ({ status, stdout: text, text });
+/** The real team of the Developer ID certificate that signed CI run 42959265358. */
+const TEAM = 'H68TN685J4';
+/**
+ * The signed, notarized, stapled build's four answers, CAPTURED (CI run 42959265358, 2026-11-11,
+ * macOS, --expect signed): every one exit 0.
+ */
+const SIGNED_MAC = () => ({
+  verify: ran(0, fx('codesign-verify-signed.txt')), display: ran(0, fx('codesign-dv-signed.txt')),
+  spctl: ran(0, fx('spctl-notarized.txt')), stapler: ran(0, fx('stapler-validated.txt')),
+});
 /**
  * The unsigned build's four answers, CAPTURED with their exit statuses (CI run 42844605289,
  * macOS, --expect unsigned): codesign --verify 1, codesign -dv 0, spctl 3, stapler 65.
@@ -24,11 +31,11 @@ const UNSIGNED_MAC = () => ({
   spctl: ran(3, fx('spctl-rejected.txt')), stapler: ran(65, fx('stapler-no-ticket.txt')),
 });
 
-describe('parseCodesignDisplay (signed: provisional fixture; ad-hoc: CI capture)', () => {
+describe('parseCodesignDisplay (CI captures)', () => {
   it('reads the authority chain, team and runtime flag of a Developer ID signature', () => {
     expect(parseCodesignDisplay(fx('codesign-dv-signed.txt'))).toEqual({
-      authorities: ['Developer ID Application: Adam Thornton (ABCDE12345)', 'Developer ID Certification Authority', 'Apple Root CA'],
-      teamId: 'ABCDE12345', runtime: true, adhoc: false,
+      authorities: ['Developer ID Application: ADAM JUSTEI- THORNTON (H68TN685J4)', 'Developer ID Certification Authority', 'Apple Root CA'],
+      teamId: TEAM, runtime: true, adhoc: false,
     });
   });
   it('reads an ad-hoc signature as no authorities, no team, adhoc', () => {
@@ -36,9 +43,9 @@ describe('parseCodesignDisplay (signed: provisional fixture; ad-hoc: CI capture)
   });
 });
 
-describe('judgeMacApp (signed: provisional fixtures; unsigned: CI captures)', () => {
-  it('passes a signed, notarized, stapled app with --expect signed', () => {
-    expect(judgeMacApp(SIGNED_MAC(), 'signed', 'ABCDE12345')).toEqual([]);
+describe('judgeMacApp (CI captures, then each varied)', () => {
+  it('passes the captured signed, notarized, stapled app with --expect signed', () => {
+    expect(judgeMacApp(SIGNED_MAC(), 'signed', TEAM)).toEqual([]);
   });
   it.each([
     ['verify', { verify: no('a sealed resource is missing or invalid') }, /codesign --verify/],
@@ -48,33 +55,33 @@ describe('judgeMacApp (signed: provisional fixtures; unsigned: CI captures)', ()
     ['notarized source', { spctl: ok(fx('spctl-notarized.txt').replace('Notarized ', '')) }, /Notarized Developer ID/],
     ['stapler', { stapler: no('/scratch/zip/TN3270.app does not have a ticket stapled to it.') }, /stapler/],
   ])('fails --expect signed on a bad %s', (_n, patch, msg) => {
-    const team = _n === 'team' ? 'ZZZZZ99999' : 'ABCDE12345';
+    const team = _n === 'team' ? 'ZZZZZ99999' : TEAM;
     const problems = judgeMacApp({ ...SIGNED_MAC(), ...patch }, 'signed', team);
     expect(problems.join('\n')).toMatch(msg);
   });
   it('passes an ad-hoc app with --expect unsigned, and fails a Developer ID one', () => {
     expect(judgeMacApp(UNSIGNED_MAC(), 'unsigned', undefined)).toEqual([]);
-    expect(judgeMacApp(SIGNED_MAC(), 'unsigned', undefined).join('\n')).toMatch(/Developer ID Application: Adam Thornton/);
+    expect(judgeMacApp(SIGNED_MAC(), 'unsigned', undefined).join('\n')).toMatch(/Developer ID Application: ADAM JUSTEI- THORNTON \(H68TN685J4\)/);
   });
   it('refuses --expect signed without a team to check against', () => {
     expect(judgeMacApp(SIGNED_MAC(), 'signed', undefined).join('\n')).toMatch(/APPLE_TEAM_ID/);
   });
   it('--expect signed needs the team in BOTH the leaf authority and TeamIdentifier', () => {
-    const leafOther = fx('codesign-dv-signed.txt').replace('Adam Thornton (ABCDE12345)', 'Adam Thornton (ZZZZZ99999)');
-    expect(judgeMacApp({ ...SIGNED_MAC(), display: ok(leafOther) }, 'signed', 'ABCDE12345').join('\n')).toMatch(/\(ZZZZZ99999\), team ABCDE12345; expected team ABCDE12345/);
-    const teamOther = fx('codesign-dv-signed.txt').replace('TeamIdentifier=ABCDE12345', 'TeamIdentifier=ZZZZZ99999');
-    expect(judgeMacApp({ ...SIGNED_MAC(), display: ok(teamOther) }, 'signed', 'ABCDE12345').join('\n')).toMatch(/\(ABCDE12345\), team ZZZZZ99999; expected team ABCDE12345/);
+    const leafOther = fx('codesign-dv-signed.txt').replace('ADAM JUSTEI- THORNTON (H68TN685J4)', 'ADAM JUSTEI- THORNTON (ZZZZZ99999)');
+    expect(judgeMacApp({ ...SIGNED_MAC(), display: ok(leafOther) }, 'signed', TEAM).join('\n')).toMatch(/\(ZZZZZ99999\), team H68TN685J4; expected team H68TN685J4/);
+    const teamOther = fx('codesign-dv-signed.txt').replace('TeamIdentifier=H68TN685J4', 'TeamIdentifier=ZZZZZ99999');
+    expect(judgeMacApp({ ...SIGNED_MAC(), display: ok(teamOther) }, 'signed', TEAM).join('\n')).toMatch(/\(H68TN685J4\), team ZZZZZ99999; expected team H68TN685J4/);
   });
   it('--expect signed: a FAIL from spctl says when Gatekeeper is disabled', () => {
     const off = ok('/private/tmp/x/TN3270.app: accepted\noverride=security disabled');
-    expect(judgeMacApp({ ...SIGNED_MAC(), spctl: off }, 'signed', 'ABCDE12345').join('\n')).toMatch(/Gatekeeper assessments are DISABLED.*override=security disabled/);
+    expect(judgeMacApp({ ...SIGNED_MAC(), spctl: off }, 'signed', TEAM).join('\n')).toMatch(/Gatekeeper assessments are DISABLED.*override=security disabled/);
   });
 });
 
 describe('judgeMacApp --expect unsigned: only recognised shapes pass (CI captures, then each varied)', () => {
   it('passes the captured unsigned build exactly as CI saw it', () => {
     expect(judgeMacApp(UNSIGNED_MAC(), 'unsigned', undefined)).toEqual([]);
-    expect(judgeMacApp(UNSIGNED_MAC(), 'signed', 'ABCDE12345').length).toBeGreaterThan(0);
+    expect(judgeMacApp(UNSIGNED_MAC(), 'signed', TEAM).length).toBeGreaterThan(0);
   });
   it('passes "code object is not signed at all" from a failing codesign -dv', () => {
     const r = { ...UNSIGNED_MAC(), display: no('/private/tmp/x/TN3270.app: code object is not signed at all') };
@@ -85,12 +92,12 @@ describe('judgeMacApp --expect unsigned: only recognised shapes pass (CI capture
     ['"not signed at all" with exit 0', { display: ok('code object is not signed at all') }, /unrecognised codesign -dv/],
     ['ad-hoc text with a non-zero exit', { display: no(fx('codesign-dv-adhoc.txt')) }, /unrecognised codesign -dv/],
     ['exit 0 and no ad-hoc flag', { display: ok(fx('codesign-dv-adhoc.txt').replace('(adhoc,linker-signed)', '(linker-signed)').replace('Signature=adhoc', 'Signature size=1')) }, /unrecognised codesign -dv/],
-    ['ad-hoc with a team', { display: ok(fx('codesign-dv-adhoc.txt').replace('TeamIdentifier=not set', 'TeamIdentifier=ABCDE12345')) }, /unrecognised codesign -dv/],
+    ['ad-hoc with a team', { display: ok(fx('codesign-dv-adhoc.txt').replace('TeamIdentifier=not set', 'TeamIdentifier=H68TN685J4')) }, /unrecognised codesign -dv/],
     ['ad-hoc with an authority', { display: ok(`${fx('codesign-dv-adhoc.txt')}Authority=Some Other CA\n`) }, /unrecognised codesign -dv/],
     ['spctl exiting 0', { spctl: ok(fx('spctl-rejected.txt')) }, /unrecognised spctl answer/],
     ['spctl failing without ": rejected"', { spctl: no('xcrun: error: invalid active developer path') }, /unrecognised spctl answer.*spctl exit 1: xcrun: error/],
     ['spctl accepting with Gatekeeper off', { spctl: ok('/private/tmp/x/TN3270.app: accepted\noverride=security disabled') }, /unrecognised spctl answer.*Gatekeeper assessments are DISABLED/],
-    ['stapler exiting 0', { stapler: ok('The validate action worked!') }, /unrecognised xcrun stapler/],
+    ['stapler exiting 0', { stapler: ran(0, fx('stapler-validated.txt')) }, /unrecognised xcrun stapler/],
     ['stapler saying "no ticket" with exit 0', { stapler: ok('/scratch/zip/TN3270.app does not have a ticket stapled to it.') }, /unrecognised xcrun stapler.*exit 0/],
     ['stapler failing with no output', { stapler: no('') }, /unrecognised xcrun stapler.*xcrun stapler exit 1: \(no output\)/],
     ['stapler killed by a signal', { stapler: no('[killed by SIGSEGV]\n') }, /unrecognised xcrun stapler.*killed by SIGSEGV/],
@@ -101,7 +108,9 @@ describe('judgeMacApp --expect unsigned: only recognised shapes pass (CI capture
   });
 });
 
-describe('parseAuthenticode / judgeWinFile (provisional fixtures)', () => {
+// authenticode-valid.json is still PROVISIONAL (no signed Windows run yet). authenticode-notsigned.json
+// is CONFIRMED: CI run 42947618085's unsigned installer answered it byte for byte.
+describe('parseAuthenticode / judgeWinFile (Valid: provisional; NotSigned: confirmed by CI run 42947618085)', () => {
   it('parses status and subject', () => {
     expect(parseAuthenticode(fx('authenticode-valid.json'))).toEqual({
       status: 'Valid', subject: 'CN=Adam Thornton, O=Adam Thornton, L=Somewhere, S=Arizona, C=US',
@@ -182,9 +191,9 @@ describe('main', () => {
 
   it('macOS signed: checks the app in BOTH the zip and the dmg, and always detaches', () => {
     const f = fakeRun({
-      'codesign -dv': ok(fx('codesign-dv-signed.txt')), spctl: ok(fx('spctl-notarized.txt')),
+      'codesign --verify': SIGNED_MAC().verify, 'codesign -dv': SIGNED_MAC().display, spctl: SIGNED_MAC().spctl, stapler: SIGNED_MAC().stapler,
     });
-    const { io, out } = base({ run: f.run, env: { APPLE_TEAM_ID: 'ABCDE12345' } });
+    const { io, out } = base({ run: f.run, env: { APPLE_TEAM_ID: TEAM } });
     expect(main(['--expect', 'signed', '/a'], io)).toBe(0);
     const apps = f.calls.filter((c) => c[0] === 'codesign' && c[1] === '--verify').map((c) => c.at(-1));
     expect(apps).toEqual(['/scratch/zip/TN3270.app', '/scratch/dmg/TN3270.app']);
@@ -196,7 +205,7 @@ describe('main', () => {
 
   it('macOS: detaches the dmg even when a check throws', () => {
     const f = fakeRun({ spctl: () => { throw new Error('boom'); } });
-    const { io } = base({ run: f.run, env: { APPLE_TEAM_ID: 'ABCDE12345' } });
+    const { io } = base({ run: f.run, env: { APPLE_TEAM_ID: TEAM } });
     expect(() => main(['--expect', 'signed', '/a'], io)).toThrow(/boom/);
     expect(f.calls.some((c) => c[0] === 'hdiutil' && c[1] === 'detach')).toBe(true);
   });
@@ -248,7 +257,7 @@ describe('main', () => {
   it('macOS unsigned: an ad-hoc build passes; the same build with --expect signed fails (exit 1)', () => {
     const answers = UNSIGNED_ANSWERS();
     expect(main(['--expect', 'unsigned', '/a'], base({ run: fakeRun(answers).run }).io)).toBe(0);
-    const { io, out } = base({ run: fakeRun(answers).run, env: { APPLE_TEAM_ID: 'ABCDE12345' } });
+    const { io, out } = base({ run: fakeRun(answers).run, env: { APPLE_TEAM_ID: TEAM } });
     expect(main(['--expect', 'signed', '/a'], io)).toBe(1);
     expect(out.join('\n')).toMatch(/FAIL TN3270-0\.1\.5-mac-universal\.zip:/);
   });

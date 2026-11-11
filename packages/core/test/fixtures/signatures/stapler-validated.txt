@@ -1,0 +1,4 @@
+# Captured: CI run 42959265358, 2026-11-11 (macos, signed+notarized build, --expect signed), exit 0.
+# xcrun stapler validate <zip>/TN3270.app
+Processing: /var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/tn3270-sig-B4gkbO/zip/TN3270.app
+The validate action worked!

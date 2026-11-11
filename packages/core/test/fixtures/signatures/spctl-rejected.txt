@@ -1,4 +1,4 @@
-# Captured: CI run 42844605289 (macos, unsigned build, --expect unsigned), exit 3.
+# Captured: CI run 42844605289, 2026-11-10 (macos, unsigned build, --expect unsigned), exit 3.
 # spctl -a -t exec -vv <zip>/TN3270.app
 /var/folders/h5/t85nd63d71x27_8gl5gw3l_w0000gn/T/tn3270-sig-83J5zE/zip/TN3270.app: rejected
 source=no usable signature
