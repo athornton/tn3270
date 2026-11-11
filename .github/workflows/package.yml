@@ -75,6 +75,10 @@ on:
         description: 'Sign and notarize the macOS app (uses environment signing; Windows is never signed)'
         type: boolean
         default: false
+      spike:
+        description: 'SPIKE (store-probe plan Task 0, removed in Task 8): run the store-probe measurement job'
+        type: boolean
+        default: false
 env:
   # Unsigned unless a signing run, whose package:gui step overrides this. `false` with no identity
   # leaves the app unsigned with no error (app-builder-lib codeSign/macCodeSign.js findIdentity), so
@@ -384,3 +388,67 @@ jobs:
       - name: Read the release back
         env: { GH_TOKEN: '${{ github.token }}' }
         run: node scripts/release-notes.mjs --verify-release installers
+
+  # SPIKE (store-probe plan Task 0; spec docs/superpowers/specs/2026-11-11-store-probe-design.md).
+  # REMOVED IN TASK 8, with scripts/spike/. A dispatch with `spike` ticked ONLY: never a push, a pull
+  # request or a tag. It measures, on the real runners, the two unknowns the store probe rests on:
+  # whether macOS enforces the App Sandbox on an ad-hoc-signed copy launched from the shell, and
+  # whether an appx with an inline-namespaced uap5 alias builds, installs, and launches through the
+  # alias with arguments, environment and package identity. Its scripts NEVER STOP EARLY: every
+  # answer is a `SPIKE: <question>: <answer>` line in the log, whatever the job's colour. No
+  # environment, no secrets, nothing uploaded; the package matrix above runs beside it untouched.
+  spike:
+    if: github.event_name == 'workflow_dispatch' && inputs.spike
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with: { node-version: '22', cache: npm }
+      # The package job's paths and key EXACTLY: the cache version hashes the path list, so any
+      # difference would make a separate, cold cache.
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+          key: electron-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+      - run: npm ci
+      - run: npm run build
+      - if: runner.os == 'macOS'
+        name: package:gui (mac universal, unsigned)
+        run: |
+          t0=$(date +%s)
+          if npm run package:gui -- --mac; then echo "SPIKE: package:gui --mac: OK"; else echo "SPIKE: package:gui --mac: FAILED rc=$?"; fi
+          echo "SPIKE: duration package:gui --mac: $(( $(date +%s) - t0 ))s"
+      # The appx ONLY (`-c.win.target=appx` replaces the config's nsis array: builder-util-runtime
+      # objects.js assignKey). `-c.` overrides are deep-merged onto electron-builder.cjs
+      # (app-builder-lib util/config/config.js mergePublish -> deepAssign). The extensions path is
+      # absolute: AppxTarget.js resolves it against the app directory, packages/gui/app.
+      - if: runner.os == 'Windows'
+        name: package:gui (appx, placeholder identity, uap5 alias)
+        run: |
+          t0=$(date +%s)
+          if npm run package:gui -- --win --x64 -c.win.target=appx -c.appx.identityName=TN3270.Probe "-c.appx.publisher=CN=TN3270 Store Probe" "-c.appx.publisherDisplayName=TN3270 store probe" "-c.appx.customExtensionsPath=$GITHUB_WORKSPACE/scripts/spike/appx-extensions.xml"; then
+            echo "SPIKE: package:gui appx (makeappx accepted the alias): OK"
+          else
+            echo "SPIKE: package:gui appx (makeappx accepted the alias): FAILED rc=$?"
+          fi
+          echo "SPIKE: duration package:gui appx: $(( $(date +%s) - t0 ))s"
+      - if: runner.os == 'macOS'
+        name: spike -- App Sandbox on an ad-hoc copy
+        run: bash scripts/spike/mac-sandbox.sh
+      # Windows PowerShell 5.1, not pwsh: its Appx module loads natively.
+      - if: runner.os == 'Windows'
+        name: spike -- appx install, alias and identity
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/spike/win-appx.ps1
