@@ -159,14 +159,19 @@ describe('release-notes.mjs', () => {
       expect(notes).not.toMatch(/npm install -g @tn3270\/\w+(?!@0\.1\.4)\s/);
     });
 
-    it('says the mac and Windows installers are signed (mac notarized), Linux is not, and how to verify them', () => {
+    it('says the mac app is signed and notarized, Windows and Linux are not, and how to verify them', () => {
       expect(notes).toContain('Developer ID');
       expect(notes).toContain('notarized');
       expect(notes).toContain('stapled');
-      expect(notes).toContain('Azure Artifact Signing');
+      expect(notes).toContain('the dmg itself is not signed, by design');
+      // Windows is NOT signed in CI (spec amendment 2026-11-11): say so, and how past SmartScreen.
+      expect(notes).toContain('The Windows installer is not signed');
+      expect(notes).toContain('SmartScreen');
+      expect(notes).toContain('*More info* → *Run anyway*');
+      expect(notes).not.toMatch(/Azure|Artifact Signing/);
       expect(notes).toContain('Linux AppImage and `.deb` are not signed');
+      // The mac app IS signed: no Gatekeeper workaround.
       expect(notes).not.toContain('Open Anyway');
-      expect(notes).not.toContain('Run anyway');
       expect(notes).toContain('sha256sum -c SHA256SUMS');
       expect(notes).toContain('shasum -a 256 -c SHA256SUMS');
       expect(notes).toContain('npm audit signatures');
