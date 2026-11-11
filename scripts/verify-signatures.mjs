@@ -32,12 +32,12 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, posix, resolve, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const DEV_ID = 'Developer ID Application:';
 
-/** Non-comment lines; fixtures mark themselves provisional with a leading `#`. */
+/** Non-comment lines; fixtures carry their provenance (captured, or provisional) on `#` lines. */
 const lines = (text) => text.split(/\r?\n/).filter((l) => l !== '' && !l.startsWith('#'));
 
 /** `codesign -dv --verbose=4` (stderr) -> what judgeMacApp needs. */
@@ -82,9 +82,9 @@ export function judgeMacApp(r, expect, teamId) {
     if (r.spctl.status === 0 || !lines(r.spctl.text).some((l) => l.endsWith(': rejected'))) {
       p.push(`unrecognised spctl answer: expected a non-zero exit and a ": rejected" line ${said('spctl', r.spctl)}${gatekeeper(r.spctl.text)}`);
     }
-    // PROVISIONAL wording, from memory: confirm against the Task 8 capture. Positive on purpose:
-    // an empty failure, a signal, `Operation not permitted` or xcrun's own `xcrun: error:` (no
-    // developer tools) are not "no ticket".
+    // Wording CONFIRMED by CI run 42844605289 (exit 65, "TN3270.app does not have a ticket stapled
+    // to it."). Positive on purpose: an empty failure, a signal, `Operation not permitted` or
+    // xcrun's own `xcrun: error:` (no developer tools) are not "no ticket".
     if (r.stapler.status === 0 || !r.stapler.text.includes('does not have a ticket stapled to it')) {
       p.push(`unrecognised xcrun stapler validate answer: expected it to find no ticket ${said('xcrun stapler', r.stapler)}`);
     }
@@ -134,6 +134,9 @@ export function judgeWinFile(sig, expect, publisher) {
 // ---------------------------------------------------------------------------------------------
 // Drivers. Everything that touches the system goes through `io`, so main() is testable on a box
 // that has none of codesign, hdiutil, spctl or pwsh.
+// Paths are built with the TARGET platform's rules (posix.join in the mac driver, win32.join in
+// the Windows one), never the host's: the driver is picked by io.platform, and with host `join`
+// a darwin run tested on a Windows host got `\scratch\zip\TN3270.app` (CI run 42844605289).
 
 /** A usage problem: exit 2. */
 class Usage extends Error {}
@@ -167,20 +170,20 @@ function verifyMac(dir, expect, io, run, work) {
   const zip = one(files, /^TN3270-.+-mac-universal\.zip$/, 'TN3270-*-mac-universal.zip', dir);
   const dmg = one(files, /^TN3270-.+-mac-universal\.dmg$/, 'TN3270-*-mac-universal.dmg', dir);
   const teamId = io.env.APPLE_TEAM_ID;
-  const zipDir = join(work, 'zip');
-  const mnt = join(work, 'dmg');
+  const zipDir = posix.join(work, 'zip');
+  const mnt = posix.join(work, 'dmg');
   const results = [];
   // Logged, never judged: the first capture shows whether Gatekeeper assessments are on here.
   if (io.env.VERIFY_SIGNATURES_ECHO === '1') run('spctl', ['--status']);
   const check = (name, root) => {
-    const app = join(root, 'TN3270.app');
+    const app = posix.join(root, 'TN3270.app');
     if (!io.exists(app)) return [name, [`no ${app}; ${root} has: ${listing(io.list, root)}`]];
     return [name, macApp(run, app, expect, teamId)];
   };
-  const unpacked = run('ditto', ['-x', '-k', join(dir, zip), zipDir]);
+  const unpacked = run('ditto', ['-x', '-k', posix.join(dir, zip), zipDir]);
   let thrown;
   try {
-    const attached = run('hdiutil', ['attach', '-readonly', '-nobrowse', '-mountpoint', mnt, join(dir, dmg)]);
+    const attached = run('hdiutil', ['attach', '-readonly', '-nobrowse', '-mountpoint', mnt, posix.join(dir, dmg)]);
     results.push(unpacked.status === 0 ? check(zip, zipDir) : [zip, [`ditto -x -k failed (exit ${unpacked.status}): ${unpacked.text.trim()}`]]);
     results.push(attached.status === 0 ? check(dmg, mnt) : [dmg, [`hdiutil attach failed (exit ${attached.status}): ${attached.text.trim()}`]]);
   } catch (e) {
@@ -220,11 +223,11 @@ function winFile(run, path, expect, publisher) {
 /** -> [[artifact, problems]] for the installer, then the installed app and uninstaller. */
 function verifyWin(dir, expect, io, run, work) {
   const installerName = one(io.list(dir), /^TN3270-.+-win-x64\.exe$/, 'TN3270-*-win-x64.exe', dir);
-  const installer = join(dir, installerName);
+  const installer = win32.join(dir, installerName);
   const publisher = io.env.AZURE_SIGNING_PUBLISHER;
   const results = [[installerName, winFile(run, installer, expect, publisher)]];
-  const target = join(work, 'install');
-  const uninstaller = join(target, 'Uninstall TN3270.exe');
+  const target = win32.join(work, 'install');
+  const uninstaller = win32.join(target, 'Uninstall TN3270.exe');
   try {
     // package-smoke's invocation: /S, then /D= LAST and unquoted (NSIS reads to the end of the
     // command line), verbatim so node adds no quotes, the program name quoted by hand.
@@ -236,7 +239,7 @@ function verifyWin(dir, expect, io, run, work) {
     // No separate "made no install directory" check: each file below then FAILs, and the
     // listing says the directory cannot be listed.
     for (const name of ['TN3270.exe', 'Uninstall TN3270.exe']) {
-      const p = join(target, name);
+      const p = win32.join(target, name);
       const label = `installed ${name}`;
       if (!io.exists(p)) {
         results.push([label, [`no ${p}; its .exe files are ${listing(io.list, target, (f) => f.toLowerCase().endsWith('.exe'))}`]]);

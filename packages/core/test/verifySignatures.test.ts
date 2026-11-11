@@ -13,12 +13,18 @@ const no = (text = '', stdout = text): Ran => ({ status: 1, stdout, text });
 const SIGNED_MAC = () => ({
   verify: ok(), display: ok(fx('codesign-dv-signed.txt')), spctl: ok(fx('spctl-notarized.txt')), stapler: ok('The validate action worked!'),
 });
+/** `status` and a fixture's text, all on stdout (the split only matters to pwsh). */
+const ran = (status: number, text: string): Ran => ({ status, stdout: text, text });
+/**
+ * The unsigned build's four answers, CAPTURED with their exit statuses (CI run 42844605289,
+ * macOS, --expect unsigned): codesign --verify 1, codesign -dv 0, spctl 3, stapler 65.
+ */
 const UNSIGNED_MAC = () => ({
-  verify: no('code has no resources but signature indicates they must be present'),
-  display: ok(fx('codesign-dv-adhoc.txt')), spctl: no(fx('spctl-rejected.txt')), stapler: no('/scratch/zip/TN3270.app does not have a ticket stapled to it.'),
+  verify: ran(1, fx('codesign-verify-notsigned.txt')), display: ran(0, fx('codesign-dv-adhoc.txt')),
+  spctl: ran(3, fx('spctl-rejected.txt')), stapler: ran(65, fx('stapler-no-ticket.txt')),
 });
 
-describe('parseCodesignDisplay (provisional fixtures)', () => {
+describe('parseCodesignDisplay (signed: provisional fixture; ad-hoc: CI capture)', () => {
   it('reads the authority chain, team and runtime flag of a Developer ID signature', () => {
     expect(parseCodesignDisplay(fx('codesign-dv-signed.txt'))).toEqual({
       authorities: ['Developer ID Application: Adam Thornton (ABCDE12345)', 'Developer ID Certification Authority', 'Apple Root CA'],
@@ -30,7 +36,7 @@ describe('parseCodesignDisplay (provisional fixtures)', () => {
   });
 });
 
-describe('judgeMacApp (provisional fixtures)', () => {
+describe('judgeMacApp (signed: provisional fixtures; unsigned: CI captures)', () => {
   it('passes a signed, notarized, stapled app with --expect signed', () => {
     expect(judgeMacApp(SIGNED_MAC(), 'signed', 'ABCDE12345')).toEqual([]);
   });
@@ -65,7 +71,11 @@ describe('judgeMacApp (provisional fixtures)', () => {
   });
 });
 
-describe('judgeMacApp --expect unsigned: only recognised shapes pass (provisional fixtures)', () => {
+describe('judgeMacApp --expect unsigned: only recognised shapes pass (CI captures, then each varied)', () => {
+  it('passes the captured unsigned build exactly as CI saw it', () => {
+    expect(judgeMacApp(UNSIGNED_MAC(), 'unsigned', undefined)).toEqual([]);
+    expect(judgeMacApp(UNSIGNED_MAC(), 'signed', 'ABCDE12345').length).toBeGreaterThan(0);
+  });
   it('passes "code object is not signed at all" from a failing codesign -dv', () => {
     const r = { ...UNSIGNED_MAC(), display: no('/private/tmp/x/TN3270.app: code object is not signed at all') };
     expect(judgeMacApp(r, 'unsigned', undefined)).toEqual([]);
@@ -128,10 +138,11 @@ function fakeRun(answers: Record<string, Ran | ((args: string[]) => Ran)>) {
   };
   return { run, calls };
 }
-/** What an ad-hoc-signed, unnotarized app answers (provisional fixtures). */
-const UNSIGNED_ANSWERS = () => ({
-  'codesign -dv': ok(fx('codesign-dv-adhoc.txt')), spctl: no(fx('spctl-rejected.txt')), 'codesign --verify': no('invalid'), stapler: no('/scratch/zip/TN3270.app does not have a ticket stapled to it.'),
-});
+/** What the unsigned build answered in CI run 42844605289, as fakeRun answers. */
+const UNSIGNED_ANSWERS = () => {
+  const m = UNSIGNED_MAC();
+  return { 'codesign --verify': m.verify, 'codesign -dv': m.display, spctl: m.spctl, stapler: m.stapler };
+};
 const MAC_FILES = ['TN3270-0.1.5-mac-universal.dmg', 'TN3270-0.1.5-mac-universal.zip', 'TN3270-0.1.5-mac-universal.dmg.blockmap'];
 /** The path inside a pwsh call's `-LiteralPath '...'`, with `''` undoubled. */
 const literalPath = (c: string[]) => /LiteralPath '((?:[^']|'')*)'/.exec(c.at(-1)!)?.[1]?.replace(/''/g, "'");
@@ -147,6 +158,21 @@ describe('main', () => {
       },
     };
   };
+
+  /** A Windows run, with Windows paths: the driver builds them with win32 rules on every host. */
+  const winBase = (over: Partial<Parameters<typeof main>[1]> = {}) =>
+    base({ platform: 'win32', scratch: () => 'C:\\scratch', list: () => ['TN3270-0.1.5-win-x64.exe'], ...over });
+
+  it('builds paths by io.platform, not the host: / for darwin, \\ for win32 (CI run 42844605289)', () => {
+    const mac = fakeRun(UNSIGNED_ANSWERS());
+    expect(main(['--expect', 'unsigned', '/a'], base({ run: mac.run }).io)).toBe(0);
+    expect(mac.calls.filter((c) => c[0] === 'codesign' && c[1] === '--verify').map((c) => c.at(-1))).toEqual(['/scratch/zip/TN3270.app', '/scratch/dmg/TN3270.app']);
+    const win = fakeRun({ pwsh: ok(fx('authenticode-notsigned.json')) });
+    expect(main(['--expect', 'unsigned', 'C:\\a'], winBase({ run: win.run }).io)).toBe(0);
+    expect(win.calls.filter((c) => c[0] === 'pwsh').map(literalPath)).toEqual([
+      'C:\\a\\TN3270-0.1.5-win-x64.exe', 'C:\\scratch\\install\\TN3270.exe', 'C:\\scratch\\install\\Uninstall TN3270.exe',
+    ]);
+  });
 
   it('is a usage error without --expect signed|unsigned, and on linux', () => {
     expect(main([], base().io)).toBe(2);
@@ -244,7 +270,7 @@ describe('main', () => {
     const dup = base({ list: () => [...MAC_FILES, 'TN3270-0.1.6-mac-universal.zip'] });
     expect(main(['--expect', 'unsigned', '/a'], dup.io)).toBe(2);
     expect(dup.out.join('\n')).toMatch(/TN3270-0\.1\.5-mac-universal\.zip.*TN3270-0\.1\.6-mac-universal\.zip/s);
-    const win = base({ platform: 'win32', list: () => [] });
+    const win = winBase({ list: () => [] });
     expect(main(['--expect', 'unsigned', 'C:\\a'], win.io)).toBe(2);
     expect(win.out.join('\n')).toMatch(/win-x64\.exe/);
   });
@@ -252,7 +278,7 @@ describe('main', () => {
   it('Windows signed: checks the installer, then the installed app and uninstaller', () => {
     const valid = ok(fx('authenticode-valid.json'));
     const f = fakeRun({ pwsh: valid });
-    const { io, out } = base({ platform: 'win32', run: f.run, list: () => ['TN3270-0.1.5-win-x64.exe'], env: { AZURE_SIGNING_PUBLISHER: 'Adam Thornton' } });
+    const { io, out } = winBase({ run: f.run, list: () => ['TN3270-0.1.5-win-x64.exe'], env: { AZURE_SIGNING_PUBLISHER: 'Adam Thornton' } });
     expect(main(['--expect', 'signed', 'C:\\a'], io)).toBe(0);
     const checked = f.calls.filter((c) => c[0] === 'pwsh').map(literalPath);
     expect(checked.map((p) => p!.split(/[\\/]/).at(-1))).toEqual(['TN3270-0.1.5-win-x64.exe', 'TN3270.exe', 'Uninstall TN3270.exe']);
@@ -265,21 +291,21 @@ describe('main', () => {
       calls.push({ cmd, args, verbatim: opts?.verbatim });
       return cmd === 'pwsh' ? ok(fx('authenticode-notsigned.json')) : ok();
     };
-    const { io } = base({ platform: 'win32', run, list: () => ['TN3270-0.1.5-win-x64.exe'] });
-    expect(main(['--expect', 'unsigned', '/a'], io)).toBe(0);
+    const { io } = winBase({ run, list: () => ['TN3270-0.1.5-win-x64.exe'] });
+    expect(main(['--expect', 'unsigned', 'C:\\a'], io)).toBe(0);
     const installs = calls.filter((c) => c.cmd.endsWith('win-x64.exe'));
-    expect(installs).toEqual([{ cmd: '/a/TN3270-0.1.5-win-x64.exe', args: ['/S', '/D=/scratch/install'], verbatim: true }]);
+    expect(installs).toEqual([{ cmd: 'C:\\a\\TN3270-0.1.5-win-x64.exe', args: ['/S', '/D=C:\\scratch\\install'], verbatim: true }]);
     // `_?=` last and verbatim: NSIS then runs in place and waits (installUtil.nsh does the same).
-    expect(calls.at(-1)).toEqual({ cmd: '/scratch/install/Uninstall TN3270.exe', args: ['/S', '_?=/scratch/install'], verbatim: true });
+    expect(calls.at(-1)).toEqual({ cmd: 'C:\\scratch\\install\\Uninstall TN3270.exe', args: ['/S', '_?=C:\\scratch\\install'], verbatim: true });
   });
 
   it("Windows: a ' in a path is doubled inside pwsh's single quotes", () => {
     const f = fakeRun({ pwsh: ok(fx('authenticode-notsigned.json')) });
-    const { io } = base({ platform: 'win32', run: f.run, scratch: () => "/it's", list: () => ['TN3270-0.1.5-win-x64.exe'] });
-    expect(main(['--expect', 'unsigned', '/a'], io)).toBe(0);
+    const { io } = winBase({ run: f.run, scratch: () => "C:\\it's" });
+    expect(main(['--expect', 'unsigned', 'C:\\a'], io)).toBe(0);
     const cmds = f.calls.filter((c) => c[0] === 'pwsh').map((c) => c.at(-1)!);
-    expect(cmds[1]).toContain("-LiteralPath '/it''s/install/TN3270.exe'");
-    expect(f.calls.filter((c) => c[0] === 'pwsh').map(literalPath)[1]).toBe("/it's/install/TN3270.exe");
+    expect(cmds[1]).toContain("-LiteralPath 'C:\\it''s\\install\\TN3270.exe'");
+    expect(f.calls.filter((c) => c[0] === 'pwsh').map(literalPath)[1]).toBe("C:\\it's\\install\\TN3270.exe");
   });
 
   it.each([
@@ -288,8 +314,8 @@ describe('main', () => {
   ])('Windows: %s is a FAIL in BOTH modes, never "unsigned"', (_n, answer, msg) => {
     for (const mode of ['signed', 'unsigned']) {
       const f = fakeRun({ pwsh: answer });
-      const { io, out } = base({ platform: 'win32', run: f.run, list: () => ['TN3270-0.1.5-win-x64.exe'], env: { AZURE_SIGNING_PUBLISHER: 'Adam Thornton' } });
-      expect(main(['--expect', mode, '/a'], io), mode).toBe(1);
+      const { io, out } = winBase({ run: f.run, list: () => ['TN3270-0.1.5-win-x64.exe'], env: { AZURE_SIGNING_PUBLISHER: 'Adam Thornton' } });
+      expect(main(['--expect', mode, 'C:\\a'], io), mode).toBe(1);
       const fails = out.filter((l) => l.startsWith('FAIL TN3270-0.1.5-win-x64.exe: '));
       expect(fails.join('\n'), mode).toMatch(msg);
     }
@@ -297,42 +323,42 @@ describe('main', () => {
 
   it('Windows: a missing installed TN3270.exe is a FAIL naming what was installed', () => {
     const f = fakeRun({ pwsh: ok(fx('authenticode-valid.json')) });
-    const { io, out } = base({
-      platform: 'win32', run: f.run, env: { AZURE_SIGNING_PUBLISHER: 'Adam Thornton' },
+    const { io, out } = winBase({
+      run: f.run, env: { AZURE_SIGNING_PUBLISHER: 'Adam Thornton' },
       list: (d: string) => (d.endsWith('install') ? ['Other.exe', 'resources.pak'] : ['TN3270-0.1.5-win-x64.exe']),
       exists: (p: string) => !p.endsWith('TN3270.exe') || p.endsWith('win-x64.exe'),
     });
     expect(main(['--expect', 'signed', 'C:\\a'], io)).toBe(1);
-    expect(out).toContain('FAIL installed TN3270.exe: no /scratch/install/TN3270.exe; its .exe files are Other.exe');
+    expect(out).toContain('FAIL installed TN3270.exe: no C:\\scratch\\install\\TN3270.exe; its .exe files are Other.exe');
   });
 
   it('Windows: the JSON is read from stdout alone, with progress records switched off', () => {
     const clixml = '#< CLIXML\r\n<Objs Version="1.1.0.1"><Obj S="progress" RefId="0"></Obj></Objs>';
     const json = fx('authenticode-valid.json');
     const f = fakeRun({ pwsh: ok(json + clixml, json) });
-    const { io, out } = base({ platform: 'win32', run: f.run, list: () => ['TN3270-0.1.5-win-x64.exe'], env: { AZURE_SIGNING_PUBLISHER: 'Adam Thornton' } });
-    expect(main(['--expect', 'signed', '/a'], io), out.join('\n')).toBe(0);
+    const { io, out } = winBase({ run: f.run, list: () => ['TN3270-0.1.5-win-x64.exe'], env: { AZURE_SIGNING_PUBLISHER: 'Adam Thornton' } });
+    expect(main(['--expect', 'signed', 'C:\\a'], io), out.join('\n')).toBe(0);
     for (const c of f.calls.filter((k) => k[0] === 'pwsh')) expect(c.at(-1)).toMatch(/^\$ProgressPreference='SilentlyContinue'; Get-AuthenticodeSignature /);
   });
 
   it('Windows: an install that made no directory FAILs both installed files', () => {
     const f = fakeRun({ pwsh: ok(fx('authenticode-notsigned.json')) });
-    const { io, out } = base({
-      platform: 'win32', run: f.run,
+    const { io, out } = winBase({
+      run: f.run,
       list: (d: string) => { if (d.endsWith('install')) throw new Error('ENOENT: no such file or directory'); return ['TN3270-0.1.5-win-x64.exe']; },
       exists: (p: string) => !p.includes('install'),
     });
-    expect(main(['--expect', 'unsigned', '/a'], io)).toBe(1);
+    expect(main(['--expect', 'unsigned', 'C:\\a'], io)).toBe(1);
     expect(out.filter((l) => l.startsWith('FAIL installed '))).toEqual([
-      'FAIL installed TN3270.exe: no /scratch/install/TN3270.exe; its .exe files are (cannot list: ENOENT: no such file or directory)',
-      'FAIL installed Uninstall TN3270.exe: no /scratch/install/Uninstall TN3270.exe; its .exe files are (cannot list: ENOENT: no such file or directory)',
+      'FAIL installed TN3270.exe: no C:\\scratch\\install\\TN3270.exe; its .exe files are (cannot list: ENOENT: no such file or directory)',
+      'FAIL installed Uninstall TN3270.exe: no C:\\scratch\\install\\Uninstall TN3270.exe; its .exe files are (cannot list: ENOENT: no such file or directory)',
     ]);
   });
 
   it('Windows: a failed silent install is a FAIL even --expect unsigned', () => {
     const f = fakeRun({ pwsh: ok(fx('authenticode-notsigned.json')), exe: no() });
-    const { io, out } = base({ platform: 'win32', run: f.run, list: () => ['TN3270-0.1.5-win-x64.exe'] });
-    expect(main(['--expect', 'unsigned', '/a'], io)).toBe(1);
+    const { io, out } = winBase({ run: f.run, list: () => ['TN3270-0.1.5-win-x64.exe'] });
+    expect(main(['--expect', 'unsigned', 'C:\\a'], io)).toBe(1);
     expect(out).toContain('ok TN3270-0.1.5-win-x64.exe: unsigned');
     expect(out).toContain('FAIL install: silent install of TN3270-0.1.5-win-x64.exe failed (exit 1): ');
     expect(out.some((l) => l.startsWith('FAIL TN3270-0.1.5-win-x64.exe'))).toBe(false);
@@ -361,10 +387,15 @@ describe('main', () => {
 
 describe('runCommand', () => {
   it('returns the exit status with stdout and stderr together', () => {
-    expect(runCommand('sh', ['-c', 'echo out; echo err >&2; exit 3'])).toEqual({ status: 3, stdout: 'out\n', text: 'out\nerr\n' });
+    const js = "process.stdout.write('out\\n'); process.stderr.write('err\\n'); process.exit(3)";
+    expect(runCommand(process.execPath, ['-e', js])).toEqual({ status: 3, stdout: 'out\n', text: 'out\nerr\n' });
   });
-  it('says so in text when the command was killed by a signal', () => {
-    expect(runCommand('sh', ['-c', 'echo before; kill -TERM $$'])).toEqual({ status: 1, stdout: 'before\n', text: 'before\n[killed by SIGTERM]\n' });
+  // Not on Windows: it has no signals. A process.kill(pid, 'SIGTERM') there is TerminateProcess,
+  // and spawnSync reports an exit status with signal null (CI run 42844605289: `sh`'s
+  // `kill -TERM $$` came back as status 3840), so there is no signal for text to name.
+  it.skipIf(process.platform === 'win32')('says so in text when the command was killed by a signal', () => {
+    const js = "process.stdout.write('before\\n', () => process.kill(process.pid, 'SIGTERM'))";
+    expect(runCommand(process.execPath, ['-e', js])).toEqual({ status: 1, stdout: 'before\n', text: 'before\n[killed by SIGTERM]\n' });
   });
   it('gives every command at most 10 minutes; verbatim adds package-smoke\'s two options', () => {
     expect(spawnOptions('x.exe')).toMatchObject({ timeout: 600_000, encoding: 'utf8' });
