@@ -16,6 +16,9 @@ staging inputs inside the macOS container, and judges.
 (`New-SelfSignedCertificate`, `Add-AppxPackage`), signtool from electron-builder's bundled kit,
 vitest, plain Node ESM.
 
+**ORDER: Task 1, then Task 0, then Tasks 2-8.** The spike (Task 0) uses Task 1's seam, so that
+the spike also measures the in-process confinement signals.
+
 **Spec:** `docs/superpowers/specs/2026-11-11-store-probe-design.md`. **Branch:** `store-probe`, cut
 from `origin/main` at `db5a93d`.
 
@@ -121,7 +124,8 @@ cat > "$W/inherit.plist" <<'EOF'
 EOF
 # Inside-out: dylibs and frameworks plain, helper apps with inherit, the app last with main.
 find "$APP/Contents/Frameworks" -name '*.dylib' -print0 | xargs -0 -n1 codesign --force -s -
-find "$APP/Contents/Frameworks" -maxdepth 1 -name '*.framework' -print0 | xargs -0 -n1 codesign --force -s -
+# --deep on frameworks only: Electron Framework.framework nests executables (Helpers/chrome_crashpad_handler).
+find "$APP/Contents/Frameworks" -maxdepth 1 -name '*.framework' -print0 | xargs -0 -n1 codesign --force --deep -s -
 find "$APP/Contents/Frameworks" -maxdepth 1 -name '*.app' -print0 | xargs -0 -n1 codesign --force -s - --entitlements "$W/inherit.plist"
 codesign --force -s - --entitlements "$W/main.plist" "$APP"
 codesign -d --entitlements :- "$APP" || true
@@ -171,9 +175,8 @@ ls -la "$C/Data" || true
      its stdout (`-RedirectStandardOutput`) and the sha256 next to the golden;
   8. the same launch of `<InstallLocation>\app\TN3270.exe` **directly**, to compare its `probe:` line;
   9. cleanup: `Remove-AppxPackage`, and remove the certificate from both stores.
-- [ ] **Step 5: The seam `TN3270_GUI_PROBE` doesn't exist yet**, so the spike's `probe:` lines will
-  be absent. That is expected. Do **Task 1 first and include it in the spike push**, so that the
-  spike also measures the in-process signals.
+- [ ] **Step 5: Check the order.** Task 1 must already be committed, so that the spike's launches
+  print `probe:` lines.
 - [ ] **Step 6: Push and dispatch (ask first):**
   `git push -u origin store-probe`, then
   `/usr/bin/gh workflow run package.yml --ref store-probe -f spike=true`. Watch it, and save both
@@ -358,7 +361,7 @@ date, exit status), the convention in `packages/core/test/fixtures/signatures/`.
     missing.
   - `parseAppxPackage(text) -> { name, packageFamilyName, installLocation } | null`, from
     `Get-AppxPackage <name> | ConvertTo-Json -Compress`. This is JSON, not `Format-List`, so the
-    probe runs it that way; Task 0 captured `Format-List`, so add a JSON capture in Task 6.
+    probe runs it that way. Task 0 captured `Format-List`, so a JSON capture comes from Task 7.
   - `judgeWinConfinement({ pkg, probe }, identityName) -> string[]`: `pkg` non-null with
     `name === identityName`, and `probe.windowsStore === true`.
   - `macRoute(io)` / `winRoute(io)` build the route objects for `package-checks.mjs`. `macRoute`'s
