@@ -404,7 +404,8 @@ jobs:
       matrix:
         os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    # 60, not 45: round 2 adds the mas build (two more Electron zips, x64 and arm64, and a universal merge).
+    timeout-minutes: 60
     permissions:
       contents: read
     steps:
@@ -431,6 +432,30 @@ jobs:
           t0=$(date +%s)
           if npm run package:gui -- --mac; then echo "SPIKE: package:gui --mac: OK"; else echo "SPIKE: package:gui --mac: FAILED rc=$?"; fi
           echo "SPIKE: duration package:gui --mac: $(( $(date +%s) - t0 ))s"
+      # Electron's MAS build, unsigned: `-c.mac.identity=null` (builder.js coerces the string "null"
+      # for config.mac only, so not -c.mas.identity) reaches the mas config, which deep-assigns
+      # config.mas over mac (macPackager.js getPlatformConfig). Null identity -> sign() returns
+      # false (MacTargetHelper.js handleNullIdentity), so no .pkg: the app is left in
+      # artifacts/gui/mas-universal/ (macPackager.js packMasTargets). If that fails, ad-hoc `-`
+      # (findSigningIdentity accepts it), which signs and then fails at the installer step (no
+      # "3rd Party Mac Developer Installer" identity) with the app already on disk.
+      - if: runner.os == 'macOS'
+        name: package:gui (mas universal, unsigned)
+        run: |
+          t0=$(date +%s)
+          if npm run package:gui -- --mac mas --universal -c.mac.identity=null 2>&1 | tee "$RUNNER_TEMP/mas-build.log"; then
+            echo "SPIKE: package:gui mas (identity null): OK"
+          else
+            echo "SPIKE: package:gui mas (identity null): FAILED rc=$?"
+            if npm run package:gui -- --mac mas --universal -c.mac.identity=- 2>&1 | tee -a "$RUNNER_TEMP/mas-build.log"; then
+              echo "SPIKE: package:gui mas (identity -): OK"
+            else
+              echo "SPIKE: package:gui mas (identity -): FAILED rc=$?"
+            fi
+          fi
+          echo "SPIKE: mas build downloaded: $(grep -o 'electron-v[^ ]*mas[^ ]*\.zip' "$RUNNER_TEMP/mas-build.log" | sort -u | tr '\n' ' ')"
+          echo "SPIKE: mas build outputs: $(find artifacts/gui -maxdepth 2 \( -name '*.pkg' -o -name '*.app' \) | tr '\n' ' ')"
+          echo "SPIKE: duration package:gui mas: $(( $(date +%s) - t0 ))s"
       # The appx ONLY (`-c.win.target=appx` replaces the config's nsis array: builder-util-runtime
       # objects.js assignKey). `-c.` overrides are deep-merged onto electron-builder.cjs
       # (app-builder-lib util/config/config.js mergePublish -> deepAssign). The extensions path is

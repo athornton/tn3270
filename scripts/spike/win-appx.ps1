@@ -4,6 +4,10 @@
 # Windows PowerShell 5.1 (`powershell.exe`, which has the Appx module natively; PowerShell 7 needs
 # `Import-Module Appx -UseWindowsPowerShell` on some images).
 #
+# ROUND 2: signs with the Windows SDK's newest signtool (round 1's kit signtool could not sign),
+# keeps the kit attempt as a comparison, and measures BOTH packages end to end: the default
+# (MinVersion 10.0.14316.0) and the 10.0.17763.0 variant, each installed, launched and removed.
+#
 # ALL OUTPUT IS Write-Host, never Write-Output: inside a function (Install, AliasCheck) Write-Output
 # would become part of the function's return value instead of reaching the log.
 #
@@ -161,28 +165,77 @@ try {
 PhaseEnd 'certificate'
 
 # ---------------------------------------------------------------------------------------------
-PhaseStart 'sign'
+# ROUND 1 (run 43110403997): the winCodeSign-2.6.0 kit's signtool failed ("SignTool Error: A
+# required function is not present"), so Add-AppxPackage refused both packages (0x800B0100).
+# Round 2 signs with the Windows SDK's newest signtool and keeps the kit attempt as a comparison.
+PhaseStart 'tools'
 $EbCache = Join-Path $env:LOCALAPPDATA 'electron-builder\Cache'
 $tools = @(Get-ChildItem $EbCache -Recurse -Include 'signtool.exe', 'makeappx.exe' -ErrorAction SilentlyContinue)
 foreach ($t in $tools) { Write-Host "  found: $($t.FullName)" }
-$SignTool = $tools | Where-Object { $_.Name -eq 'signtool.exe' -and $_.FullName -like '*\windows-10\x64\*' } | Select-Object -First 1
-if (-not $SignTool) { $SignTool = $tools | Where-Object { $_.Name -eq 'signtool.exe' } | Select-Object -First 1 }
-if ($SignTool) { $SignTool = $SignTool.FullName; Say "signtool (electron-builder kit): $SignTool" }
-else {
-  Say "signtool (electron-builder kit): NONE under $EbCache"
-  $sdk = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe' -ErrorAction SilentlyContinue | Sort-Object FullName | Select-Object -Last 1
-  if ($sdk) { $SignTool = $sdk.FullName; Say "signtool (Windows SDK fallback): $SignTool" }
+function KitTool([string]$name) {
+  $hit = $tools | Where-Object { $_.Name -eq $name -and $_.FullName -like '*\windows-10\x64\*' } | Select-Object -First 1
+  if ($hit) { return $hit.FullName } else { return $null }
 }
-$MakeAppx = $tools | Where-Object { $_.Name -eq 'makeappx.exe' -and $_.FullName -like '*\windows-10\x64\*' } | Select-Object -First 1
-if ($MakeAppx) { $MakeAppx = $MakeAppx.FullName }
-Say "makeappx (electron-builder kit): $(if ($MakeAppx) { $MakeAppx } else { 'NONE' })"
+# The newest SDK bin\10.*\x64\<name>, by version (not by string order).
+function SdkTool([string]$name) {
+  $bin = 'C:\Program Files (x86)\Windows Kits\10\bin'
+  $dirs = @(Get-ChildItem $bin -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^10\.\d+\.\d+\.\d+$' } | Sort-Object { [version]$_.Name } -Descending)
+  foreach ($d in $dirs) { $f = Join-Path $d.FullName "x64\$name"; if (Test-Path $f) { return $f } }
+  return $null
+}
+function ToolVersion([string]$f) { if ($f) { (Get-Item $f).VersionInfo.FileVersion } else { 'n/a' } }
+$KitSignTool = KitTool 'signtool.exe'
+$SdkSignTool = SdkTool 'signtool.exe'
+$MakeAppx = KitTool 'makeappx.exe'
+if (-not $MakeAppx) { $MakeAppx = SdkTool 'makeappx.exe' }
+Say "signtool (electron-builder kit): $(if ($KitSignTool) { "$KitSignTool version $(ToolVersion $KitSignTool)" } else { 'NONE' })"
+Say "signtool (Windows SDK, newest): $(if ($SdkSignTool) { "$SdkSignTool version $(ToolVersion $SdkSignTool)" } else { 'NONE' })"
+Say "makeappx (for the variant): $(if ($MakeAppx) { "$MakeAppx version $(ToolVersion $MakeAppx)" } else { 'NONE' })"
+PhaseEnd 'tools'
 
-function SignAppx([string]$file) {
-  if (-not ($SignTool -and $Cert -and $file)) { Say "sign $file : SKIPPED (signtool, certificate or appx missing)"; return }
-  & $SignTool sign /fd SHA256 /f $Pfx /p $Pw $file 2>&1 | Write-Host
-  Say "signtool sign $(Split-Path -Leaf $file): rc=$LASTEXITCODE"
+# ---------------------------------------------------------------------------------------------
+# The 10.0.17763.0 variant, ALWAYS built (round 1 built it only as a fallback): the default
+# package, unsigned, unpacked, TargetDeviceFamily raised, repacked. uap5 is documented from build
+# 16299; electron-builder's x64 default is 10.0.14316.0 (AppxTarget.js:174).
+PhaseStart 'variant-build'
+$Appx2 = $null
+if ($Appx -and $MakeAppx) {
+  $un = Join-Path $Temp 'unpacked'; $cand = Join-Path $Temp 'TN3270-minversion.appx'
+  & $MakeAppx unpack /p $Appx /d $un /o 2>&1 | Select-Object -Last 5 | Write-Host
+  Say "makeappx unpack: rc=$LASTEXITCODE"
+  $mf = Join-Path $un 'AppxManifest.xml'
+  # The footprint files makeappx writes itself; -LiteralPath, because [ ] are wildcards to -Path.
+  foreach ($f in 'AppxSignature.p7x', 'AppxBlockMap.xml', '[Content_Types].xml') { Remove-Item -LiteralPath (Join-Path $un $f) -Force -ErrorAction SilentlyContinue }
+  $m = Get-Content -Raw $mf
+  $m = [regex]::Replace($m, 'MinVersion="[^"]*"', 'MinVersion="10.0.17763.0"')
+  $m = [regex]::Replace($m, 'MaxVersionTested="[^"]*"', 'MaxVersionTested="10.0.22621.0"')
+  [IO.File]::WriteAllText($mf, $m)
+  Say "variant TargetDeviceFamily: $([regex]::Match($m, '<TargetDeviceFamily[^>]*>').Value)"
+  & $MakeAppx pack /d $un /p $cand /o 2>&1 | Select-Object -Last 5 | Write-Host
+  Say "makeappx pack (variant): rc=$LASTEXITCODE"
+  if (Test-Path $cand) { $Appx2 = $cand }
+} else { Say 'variant build: SKIPPED (no appx or no makeappx)' }
+PhaseEnd 'variant-build'
+
+# ---------------------------------------------------------------------------------------------
+PhaseStart 'sign'
+function SignWith([string]$tool, [string]$file, [string]$label) {
+  if (-not ($tool -and $Cert -and $file)) { Say "signtool sign ($label): SKIPPED (signtool, certificate or appx missing)"; return $false }
+  & $tool sign /fd SHA256 /f $Pfx /p $Pw $file 2>&1 | Write-Host
+  $rc = $LASTEXITCODE
+  Say "signtool sign ($label) $(Split-Path -Leaf $file): rc=$rc"
+  return ($rc -eq 0)
 }
-SignAppx $Appx
+# The comparison: the kit's signtool on a COPY, so its failure cannot touch the packages installed below.
+if ($Appx) {
+  $kitCopy = Join-Path $Temp 'kit-signtool-copy.appx'
+  Copy-Item $Appx $kitCopy -Force
+  $null = SignWith $KitSignTool $kitCopy 'kit signtool, comparison'
+}
+$SignTool = if ($SdkSignTool) { $SdkSignTool } else { $KitSignTool }
+Say "signing with: $SignTool"
+$null = SignWith $SignTool $Appx 'default'
+$null = SignWith $SignTool $Appx2 'minversion'
 PhaseEnd 'sign'
 
 # ---------------------------------------------------------------------------------------------
@@ -217,58 +270,43 @@ function AliasCheck([string]$label) {
   return $null
 }
 
-$Pkg = $null
-if ($Appx) { $Pkg = Install $Appx 'default' }
-$Alias = AliasCheck 'default'
-
-# ONLY IF the default build gave no install or no alias: the same package with the manifest's
-# TargetDeviceFamily raised to 10.0.17763.0 (uap5 is documented from build 16299; electron-builder's
-# x64 default is 10.0.14316.0, AppxTarget.js:174), unpacked and repacked with the kit's makeappx.
-if ($Appx -and (-not $Pkg -or -not $Alias)) {
-  PhaseStart 'variant-minversion'
-  if ($Pkg) { Remove-AppxPackage -Package $Pkg.PackageFullName -ErrorAction SilentlyContinue }
-  $un = Join-Path $Temp 'unpacked'; $Appx2 = Join-Path $Temp 'TN3270-minversion.appx'
-  if ($MakeAppx) {
-    & $MakeAppx unpack /p $Appx /d $un /o 2>&1 | Select-Object -Last 5 | Write-Host
-    Say "makeappx unpack: rc=$LASTEXITCODE"
-    $mf = Join-Path $un 'AppxManifest.xml'
-    # The footprint files makeappx writes itself; -LiteralPath, because [ ] are wildcards to -Path.
-    foreach ($f in 'AppxSignature.p7x', 'AppxBlockMap.xml', '[Content_Types].xml') { Remove-Item -LiteralPath (Join-Path $un $f) -Force -ErrorAction SilentlyContinue }
-    $m = Get-Content -Raw $mf
-    $m = [regex]::Replace($m, 'MinVersion="[^"]*"', 'MinVersion="10.0.17763.0"')
-    $m = [regex]::Replace($m, 'MaxVersionTested="[^"]*"', 'MaxVersionTested="10.0.22621.0"')
-    [IO.File]::WriteAllText($mf, $m)
-    Say "variant TargetDeviceFamily: $([regex]::Match($m, '<TargetDeviceFamily[^>]*>').Value)"
-    & $MakeAppx pack /d $un /p $Appx2 /o 2>&1 | Select-Object -Last 5 | Write-Host
-    Say "makeappx pack (variant): rc=$LASTEXITCODE"
-    SignAppx $Appx2
-    PhaseEnd 'variant-minversion'
-    if (Test-Path $Appx2) {
-      $Pkg = Install $Appx2 'minversion'
-      $Alias = AliasCheck 'minversion'
-    }
-  } else { Say 'variant: SKIPPED (no makeappx found)'; PhaseEnd 'variant-minversion' }
+# ---------------------------------------------------------------------------------------------
+# Each package in turn: install, Get-AppxPackage (also as the compressed JSON store-probe.mjs will
+# parse), the alias, the alias launch, the direct launch, then uninstall before the next.
+function MeasurePackage([string]$file, [string]$label) {
+  if (-not $file) { Say "$label : SKIPPED (no package)"; return }
+  $pkg = Install $file $label
+  if ($pkg) {
+    $json = Get-AppxPackage $PkgName | ConvertTo-Json -Compress
+    Say "Get-AppxPackage json ($label): $json"
+  }
+  $alias = AliasCheck $label
+  $inst = if ($pkg) { $pkg.InstallLocation } else { $null }
+  if ($alias) {
+    PhaseStart "$label-alias-launch"
+    Launch "$label-alias" $alias $inst
+    PhaseEnd "$label-alias-launch"
+  } else { Say "$label alias launch: SKIPPED (no alias)" }
+  if ($inst) {
+    PhaseStart "$label-direct-launch"
+    $direct = Join-Path $inst 'app\TN3270.exe'
+    Say "$label direct exe exists: $(if (Test-Path $direct) { "YES $direct" } else { "NO $direct" })"
+    Launch "$label-direct" $direct $inst
+    PhaseEnd "$label-direct-launch"
+    foreach ($q in (ProcsUnder $inst)) { Stop-Process -Id $q.ProcessId -Force -ErrorAction SilentlyContinue }
+  } else { Say "$label direct launch: SKIPPED (not installed)" }
+  foreach ($p in @(Get-AppxPackage $PkgName)) {
+    try { Remove-AppxPackage -Package $p.PackageFullName -ErrorAction Stop; Say "Remove-AppxPackage ($label) $($p.PackageFullName): OK" }
+    catch { Say "Remove-AppxPackage ($label) $($p.PackageFullName): FAILED $($_.Exception.Message)" }
+  }
+  Say "alias gone after uninstall ($label): $(if (Get-Command tn3270-gui.exe -ErrorAction SilentlyContinue) { 'NO' } else { 'YES' })"
 }
 
-# ---------------------------------------------------------------------------------------------
-$Inst = if ($Pkg) { $Pkg.InstallLocation } else { $null }
-if ($Alias) {
-  PhaseStart 'alias-launch'
-  Launch 'alias' $Alias $Inst
-  PhaseEnd 'alias-launch'
-} else { Say 'alias launch: SKIPPED (no alias)' }
-
-if ($Inst) {
-  PhaseStart 'direct-launch'
-  $direct = Join-Path $Inst 'app\TN3270.exe'
-  Say "direct exe exists: $(if (Test-Path $direct) { "YES $direct" } else { "NO $direct" })"
-  Launch 'direct' $direct $Inst
-  PhaseEnd 'direct-launch'
-} else { Say 'direct launch: SKIPPED (not installed)' }
-
+# Not `Measure`: that is Measure-Object's alias, and aliases win over functions.
+MeasurePackage $Appx 'default'
+MeasurePackage $Appx2 'minversion'
 # ---------------------------------------------------------------------------------------------
 PhaseStart 'cleanup'
-foreach ($q in (ProcsUnder $Inst)) { Stop-Process -Id $q.ProcessId -Force -ErrorAction SilentlyContinue }
 foreach ($p in @(Get-AppxPackage $PkgName)) {
   try { Remove-AppxPackage -Package $p.PackageFullName -ErrorAction Stop; Say "Remove-AppxPackage $($p.PackageFullName): OK" }
   catch { Say "Remove-AppxPackage $($p.PackageFullName): FAILED $($_.Exception.Message)" }
