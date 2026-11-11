@@ -21,6 +21,13 @@
 # app-sandbox is INVALID and launches nothing; a golden counts only when the probe line names the
 # container (`sandbox=io.github.athornton.tn3270`).
 #
+# ROUND 3 (run 43114227702): B was VALID (sandbox + group signed, --verify rc=0) and still died on
+# the same FATAL, so ordinary Electron is ruled out and B is dropped. C and D were INVALID: the
+# MAS build carries Contents/Library/LoginItems/TN3270 Login Helper.app, which ordinary Electron
+# lacks, and only Contents/Frameworks was signed. ROUND 4: C and D, with the login helper signed
+# (app-sandbox only, as Electron's guide gives it), every nested bundle and Mach-O enumerated
+# before signing, and every unsigned subcomponent --verify names printed after.
+#
 # and per variant four launches, to separate what triggers a crash: bare, --user-data-dir only,
 # replay/shot env only, the full golden; plus the outside-read NEGATIVE only when the golden matched.
 #
@@ -203,6 +210,7 @@ prepare() {
   echo "SPIKE: $v inherit entitlements: $(tr -d '\n' < "$inherit" | sed 's/.*<dict>//; s#</dict>.*##')"
   plutil -lint "$main" || bad="$bad main plist fails plutil -lint;"
   plutil -lint "$inherit" || bad="$bad inherit plist fails plutil -lint;"
+  plutil -lint "$LOGIN_PLIST" || bad="$bad login-helper plist fails plutil -lint;"
   if [ -n "$bad" ]; then echo "SPIKE: $v: INVALID ($bad)"; return 1; fi
   rm_container
   rm -rf "$W/$v"; mkdir -p "$W/$v"
@@ -216,10 +224,27 @@ prepare() {
     echo "SPIKE: $v ElectronTeamID set: $(/usr/libexec/PlistBuddy -c 'Print :ElectronTeamID' "$APP/Contents/Info.plist" 2>&1)"
   fi
   echo "SPIKE: $v Frameworks: $(ls "$APP/Contents/Frameworks" | tr '\n' ' ')"
+  # EVERY nested bundle and Mach-O, so an unsigned newcomer (round 3's login helper) is visible.
+  find "$APP/Contents" \( -name '*.app' -o -name '*.framework' -o -name '*.dylib' -o -name '*.appex' -o -name '*.xpc' \) > "$W/$v.nested"
+  find "$APP/Contents" -type f -perm -u+x \( -path '*/MacOS/*' -o -path '*/Helpers/*' \) >> "$W/$v.nested"
+  find "$APP/Contents" -type f -perm -u+x ! -name '*.dylib' -print0 | xargs -0 file 2>/dev/null | grep 'Mach-O' | cut -d: -f1 >> "$W/$v.nested"
+  sort -u "$W/$v.nested" -o "$W/$v.nested"
+  echo "SPIKE: $v nested bundles and Mach-O: $(wc -l < "$W/$v.nested" | tr -d ' ')"
+  sed "s#^$APP/##; s/^/    /" "$W/$v.nested"
   find "$APP/Contents/Frameworks" -name '*.dylib' -print0 | xargs -0 -n1 codesign --force -s - || { echo "SPIKE: $v dylib signing rc=$?"; bad="$bad dylib signing failed;"; }
   # --deep on frameworks only: Electron Framework.framework nests executables (Helpers/chrome_crashpad_handler).
   find "$APP/Contents/Frameworks" -maxdepth 1 -name '*.framework' -print0 | xargs -0 -n1 codesign --force --deep -s - || { echo "SPIKE: $v framework signing rc=$?"; bad="$bad framework signing failed;"; }
   find "$APP/Contents/Frameworks" -maxdepth 1 -name '*.app' -print0 | xargs -0 -n1 codesign --force -s - --entitlements "$inherit" || { echo "SPIKE: $v helper signing rc=$?"; bad="$bad helper signing failed;"; }
+  # Login items (the MAS build's `TN3270 Login Helper.app`): its executable, then the bundle, with
+  # $LOGIN_PLIST -- Electron's guide (v8.0.0, loginhelper.plist): app-sandbox only.
+  local li
+  for li in "$APP"/Contents/Library/LoginItems/*.app; do
+    [ -d "$li" ] || continue
+    echo "SPIKE: $v login item: $(basename "$li"), entitlements $(basename "$LOGIN_PLIST")"
+    find "$li/Contents/MacOS" -type f -perm -u+x -print0 | xargs -0 -n1 codesign --force -s - --entitlements "$LOGIN_PLIST" \
+      || { echo "SPIKE: $v login item executable signing rc=$?"; bad="$bad login item executable signing failed;"; }
+    codesign --force -s - --entitlements "$LOGIN_PLIST" "$li" || { echo "SPIKE: $v login item signing rc=$?"; bad="$bad login item signing failed;"; }
+  done
   codesign --force -s - --entitlements "$main" "$APP" || { echo "SPIKE: $v app signing rc=$?"; bad="$bad app signing failed;"; }
   codesign -d --entitlements :- "$APP" > "$W/$v.ent" 2>&1 || true
   cat "$W/$v.ent"
@@ -230,7 +255,11 @@ prepare() {
     codesign -d --entitlements :- "$h" > "$W/$v.hent" 2>&1 || true
     echo "SPIKE: $v helper $(basename "$h") inherit: $(has com.apple.security.inherit "$W/$v.hent") application-groups: $(has com.apple.security.application-groups "$W/$v.hent")"
   done
-  codesign --verify --deep --strict --verbose=2 "$APP" 2>&1; echo "SPIKE: $v codesign --verify --deep --strict rc=$?"
+  codesign --verify --deep --strict --verbose=2 "$APP" > "$W/$v.verify" 2>&1; local vrc=$?
+  cat "$W/$v.verify"
+  echo "SPIKE: $v codesign --verify --deep --strict rc=$vrc"
+  grep -E 'In subcomponent|not signed at all|code object is not signed' "$W/$v.verify" | sed "s/^/SPIKE: $v unsigned subcomponent: /"
+  [ "$vrc" = 0 ] || bad="$bad codesign --verify --deep --strict rc=$vrc;"
   codesign -dv "$APP" 2>&1 | grep -E '^(Identifier|Signature|Format)=' || true
   grep -q com.apple.security.app-sandbox "$W/$v.ent" || bad="$bad no app-sandbox in the app's signature;"
   if [ -n "$bad" ]; then echo "SPIKE: $v: INVALID ($bad)"; return 1; fi
@@ -293,14 +322,16 @@ plist "$W/B-inherit.plist" "$SANDBOX" "$INHERIT" "$APPGROUPS"
 # user-selected and the JIT keys on top of the guide's two.
 plist "$W/D-main.plist" "$SANDBOX" "$MAIN_KEYS" "$APPGROUPS"
 plist "$W/D-inherit.plist" "$SANDBOX" "$INHERIT"
+# The login helper: Electron's guide, v8.0.0 (docs/tutorial/mac-app-store-submission-guide.md,
+# loginhelper.plist; later versions dropped the section): app-sandbox only.
+LOGIN_PLIST="$W/loginhelper.plist"
+plist "$LOGIN_PLIST" "$SANDBOX"
 end setup
 
 # ---------------------------------------------------------------------------------------------
-echo "SPIKE: variant A: SKIPPED in round 3 (answered by run 43112504521: every launch FATAL in mach_port_rendezvous_mac.cc:159)"
+echo "SPIKE: variant A: SKIPPED since round 3 (answered by run 43112504521: every launch FATAL in mach_port_rendezvous_mac.cc:159)"
 
-begin variant-B
-if prepare B "$W/zip/TN3270.app" "$W/B-main.plist" "$W/B-inherit.plist"; then launches B; fi
-end variant-B
+echo "SPIKE: variant B: SKIPPED in round 4 (answered by run 43114227702: valid sandbox + app group, same mach_port_rendezvous FATAL)"
 
 for v in C D; do
   begin "variant-$v"
