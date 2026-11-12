@@ -87,7 +87,7 @@ describe('store stand-in config', () => {
     expect(build).toBeGreaterThanOrEqual(16299);
   });
 
-  it.each(['entitlements.mas.inherit.plist', 'entitlements.mas.loginhelper.plist'])( // MUTATION 1: main dropped so the gate reaches the probe
+  it.each(['entitlements.mas.plist', 'entitlements.mas.inherit.plist', 'entitlements.mas.loginhelper.plist'])(
     '%s grants app-sandbox',
     (f) => {
       expect(plist(f)['com.apple.security.app-sandbox']).toBe(true);

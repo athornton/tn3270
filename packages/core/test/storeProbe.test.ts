@@ -411,7 +411,7 @@ describe('removeContainer: ONLY <home>/Library/Containers/io.github.athornton.tn
 });
 
 describe('main on Windows (a port of win-appx.ps1)', () => {
-  it.skip('happy path: the spike\'s steps in its order, confined by the alias, both checks ok, cleanup, exit 0', async () => { // MUTATION 3: the route no longer uses the alias
+  it('happy path: the spike\'s steps in its order, confined by the alias, both checks ok, cleanup, exit 0', async () => {
     const w = winWorld();
     expect(await main([WIN_DIR], w.io)).toBe(0);
     expect(w.events.filter((e) => e.startsWith('run ') || e === 'launch' || e.startsWith('check ') || e.startsWith('rm ')).map((e) => e.replace(/ C:\\.*$/, ''))).toEqual([
