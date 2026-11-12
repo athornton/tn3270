@@ -19,6 +19,7 @@
 // Signing mode or not, decided once from the environment (signing.cjs explains both modes).
 // process.platform, not a target flag: each OS is built (and signed) on its own runner.
 const signing = require('./signing.cjs').signingOptions(process.env, process.platform);
+const path = require('node:path');
 
 module.exports = {
   appId: 'io.github.athornton.tn3270',
@@ -124,7 +125,10 @@ module.exports = {
   deb: { packageName: 'tn3270-gui' },
 
   win: {
-    target: [{ target: 'nsis', arch: 'x64' }],
+    // nsis: the real installer. appx: the Store stand-in (store-probe plan Task 3/6), x64 only,
+    // built and launched by scripts/store-probe.mjs on windows-latest and never uploaded (the
+    // mac equivalent is the separate `mas` build in Task 6, not a target here; see `mac` above).
+    target: [{ target: 'nsis', arch: 'x64' }, { target: 'appx', arch: 'x64' }],
     // Signing mode only: azureSignOptions (Azure Artifact Signing) and forceCodeSigning. Present at
     // all, azureSignOptions signs every Windows build, which is why it lives behind the switch.
     // CI never turns it on: Windows signing is not wired (signing.cjs header).
@@ -134,5 +138,32 @@ module.exports = {
   nsis: {
     oneClick: false,
     allowToChangeInstallationDirectory: true,
+  },
+
+  /*
+    The Store stand-in's identity (store-probe plan Task 3). `identityName`, `publisher` and
+    `publisherDisplayName` are PLACEHOLDERS until a real Store listing is reserved (the plan's
+    piece 3); this appx is a stand-in the store-probe script installs and launches on
+    windows-latest to prove MSIX/package identity, and it is NEVER uploaded (package.yml's
+    `gui-windows-latest` upload lists `*.exe`, not `*.appx`).
+
+    `customExtensionsPath` is ABSOLUTE, not relative to `buildResources` as scheme.json's
+    description implies: AppxTarget.js:344 resolves it with `path.resolve(appInfo.appDir, ...)`,
+    and `appDir` is the bundle directory `packages/gui/app`, not `resources/` -- a relative path
+    here would be read from the wrong directory. The alias file declares the
+    `windows.appExecutionAlias` extension for `tn3270-gui.exe` (proven by
+    scripts/spike/appx-extensions.xml, run 43110403997: makeappx accepted the inline uap5
+    namespace).
+
+    `minVersion`: the manifest's `uap5` element is documented from Windows build 16299
+    (store-probe spec Amendment 2026-11-12); 10.0.17763.0 is comfortably above that and installed
+    cleanly in the spike (run 43112504521).
+  */
+  appx: {
+    identityName: 'TN3270.Probe',
+    publisher: 'CN=TN3270 Store Probe',
+    publisherDisplayName: 'TN3270 store probe',
+    minVersion: '10.0.17763.0',
+    customExtensionsPath: path.join(__dirname, 'resources', 'appx-extensions.xml'),
   },
 };

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- store-probe plan Task 3: entitlements for the helper apps signed inside the MAS stand-in
+     (Contents/Frameworks/*.app), copied from the variant-D plist proved in run 43115293433.
+     app-sandbox and inherit ONLY: NO application-groups here (variant C added the group to this
+     file too and the app crashed with "GPU process isn't usable"). PLACEHOLDER; never uploaded. -->
+<plist version="1.0"><dict>
+<key>com.apple.security.app-sandbox</key><true/>
+<key>com.apple.security.inherit</key><true/>
+</dict></plist>

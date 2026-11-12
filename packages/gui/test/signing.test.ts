@@ -77,7 +77,8 @@ describe('electron-builder.cjs', () => {
     expect(cfg.mac.forceCodeSigning).toBeUndefined();
     expect(cfg.win.azureSignOptions).toBeUndefined();
     expect(cfg.win.forceCodeSigning).toBeUndefined();
-    expect(cfg.win.target).toEqual([{ target: 'nsis', arch: 'x64' }]); // the spread kept the rest
+    // appx x64 (store-probe plan Task 3) added alongside nsis; see storeConfig.test.ts.
+    expect(cfg.win.target).toEqual([{ target: 'nsis', arch: 'x64' }, { target: 'appx', arch: 'x64' }]); // the spread kept the rest
   });
 
   it('spreads signingOptions into mac and win rather than retyping either', () => {

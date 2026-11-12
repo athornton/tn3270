@@ -1,0 +1,5 @@
+<uap5:Extension xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5" Category="windows.appExecutionAlias" Executable="app\TN3270.exe" EntryPoint="Windows.FullTrustApplication">
+  <uap5:AppExecutionAlias>
+    <uap5:ExecutionAlias Alias="tn3270-gui.exe" />
+  </uap5:AppExecutionAlias>
+</uap5:Extension>
