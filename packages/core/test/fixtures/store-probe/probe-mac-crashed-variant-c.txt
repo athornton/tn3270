@@ -1,0 +1,9 @@
+# Captured: CI run 43115293433 (store-probe spike round 4), 2026-11-11, macos-latest, variant C "bare" launch,
+# crashed rc=133 after ~4 s ("C bare: crashed rc=133"): sandboxed per its probe line, then the GPU FATAL. Its stdout+stderr.
+probe: sandbox=io.github.athornton.tn3270 windowsStore=false
+[32028:1111/225546.831526:ERROR:content/browser/gpu/gpu_process_host.cc:1035] GPU process exited unexpectedly: exit_code=5
+[32028:1111/225546.832785:ERROR:content/browser/network_service_instance_impl.cc:650] Network service crashed or was terminated, restarting service.
+[32028:1111/225547.072310:ERROR:content/browser/gpu/gpu_process_host.cc:1035] GPU process exited unexpectedly: exit_code=5
+[32028:1111/225547.077575:ERROR:content/browser/network_service_instance_impl.cc:650] Network service crashed or was terminated, restarting service.
+[32028:1111/225547.144687:ERROR:content/browser/gpu/gpu_process_host.cc:1035] GPU process exited unexpectedly: exit_code=5
+[32028:1111/225547.144749:FATAL:content/browser/gpu/gpu_data_manager_impl_private.cc:417] GPU process isn't usable. Goodbye.

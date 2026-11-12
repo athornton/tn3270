@@ -1,0 +1,5 @@
+# Captured: CI run 43112504521 (store-probe spike round 2), 2026-11-11, macos-latest, variant B "bare" launch,
+# no exit status: alive after 20 s and killed ("B bare: alive"). B ran UNSANDBOXED (its plists failed lint).
+# The launch's whole stdout+stderr (cat of B-bare.out; xtrace removed).
+probe: sandbox=none windowsStore=false
+connect: dialog shown

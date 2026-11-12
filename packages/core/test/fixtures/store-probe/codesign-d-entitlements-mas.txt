@@ -1,0 +1,6 @@
+# Captured: CI run 43115293433 (store-probe spike round 4), 2026-11-11, macos-latest, variant D (the MAS build,
+# signed as the spike's mac-sandbox.sh prepare() does; in git at bcdb031). Exit status NOT recorded: the spike ran it `|| true`.
+# codesign -d --entitlements :- <scratch>/D/TN3270.app
+Executable=/Users/runner/work/_temp/spike/D/TN3270.app/Contents/MacOS/TN3270
+warning: Specifying ':' in the path is deprecated and will not work in a future release
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>com.apple.security.app-sandbox</key><true/><key>com.apple.security.application-groups</key><array><string>H68TN685J4.io.github.athornton.tn3270</string></array><key>com.apple.security.cs.allow-jit</key><true/><key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/><key>com.apple.security.files.user-selected.read-write</key><true/><key>com.apple.security.network.client</key><true/></dict></plist>

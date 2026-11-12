@@ -25,6 +25,8 @@ import { buildMenuTemplate, modelMenuStates, applyChoiceStates, type GeometryMen
 import { createTransferController } from './transferWindow.js';
 import { layoutFor } from './appRoot.js';
 import { stripElectronSwitches } from './electronSwitches.js';
+import { probeLine } from './probe.js';
+import { describeFileError } from './seamFile.js';
 
 /**
  * Electron main: the Session, the socket and the window live here.
@@ -341,6 +343,31 @@ let transferScenarioRunning = false;
  */
 let shuttingDown = false;
 
+/**
+ * A seam could not read or write the file it was given: one line on stderr, then EXIT 1.
+ *
+ * FOR `TN3270_GUI_REPLAY`'s read and `TN3270_GUI_SHOT`'s write, which both do synchronous file I/O
+ * inside `app.whenReady()`'s promise. Uncaught, that throw is an unhandled rejection: the steps
+ * after it -- the capture, `quitIfKeysOnly` -- never run, the terminal window stays open, and so
+ * `window-all-closed` never fires either. The process HANGS, which a harness cannot tell from a
+ * slow paint. MEASURED in CI on the MAS build (EPERM on the trace, killed at 60 s) and on Linux
+ * with ENOENT, EACCES, EISDIR and a shot path in a missing directory.
+ *
+ * EXITS EVEN WITHOUT THE SHOT SEAM, unlike the startup `fail(...)` paths, which leave a painted
+ * error up for a real user. Only an env var somebody deliberately set reaches here -- the rule
+ * `maybeSendKeys` states for its own stderr-only refusal -- so there is no double-clicker to
+ * strand, and a window left open would be the hang again. 1, not the usage error 2: the spec was
+ * well-formed and the file system refused it. DRAINED before exiting, because a write to a pipe is
+ * asynchronous and `app.exit` would otherwise be free to drop the one line that says why.
+ */
+async function exitOnSeamFileError(seam: string, verb: string, path: string, err: unknown): Promise<void> {
+  shuttingDown = true;
+  await new Promise<void>((r) => {
+    process.stderr.write(`${describeFileError(seam, verb, path, err)}\n`, () => { r(); });
+  });
+  app.exit(1);
+}
+
 /** The connect a failure came from, when it came from one. */
 interface ConnectTarget {
   readonly host: string;
@@ -378,6 +405,15 @@ function explain(err: unknown, target?: ConnectTarget): string {
 }
 
 app.whenReady().then(async () => {
+  /*
+    A TENTH TEST SEAM: `TN3270_GUI_PROBE=1` prints the process's OWN confinement signals -- macOS's
+    `APP_SANDBOX_CONTAINER_ID` and Electron's `process.windowsStore` -- as one `probe: ...` stdout
+    line that scripts/store-probe.mjs judges (store-probe spec, section 2). It is the very first
+    thing app-ready does, before any window work, so the line still appears if a later step throws.
+  */
+  if (process.env['TN3270_GUI_PROBE'] === '1') {
+    process.stdout.write(`${probeLine(process.env, process as unknown as { windowsStore: boolean | undefined; mas: boolean | undefined })}\n`);
+  }
   /*
     macOS ignores a window's `icon`: the Dock shows the .app bundle's icon, which electron-builder
     makes from the same PNG. An UNPACKAGED run (`tn3270-gui` from npm, or `electron dist/main.js`)
@@ -1860,7 +1896,19 @@ async function startSession(
     if (mode === 'dialog') throw new Error('startSession: replay is not reachable from the Connect dialog');
     // NO GEOMETRY IS RESOLVED HERE: only `connect()` resolves it, so `-oversize` (and `auto`'s
     // measure) does not apply under TN3270_GUI_REPLAY -- the session keeps the model's sizes.
-    session.replay(readFileSync(SEAM.replay, 'utf8'));
+    // CAUGHT HERE, AT THE SEAM, because nothing above catches it: this runs inside
+    // `app.whenReady()`'s promise, so a throw from `readFileSync` was an unhandled rejection with
+    // the terminal window still open -- and the process SAT. MEASURED in CI (run 43115293433): an
+    // App-Sandboxed MAS build could not read the trace, logged `UnhandledPromiseRejectionWarning:
+    // Error: EPERM` and hung until the job killed it at 60 s. `scripts/seam-errors.mjs` pins it.
+    let trace: string;
+    try {
+      trace = readFileSync(SEAM.replay, 'utf8');
+    } catch (err) {
+      await exitOnSeamFileError('replay', 'read', SEAM.replay, err);
+      return;
+    }
+    session.replay(trace);
     send();
     // The session is passed so a `wait:` step works here too -- a replay paints synchronously, so
     // every wait in a replay run matches on its first poll. That is what makes the seam's own
@@ -3074,20 +3122,31 @@ async function maybeCapture(win: BrowserWindow, failExitCode?: number): Promise<
   if (path === '') return;
   await new Promise((r) => setTimeout(r, SEAM.shotMs));
   const image = await win.webContents.capturePage();
-  writeFileSync(path, image.toPNG());
+  // The file being written, for the error line if a write throws -- the PNG or its hash.
+  let writing = path;
+  try {
+    writeFileSync(writing, image.toPNG());
 
-  /**
-   * The hash is of the RAW BITMAP, not of the PNG.
-   *
-   * Rendering is deterministic -- bitmap glyphs at integer scale with smoothing off have no
-   * hinting and no subpixel antialiasing -- but the PNG ENCODER is not part of that promise
-   * and can change between Electron versions. Hashing `toBitmap()` compares what was drawn;
-   * hashing the file would compare what was drawn AND how it was compressed, and a goldens
-   * suite that breaks on an Electron upgrade teaches people to run --update without looking.
-   *
-   * The PNG is still written, for a human to look at when a hash does differ.
-   */
-  writeFileSync(`${path}.sha256`, createHash('sha256').update(image.toBitmap()).digest('hex'));
+    /**
+     * The hash is of the RAW BITMAP, not of the PNG.
+     *
+     * Rendering is deterministic -- bitmap glyphs at integer scale with smoothing off have no
+     * hinting and no subpixel antialiasing -- but the PNG ENCODER is not part of that promise
+     * and can change between Electron versions. Hashing `toBitmap()` compares what was drawn;
+     * hashing the file would compare what was drawn AND how it was compressed, and a goldens
+     * suite that breaks on an Electron upgrade teaches people to run --update without looking.
+     *
+     * The PNG is still written, for a human to look at when a hash does differ.
+     */
+    writing = `${path}.sha256`;
+    writeFileSync(writing, createHash('sha256').update(image.toBitmap()).digest('hex'));
+  } catch (err) {
+    // CAUGHT, for the reason at `exitOnSeamFileError`: a throw here is an unhandled rejection with
+    // the terminal window still open, and the run hangs instead of failing. MEASURED: a shot path
+    // in a missing directory sat until the harness killed it.
+    await exitOnSeamFileError('shot', 'write', writing, err);
+    return;
+  }
   const { width, height } = image.getSize();
   process.stdout.write(`shot: ${path} ${width}x${height}\n`);
   if (failExitCode !== undefined) {

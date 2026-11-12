@@ -1,0 +1,6 @@
+# Captured: CI run 43114227702 (store-probe spike round 3), 2026-11-11, macos-latest, variant D, exit 1
+# ("SPIKE: D app signing rc=1"): codesign naming the unsigned subcomponent. This is the SIGNING step's output;
+# the round-3 --verify said only the first line. The tests append it to a --verify capture as a composite.
+# codesign --force -s - --entitlements <D-main.plist> <scratch>/D/TN3270.app
+/Users/runner/work/_temp/spike/D/TN3270.app: code object is not signed at all
+In subcomponent: /Users/runner/work/_temp/spike/D/TN3270.app/Contents/Library/LoginItems/TN3270 Login Helper.app

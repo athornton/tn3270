@@ -1621,15 +1621,17 @@ holds as one item.
    release 0.1.4): a `github-release` job after `publish` attaches the run's seven native
    installers and a `SHA256SUMS`, with notes from the version's `CHANGELOG.md` entry, which scriv
    collects from a fragment written with each functional change (`docs/releasing.md`).
-   **macOS code signing is built and proven** (2026-11-10, branch `signing`, not yet merged; a
+   **macOS code signing is built and proven** (2026-11-10; merged 2026-11-11 as `db5a93d`; a
    signed CI run, 42959265358, signed, notarized, stapled, verified and launched the app). A tag
    run signs the mac app with a Developer ID, notarizes and staples it, and verifies it
    (`docs/releasing.md`, *Code signing*). **Windows is not signed in CI**: Azure Artifact Signing
    was dropped (no Azure subscription; spec amendment 2026-11-11), and every run verifies the
    Windows installer is unsigned. Windows signing is planned through the **Microsoft Store as an
-   MSIX** (Microsoft signs it), a separate design not yet written; the unsigned NSIS `.exe` stays
-   a release artifact. The Mac App Store is a different path and is still undecided: it needs App
-   Sandbox and its own certificate.
+   MSIX** (Microsoft signs it); the unsigned NSIS `.exe` stays a release artifact. The Mac App
+   Store is planned too, and neither store gets a submission before x3270 parity.
+   **Store probe** (2026-11-12, branch `store-probe`): every CI run builds and launches an
+   App-Sandboxed Mac App Store stand-in and an installed MSIX, each proving its confinement and
+   passing package-smoke's two checks; nothing is uploaded (`docs/releasing.md`, *Store probe*).
 15. **The rest of the GUI ("milestone B").** `File` → `Connect…` in a running window (which means
    hoisting the startup block's once-only IPC handlers and quit hook), recent hosts, a config file
    and preferences, light and dark modes, font choice. Moved up from the "super-terminal" stretch
