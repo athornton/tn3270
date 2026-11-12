@@ -101,9 +101,11 @@
  * `Cannot read properties of undefined (reading 'onAtlas')`, naming `renderer.js` instead. The
  * misdirection `httpstatic.ts:94-100` records is therefore not repeated here.
  *
- * `transferBoot.ts` is the file this phase exists for, and that file's own header says so: it has
- * no unit test, because `vitest.config.ts` sets `environment: 'node'`, nothing in this repo has a
- * `document`, and jsdom is not a dependency.
+ * `transferBoot.ts` is the file this phase exists for. Since 2026-11-12 it has a unit test,
+ * `packages/web/test/transferBoot.test.ts`, which drives `bootTransfer` over a small hand-made fake
+ * document (vitest's `environment` is `'node'` and jsdom is not a dependency). That test pins the
+ * receive's derived name and its single download; it cannot click real elements, lay out a page or
+ * reach a real download manager, which is what this phase is for.
  *
  * ## IT CLICKS BY LABEL
  *
@@ -1826,7 +1828,8 @@ async function runTransferPhase(url) {
     // WHAT IT GUARDS: `bridge.cancel()` drops the staged bytes, so the ending then sees "nothing
     // staged, nothing refused" -- the legal ZERO-BYTE receive -- and `finishEmpty()` would
     // download an empty `nap.h`. `transferBoot.ts`'s cancel handler holds a refusal for a
-    // cancelled receive to stop that, and no unit test can reach that file; this is its cover.
+    // cancelled receive to stop that. `transferBoot.test.ts` does not cover the cancel handler, so
+    // this is its cover.
     {
       const downloadsBeforeCancel = downloadsBegun().length;
       const sentBeforeCancel = await sentCount();
