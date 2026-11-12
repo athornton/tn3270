@@ -36,3 +36,20 @@ describe('route paths do not depend on the host\'s path rules', () => {
     expect([w.shot, w.userData]).toEqual(['C:\\scratch\\shot-1\\shot.png', 'C:\\scratch\\shot-1\\user-data']);
   });
 });
+
+describe('main\'s drivers do not depend on the host\'s path rules', () => {
+  it.each(['win32', 'posix'] as const)('host rules %s: the darwin driver\'s paths use /, the win32 driver\'s use \\', async (rules) => {
+    host.rules = rules;
+    const { main } = await import('../../../scripts/store-probe.mjs');
+    const { macWorld, winWorld, MAC_DIR, WIN_DIR, WIN_WORK, SIGNTOOL } = await import('./helpers/storeProbeWorld.js');
+    const m = macWorld();
+    expect(await main([MAC_DIR], m.io)).toBe(0);
+    const macPaths = m.calls.filter((c) => c[0] === 'codesign' || c[0] === 'ditto' || c[0] === 'find').map((c) => c.find((a) => a.startsWith('/scratch'))!);
+    expect(macPaths.length).toBeGreaterThan(10);
+    for (const p of macPaths) expect(p, p).not.toContain('\\');
+    expect(m.events).toContain('rm /Users/runner/Library/Containers/io.github.athornton.tn3270');
+    const w = winWorld();
+    expect(await main([WIN_DIR], w.io)).toBe(0);
+    expect(w.calls.find((c) => c[0] === SIGNTOOL)!.slice(4)).toEqual(['/f', `${WIN_WORK}\\probe.pfx`, '/p', expect.any(String), `${WIN_WORK}\\TN3270-0.1.4-win-x64.appx`]);
+  });
+});
