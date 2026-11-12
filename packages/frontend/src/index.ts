@@ -51,11 +51,13 @@ export { defaultSession } from './session.js';
 // the byte-sequence table itself is terminal-specific, and the GUI will have its own
 // KeyboardEvent mapper beside it rather than a shared abstraction over both. See
 // keymap.ts on why the table is MOVED here rather than generalised.
-export { lookup, printableRun, isValidPf, PARTIAL, MAX_SEQUENCE_LENGTH } from './keymap.js';
-export type { Action } from './keymap.js';
+export {
+  lookup, printableRun, isValidPf, PARTIAL, MAX_SEQUENCE_LENGTH, TERMINAL_BINDINGS,
+} from './keymap.js';
+export type { Action, TerminalBinding } from './keymap.js';
 
 // The virtual keypad's key set, as data. Here rather than in `canvas` because the TUI's
-// overlay offers the same keys and `tui` cannot import `canvas` -- two lists of 47 keys
+// overlay offers the same keys and `tui` cannot import `canvas` -- two lists of 48 keys
 // would drift silently. Pure data: no pixels, no cells-to-pixels arithmetic.
 export { KEYPAD_KEYS } from './keypad.js';
 export type { KeypadKey } from './keypad.js';

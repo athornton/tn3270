@@ -3,7 +3,9 @@ import {
   AckAid, AID, BIND_OFF, BIND_RU, resolve, Session, TelnetCmd as T, TelnetOpt as O, Tn3270eDataType,
   Tn3270eFunc, Tn3270eOp, type Connection, type GeometrySetting,
 } from '@tn3270/core';
-import { applicable, TRANSFER_FIELDS, type Action, type TransferFiles } from '@tn3270/frontend';
+import {
+  applicable, KEYPAD_KEYS, TERMINAL_BINDINGS, TRANSFER_FIELDS, type Action, type TransferFiles,
+} from '@tn3270/frontend';
 import { App, type HostProcess, type InputStream, type OutputStream } from '../src/app.js';
 import { measureTerminal } from '../src/render.js';
 import { overlayLines } from '../src/keypadOverlay.js';
@@ -570,6 +572,39 @@ const marked = (selected: number): string => overlayLines(selected)[selected]!;
  * keystroke drew. One overlay keystroke is one `draw()`, so one write.
  */
 const latest = (h: Harness): string => h.stdout.written[h.stdout.written.length - 1] ?? '';
+
+describe('the overlay\'s chord column, driven through the real input decoder', () => {
+  it('fires each key\'s own action when its shown chord is pressed', () => {
+    // THE DRIFT TEST. The overlay is a promise -- "press this to send that" -- and this keeps it by
+    // pressing. For every line with a chord, the chord's bytes go into `onInput` with the overlay
+    // CLOSED, through `pump()` and `lookup`, exactly as a keystroke would; `apply` records instead
+    // of acting so `quit` or an AID cannot end the run. A chord that names the wrong sequence, a
+    // sequence `pump()` resolves differently (a longer match, a prefix wait), or a lookup that
+    // matched on `kind` alone all redden here with the key named.
+    const chordCol = 2 + Math.max(...KEYPAD_KEYS.map((k) => k.name.length)) + 2;
+    let pressed = 0;
+    overlayLines(-1).forEach((line, i) => {
+      const chord = line.slice(chordCol).trim();
+      if (chord === '') return;
+      const key = KEYPAD_KEYS[i]!;
+      const seqs = TERMINAL_BINDINGS.filter((b) => b.chord === chord).map((b) => b.sequence);
+      expect(seqs.length, `${key.name}: no sequence is named ${chord}`).toBeGreaterThan(0);
+      for (const seq of seqs) {
+        const h = harness();
+        h.app.start();
+        const fired: Action[] = [];
+        vi.spyOn(h.app as unknown as { apply(a: Action): void }, 'apply')
+          .mockImplementation((a: Action) => { fired.push(a); });
+        h.app.onInput(Uint8Array.from([...seq].map((c) => c.charCodeAt(0))));
+        expect(fired, `${key.name} via ${chord} ${JSON.stringify(seq)}`).toEqual([key.action]);
+        pressed += 1;
+      }
+    });
+    // 46 keys have a chord; the four arrows and Home have two encodings each (CSI and SS3), and
+    // every encoding is pressed. Exact, so a sweep that silently skipped lines cannot pass.
+    expect(pressed).toBe(46 + 5);
+  });
+});
 
 describe('the special-keys overlay', () => {
   // The overlay holds a lone ESC for the same 50ms window `pump()` does, so closing it is a timed

@@ -6,7 +6,7 @@
  * This lives in `frontend` because both package graphs reach it: `canvas` already imports from
  * here (`canvas/src/keys.ts:1` takes `Action`, `canvas/src/drawlist.ts:46` takes `schemeRgb`), and
  * so the Electron GUI and the web gateway get it; `tui` imports from here too. A copy in `canvas`
- * would be out of the TUI's reach, and two lists of 47 keys drift silently.
+ * would be out of the TUI's reach, and two lists of 48 keys drift silently.
  *
  * Nothing here is geometry in PIXELS and nothing here draws: `row` and `col` are in CELLS, and
  * `canvas/src/keypad.ts` owns the cells-to-pixels arithmetic and the button rectangles.

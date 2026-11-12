@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PF_AIDS } from '@tn3270/core';
-import { isValidPf, lookup, PARTIAL, type Action } from '../src/keymap.js';
+import { isValidPf, lookup, PARTIAL, TERMINAL_BINDINGS, type Action } from '../src/keymap.js';
 
 /** Feed a string as bytes and expect exactly one action. */
 function one(seq: string): Action {
@@ -242,5 +242,54 @@ describe('the keypad-era chords', () => {
       .map((b) => lookup(new Uint8Array([b])))
       .filter((a) => a !== null && a !== undefined && (a as { kind: string }).kind === 'sysreq');
     expect(reachable).toEqual([]);
+  });
+});
+
+describe('TERMINAL_BINDINGS, the decoder table with a human name on every row', () => {
+  // The TUI overlay shows these names, so each one is a claim to an operator about which key to
+  // press. These tests hold the names to the bytes rather than to each other.
+
+  it('is the table lookup decodes: every row resolves to its own action', () => {
+    expect(TERMINAL_BINDINGS.length).toBeGreaterThan(0);
+    for (const b of TERMINAL_BINDINGS) expect(one(b.sequence), b.chord).toEqual(b.action);
+  });
+
+  it('gives every sequence exactly one row, and every row a name', () => {
+    // A repeated sequence would be a Map overwrite in the decoder: one row's name would be shown
+    // for an action the bytes no longer produce.
+    const seqs = TERMINAL_BINDINGS.map((b) => b.sequence);
+    expect(new Set(seqs).size).toBe(seqs.length);
+    for (const b of TERMINAL_BINDINGS) expect(b.chord.trim(), JSON.stringify(b.sequence)).not.toBe('');
+  });
+
+  it('never gives two different actions the same name', () => {
+    // Several sequences may share a name (CSI and SS3 Up are both "Up"); a name shared across
+    // ACTIONS would make the overlay's chord ambiguous.
+    const byName = new Map<string, Action>();
+    for (const b of TERMINAL_BINDINGS) {
+      const seen = byName.get(b.chord);
+      if (seen !== undefined) expect(b.action, b.chord).toEqual(seen);
+      else byName.set(b.chord, b.action);
+    }
+  });
+
+  it('names every control byte by the letter that sends it', () => {
+    // Ground truth from ASCII rather than from the table: Ctrl-X is X & 0x1f.
+    const ctrl = TERMINAL_BINDINGS.filter((b) => /^Ctrl-.$/.test(b.chord));
+    expect(ctrl.length).toBeGreaterThan(0);
+    for (const b of ctrl) {
+      expect(b.sequence, b.chord).toBe(String.fromCharCode(b.chord.charCodeAt(5) & 0x1f));
+    }
+  });
+
+  it('names the function keys after terminfo kf1-kf24: F(n), then Shift-F(n) for PF(n+12)', () => {
+    // Spot checks written out, one from each encoding family, so a name derived from the wrong
+    // index (or the PF gap at 22~) reddens with the sequence in the message.
+    const chordOf = (seq: string): string | undefined =>
+      TERMINAL_BINDINGS.find((b) => b.sequence === seq)?.chord;
+    expect(chordOf('\x1bOQ')).toBe('F2');
+    expect(chordOf('\x1b[23~')).toBe('F11');
+    expect(chordOf('\x1b[1;2Q')).toBe('Shift-F2');
+    expect(chordOf('\x1b[24;2~')).toBe('Shift-F12');
   });
 });

@@ -320,8 +320,8 @@ this does not: reopening is one keystroke, and a keypad that reappears unbidden 
 to someone who did not want it this session. That is a decision rather than a missing feature, and
 it is explicitly not on the list of things a preferences store should bring.
 
-**Every button carries a tooltip** naming what the key does, from the same `BINDING_INTENT` table
-the TUI's keypad list reads. 22 of the 48 keys have no prose entry there and 15 more have an entry
+**Every button carries a tooltip** naming what the key does, from the `BINDING_INTENT` table of
+binding notes. 22 of the 48 keys have no prose entry there and 15 more have an entry
 with no note, so the tooltip falls back to the key's short name — which means nothing is ever
 blank, and no description had to be invented for a PF key whose meaning is the host's business.
 
@@ -587,10 +587,10 @@ is c3270's own binding for its keypad (`Common/fb-c3270:191`), not a divergence.
 open **it owns the keyboard** — nothing falls through to the field behind it — and the window
 follows the selection rather than showing only the first screenful, or everything past `Attention`
 (**Sys Req** and **Newline** included) would be unreachable. Those two have no chord anywhere, so
-the list is their only keyboard route. Each line shows a chord read from the `BINDING_INTENT`
-table, which lists only representative function keys: 22 of the 48 lines show a blank, and 20 of
-those (PF2, PF4–11 and PF14–24) are in fact bound to their F-keys. Only Sys Req and Newline really
-have none.
+the list is their only keyboard route. Each line shows the chord that sends that key in the TUI
+(`F2` for PF2, `Shift-F2` for PF14, `Ctrl-A` for Attention), read from the same keymap table the
+TUI decodes its input with, so the list cannot name a chord the keys do not honour. Only Sys Req
+and Newline show a blank.
 
 **The list is opaque.** Every line is padded to one width — 27 columns: the selection mark, the
 name column, a two-space gap and the widest chord — so the 3270 screen behind it never shows

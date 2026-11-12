@@ -255,73 +255,105 @@ const PF_KEYS: readonly (readonly [string, number])[] = [
   ['\x1b[20;2~', 21], ['\x1b[21;2~', 22], ['\x1b[23;2~', 23], ['\x1b[24;2~', 24],
 ];
 
-function buildTable(): Map<string, Action> {
-  const t = new Map<string, Action>();
-  for (const [seq, n] of PF_KEYS) t.set(seq, { kind: 'pf', n });
+/**
+ * One row of the terminal keymap: the bytes, the action they decode to, and what a person would
+ * call the key that sends them.
+ *
+ * THE NAME LIVES ON THE ROW so that anything showing a chord to an operator -- the TUI's
+ * special-keys overlay -- reads it from the table the decoder itself is built from, and cannot
+ * claim a key the decoder does not honour. It used to read `BINDING_INTENT` instead, which names
+ * REPRESENTATIVE keys only (F1, F3, F12, Shift-F1), so 20 PF keys the TUI binds showed no chord.
+ * `bindings.test.ts` holds the two tables' spellings together.
+ *
+ * Several rows may share an action (CSI and SS3 arrows; `\r` and `\n` for Enter). Rows are in
+ * table order and the FIRST row for an action is its canonical chord.
+ */
+export interface TerminalBinding {
+  readonly sequence: string;
+  readonly action: Action;
+  /** How a user would describe the key: `F2`, `Shift-F2`, `Ctrl-A`. */
+  readonly chord: string;
+}
+
+/** `F(n)` for PF1-12, `Shift-F(n-12)` for PF13-24: the convention `PF_KEYS` is laid out in. */
+const pfChord = (n: number): string => (n <= 12 ? `F${n}` : `Shift-F${n - 12}`);
+
+function buildBindings(): readonly TerminalBinding[] {
+  const rows: TerminalBinding[] = [];
+  const bind = (sequence: string, action: Action, chord: string): void => {
+    rows.push(Object.freeze({ sequence, action, chord }));
+  };
+  for (const [seq, n] of PF_KEYS) bind(seq, { kind: 'pf', n }, pfChord(n));
 
   // Cursor keys and Home, BOTH encodings -- see the header note on DECCKM.
-  t.set('\x1b[A', { kind: 'up' });
-  t.set('\x1b[B', { kind: 'down' });
-  t.set('\x1b[C', { kind: 'right' });
-  t.set('\x1b[D', { kind: 'left' });
-  t.set('\x1bOA', { kind: 'up' });
-  t.set('\x1bOB', { kind: 'down' });
-  t.set('\x1bOC', { kind: 'right' });
-  t.set('\x1bOD', { kind: 'left' });
-  t.set('\x1b[H', { kind: 'home' });
-  t.set('\x1bOH', { kind: 'home' });
+  bind('\x1b[A', { kind: 'up' }, 'Up');
+  bind('\x1b[B', { kind: 'down' }, 'Down');
+  bind('\x1b[C', { kind: 'right' }, 'Right');
+  bind('\x1b[D', { kind: 'left' }, 'Left');
+  bind('\x1bOA', { kind: 'up' }, 'Up');
+  bind('\x1bOB', { kind: 'down' }, 'Down');
+  bind('\x1bOC', { kind: 'right' }, 'Right');
+  bind('\x1bOD', { kind: 'left' }, 'Left');
+  bind('\x1b[H', { kind: 'home' }, 'Home');
+  bind('\x1bOH', { kind: 'home' }, 'Home');
 
-  t.set('\x1b[Z', { kind: 'backTab' });   // tput kcbt
-  t.set('\x1b[3~', { kind: 'delete' });   // tput kdch1
-  t.set('\x7f', { kind: 'backspace' });   // tput kbs
-  t.set('\t', { kind: 'tab' });
-  t.set('\r', { kind: 'enter' });
-  t.set('\n', { kind: 'enter' });         // some terminals send LF for Return
+  bind('\x1b[Z', { kind: 'backTab' }, 'Shift-Tab'); // tput kcbt
+  bind('\x1b[3~', { kind: 'delete' }, 'Delete');   // tput kdch1
+  bind('\x7f', { kind: 'backspace' }, 'Backspace');   // tput kbs
+  bind('\t', { kind: 'tab' }, 'Tab');
+  bind('\r', { kind: 'enter' }, 'Enter');
+  // Some terminals send LF for Return. NAMED Ctrl-J, which is the key that sends LF everywhere,
+  // and never shown: `\r` comes first, so Enter's canonical chord is `Enter`.
+  bind('\n', { kind: 'enter' }, 'Ctrl-J');
 
   // `\x1b[4~` is vt220 Select/End. Bound to EraseEOF as a deliberate CHOICE,
   // following c3270; it is not a terminfo-derived mapping.
-  t.set('\x1b[4~', { kind: 'eraseEOF' });
+  bind('\x1b[4~', { kind: 'eraseEOF' }, 'End');
 
   // The Insert key toggles insert mode, as x3270 does (fb-x3270:210). MEASURED:
   // `tput kich1` is `\x1b[2~` on the development box.
-  t.set('\x1b[2~', { kind: 'toggleInsert' });
+  bind('\x1b[2~', { kind: 'toggleInsert' }, 'Insert');
 
   // Control keys. Ctrl-C is Clear, not interrupt: Clear is an AID a 3270 user
   // needs constantly (it dismisses MORE...), and Ctrl-] is the way out.
   // Attn is c3270's Ctrl-A (Common/fb-c3270:83). It is a Telnet BREAK, not an AID.
-  t.set('\x01', { kind: 'attn' });
-  t.set('\x03', { kind: 'clear' });
-  t.set('\x12', { kind: 'reset' });
-  t.set('\x15', { kind: 'eraseInput' });
-  t.set('\x1d', { kind: 'quit' });
+  bind('\x01', { kind: 'attn' }, 'Ctrl-A');
+  bind('\x03', { kind: 'clear' }, 'Ctrl-C');
+  bind('\x12', { kind: 'reset' }, 'Ctrl-R');
+  bind('\x15', { kind: 'eraseInput' }, 'Ctrl-U');
+  bind('\x1d', { kind: 'quit' }, 'Ctrl-]');
 
   // Dup and Field Mark are c3270's own Ctrl-D and Ctrl-F, and BOTH of its keymaps agree:
   // `Ctrl<Key>d: Dup()` / `Ctrl<Key>f: FieldMark()` at Common/fb-c3270:186-187 (the
   // non-Windows table, which a terminal build reads) and the same pair at :88 and :93 in the
   // _WIN32 one. They are TYPED CHARACTERS, not AIDs -- see the note on the Action union.
-  t.set('\x04', { kind: 'dup' });
-  t.set('\x06', { kind: 'fieldMark' });
+  bind('\x04', { kind: 'dup' }, 'Ctrl-D');
+  bind('\x06', { kind: 'fieldMark' }, 'Ctrl-F');
   // The keypad/overlay toggle, ALSO c3270's own: `Ctrl<Key>k: Keypad()`, fb-c3270:191. Its
   // _WIN32 keymap spells the same command Alt-K (:48), which would arrive here as `ESC k` --
   // and new bindings do not go down the ESC path, whose two regressions are recorded in
   // app.ts. The canvas front ends, which read a real KeyboardEvent and so have no ESC
   // ambiguity, accept both. Sys Req gets NO chord: c3270 defines none in either keymap, which
   // is why the TUI's overlay is its only keyboard route.
-  t.set('\x0b', { kind: 'toggleKeypad' });
+  bind('\x0b', { kind: 'toggleKeypad' }, 'Ctrl-K');
   // The transfer form. NOT c3270's -- it binds no transfer key at all, in either half of
   // fb-c3270, so there is no reference spelling to match and the choice is ours. `0x14` is free
   // in both of its keymaps and was free here: the control bytes this table already takes are
   // 01 03 04 06 0b 12 15 1d 7f.
-  t.set('\x14', { kind: 'transferForm' });
+  bind('\x14', { kind: 'transferForm' }, 'Ctrl-T');
 
   // The PA keys have no terminal equivalent, so ESC-digit, as c3270 does.
-  t.set('\x1b1', { kind: 'pa', n: 1 });
-  t.set('\x1b2', { kind: 'pa', n: 2 });
-  t.set('\x1b3', { kind: 'pa', n: 3 });
-  return t;
+  bind('\x1b1', { kind: 'pa', n: 1 }, 'Alt-1');
+  bind('\x1b2', { kind: 'pa', n: 2 }, 'Alt-2');
+  bind('\x1b3', { kind: 'pa', n: 3 }, 'Alt-3');
+  return Object.freeze(rows);
 }
 
-const TABLE: ReadonlyMap<string, Action> = buildTable();
+/** The terminal keymap, row by row. `TABLE` below is built from this and nothing else. */
+export const TERMINAL_BINDINGS: readonly TerminalBinding[] = buildBindings();
+
+const TABLE: ReadonlyMap<string, Action> =
+  new Map(TERMINAL_BINDINGS.map((b) => [b.sequence, b.action]));
 
 /** Every prefix of every table key, so PARTIAL is a lookup and not a scan. */
 const PREFIXES: ReadonlySet<string> = (() => {
