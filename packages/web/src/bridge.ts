@@ -246,7 +246,7 @@ const transferOverlay = createTransferOverlay({
   // A COMPLETED RECEIVE HELD IN MEMORY IS LOST BY CLOSING, with the host already out of transfer
   // mode and nothing to retry from -- see `transferOverlay.ts`'s "WHY IT WARNS" section.
   confirmDiscard: () => globalThis.confirm(
-    'The transfer finished but the file has not been saved. Close and lose it?',
+    'The transfer finished but the file has not been downloaded. Close and lose it?',
   ),
 });
 
@@ -364,7 +364,7 @@ const bridge = createBridge({
    * `writeClipboard` holds the capability check, the caught rejection and the measurements behind
    * both, in `bridgecore.ts` where a unit test can drive the NO-CLIPBOARD route -- which is the
    * common case for a LAN gateway on plain `http` and would otherwise be the one route nothing
-   * covers, exactly as `transferBridge.ts` records for its save dialog.
+   * covers, exactly as `transferBridge.ts` recorded for its since-removed save picker.
    *
    * `navigator.clipboard` IS PASSED, NOT READ DOWN THERE, for the reason that file's header gives
    * about every browser capability: the tests run with `environment: 'node'` and have no

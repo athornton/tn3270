@@ -1164,6 +1164,14 @@ text including passwords. Correct, and it means a live session cannot be action-
    **THE RING IS LEGIBLE, witnessed by the user in Firefox 158.0.1 on macOS, 2026-10-22** — the one
    thing no harness here could judge, since nothing reads computed styles for legibility. Still
    unexercised: Chromium (where `Highlight` resolves differently) and a dark system theme.
+
+   **CORRECTED, 2026-11-12: THE SAVE BUTTON DESCRIBED ABOVE IS GONE, AND THIS IS NOW THE CURRENT
+   STATE.** `#transfer-save`, its focus ring, its enablement from `hasUnsaved()` and the
+   `showSaveFilePicker` route it never used are all removed. A receive now downloads through
+   `<a download>` as soon as it completes, named `defaultLocalName(hostFile, host)`, and the
+   status line reads `received <n> bytes; downloaded as <name>`. See the plan
+   `docs/superpowers/plans/2026-11-12-web-receive-download.md` and `README.md`'s *Using the web
+   gateway*.
 4. **`transferUi.ts` NOW LIVES IN `packages/canvas`**, and both front ends import it by deep path.
    **The import map needs one specifier per shared module**, because one specifier cannot name two
    files. Streaming downloads are groundwork recorded in the spec and **deliberately deferred**.

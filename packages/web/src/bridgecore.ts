@@ -149,8 +149,10 @@ export interface BridgeDeps {
    * `tsconfig.base.json`'s `exactOptionalPropertyTypes: true` a bare `?:` accepts the property
    * being ABSENT but rejects it being present and `undefined`, so the annotation is what lets a
    * caller inject the result of a condition rather than branching on the whole object literal.
-   * `bridge.ts` passes a real function today; `transferBridge.ts`'s `savePicker` records the
-   * measurement (`TS2379`) for the dep that is genuinely handed `undefined`.
+   * `bridge.ts` passes a real function today. MEASURED 2026-10-07 on a dep that WAS handed
+   * `undefined` (the since-removed `savePicker`): without the annotation, the pattern
+   * `dep: cond ? fn : undefined` fails with `TS2379 ... Consider adding 'undefined' to the types
+   * of the target's properties`.
    */
   readonly showTransfer?: (() => void) | undefined;
   /**
@@ -366,8 +368,7 @@ export function socketUrl(documentHref: string): string {
  * A narrowing of `navigator.clipboard` to the one method this uses.
  *
  * Declared rather than taken from `lib.dom` so `writeClipboard` can be handed `undefined`, which
- * `Navigator.clipboard`'s own type forbids -- see that function's note. The same shape and the
- * same reason as `transferBridge.ts`'s `SaveSink`, which narrows a `FileSystemWritableFileStream`
+ * `Navigator.clipboard`'s own type forbids -- see that function's note. Narrowed to what this uses,
  * so a unit test can supply one.
  */
 export interface ClipboardWriter {
@@ -378,7 +379,7 @@ export interface ClipboardWriter {
  * Put the operator's copied text on their clipboard, or say why it could not be done.
  *
  * HERE RATHER THAN IN `bridge.ts` SO THE NO-API ROUTE CAN BE TESTED, which is the same split
- * `socketUrl` above exists for and the same one `transferBridge.ts` makes for its save dialog.
+ * `socketUrl` above exists for and the same one `transferBridge.ts` makes for its download sink.
  * `bridge.ts` touches real browser globals at module load, so no unit test can import it; this
  * takes the clipboard and the warn sink as PARAMETERS, so both routes are drivable with no DOM.
  * It is an exported plain function and not a fifth member of `BridgeApi`, exactly as `socketUrl`
@@ -387,10 +388,11 @@ export interface ClipboardWriter {
  * ## `clip === undefined` IS THE COMMON CASE AND THE UNTESTED ROUTE IS THE ONE THAT ROTS
  *
  * `navigator.clipboard` is SECURE-CONTEXT-ONLY, and a LAN deployment of this gateway on plain
- * `http` does not have one. `transferBridge.ts` records the identical situation for
- * `showSaveFilePicker` -- "`undefined` is the COMMON case for this gateway, not an edge one" --
- * and the structural lesson with it: "the fallback is the one at risk of rotting, because a
- * developer on Chrome-over-localhost always gets the picker." So the capability is INJECTED here
+ * `http` does not have one. `transferBridge.ts` recorded the identical situation for
+ * `showSaveFilePicker` (a route removed 2026-11-12): "`undefined` is the COMMON case for this
+ * gateway, not an edge one", and the structural lesson with it: "the fallback is the one at risk
+ * of rotting, because a developer on Chrome-over-localhost always gets the picker." So the
+ * capability is INJECTED here
  * rather than read from `navigator` at the point of use, which is the whole reason this function
  * exists instead of an inline `if` in the entry point.
  *

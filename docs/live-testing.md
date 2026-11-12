@@ -244,6 +244,13 @@ and the Recording log says what happened when they were run.
   now a measured-good combination on that browser** — untested on Chromium, where `Highlight`
   resolves differently, and untested in a dark system theme.
 
+  **NOTE, 2026-11-12: the Save step this record describes was removed the same day.** A receive
+  now downloads through `<a download>` as soon as it completes, named from the host file; there
+  is no Save button, no focus ring to read, and no `showSaveFilePicker` route. The record above is
+  left as it was recorded and is not rewritten. The new flow is **not yet live-verified**: owed is
+  a receive from VM/CMS in Firefox and in Chrome, landing under the derived name with no further
+  clicks.
+
 - **THE KEYPAD IS REAL HTML CONTROLS IN BOTH FRONT ENDS — OFFLINE EVIDENCE COMPLETE, AND NO LIVE
   RUN IS NEEDED, 2026-10-06.** The second clause is the unusual one and it is worth stating plainly:
   **nothing about this change alters what reaches the host.** A keypad button raises the same

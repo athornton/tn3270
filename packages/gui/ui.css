@@ -132,9 +132,10 @@ body.ui-surface {
 
   **BUT IT IS NOT ENOUGH FOR A PROGRAMMATIC FOCUS, which this comment originally claimed it was.**
   MEASURED the same day: `:focus-visible` is decided by the UA's heuristic about the user's LAST
-  INPUT MODALITY, not by how the focus was set -- so the Save button that `transferBoot.ts` focuses
-  on a completed receive did NOT match it, because the operator got there by CLICKING Start. See
-  the `#transfer-save` rule below, which is why it exists.
+  INPUT MODALITY, not by how the focus was set -- so the web Save button that `transferBoot.ts`
+  focused on a completed receive did NOT match it, because the operator got there by CLICKING
+  Start. That button, and the plain `:focus` rule it needed, were removed on 2026-11-12, when a
+  receive began downloading as it completes; nothing is focused programmatically now.
 
   THIS REACHES THE ELECTRON GUI TOO, deliberately. This file lives in `packages/gui` and is served
   to the browser as a third asset root (`web/src/httpstatic.ts` sets out why at length); the GUI's
@@ -148,28 +149,6 @@ body.ui-surface {
 .ui-surface button:focus-visible,
 #keypad-overlay button:focus-visible,
 #transfer-overlay button:focus-visible {
-  outline: 2px solid Highlight;
-  outline-offset: 2px;
-}
-
-/*
-  AND `#transfer-save` NEEDS PLAIN `:focus` AS WELL -- MEASURED, NOT ASSUMED.
-
-  `transferBoot.ts` focuses this button when a receive completes, and the rule above DID NOT PAINT:
-  `browser-clicks.mjs` reported `:focus-visible matched: false` with the focus correctly on
-  `#transfer-save`. `:focus-visible` is decided by the UA's heuristic about the user's LAST INPUT
-  MODALITY, not by how the focus was set -- and the operator reaches a completed transfer by
-  CLICKING Start, so the modality is pointer and the ring is suppressed. Confirmed against MDN
-  2026-10-22. The autofocus would have landed invisibly, which is the whole defect it exists to fix.
-
-  SO THIS ONE BUTTON OPTS INTO `:focus` TOO, and the usual objection does not apply to it. `:focus`
-  is avoided generally because it leaves a ring on a button the operator merely clicked -- but
-  clicking THIS button saves the file and `transferBoot.ts` then DISABLES it (`hasUnsaved()` goes
-  false), so the lingering-ring case cannot arise: there is no state where Save is both clicked and
-  still focusable. The narrow selector is deliberate; widening it to every button would
-  reintroduce exactly what `:focus-visible` is for.
-*/
-#transfer-overlay #transfer-save:focus {
   outline: 2px solid Highlight;
   outline-offset: 2px;
 }

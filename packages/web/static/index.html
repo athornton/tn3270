@@ -167,10 +167,9 @@
   reload. There is no `<form>` element here, so no submit has anywhere to go today -- which is
   precisely what would make the omission invisible until someone wrapped these in one.
 
-  THE `Save…` BUTTON EXISTS BECAUSE THE SAVE PICKER NEEDS TRANSIENT USER ACTIVATION, and cannot be
-  opened from the completion callback: the click that started the transfer is spent by the time
-  `transferDone` arrives. So a receive ends with this button ENABLED and the operator's click on it
-  is what opens the dialog. It starts `disabled` because there is nothing to save until then.
+  THERE IS NO SAVE BUTTON (removed 2026-11-12): a receive downloads as it completes, named from the
+  host file (`transferBridge.ts`'s `endTransfer`). `Browse…` is hidden on a receive by
+  `transferBoot.ts`, since there is no local file to choose.
 
   THE FILE INPUT IS `hidden` AND DRIVEN BY THE Browse BUTTON. A styled `<input type="file">` is not
   possible across browsers, and the click on Browse is the user gesture the chooser needs; a
@@ -184,7 +183,6 @@
     <button type="button" id="transfer-browse">Browse…</button>
     <button type="button" id="transfer-start">Start</button>
     <button type="button" id="transfer-cancel" disabled>Cancel</button>
-    <button type="button" id="transfer-save" disabled>Save…</button>
     <button type="button" id="transfer-close">Close</button>
   </div>
   <input type="file" id="transfer-file" hidden>

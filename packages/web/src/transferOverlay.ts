@@ -26,9 +26,11 @@
  *
  * ## WHY IT WARNS BEFORE CLOSING, WHICH THE KEYPAD DOES NOT NEED
  *
- * A completed receive holds its bytes until the operator saves (`transferBridge.ts`'s
- * `hasUnsaved()`). Dismissing the overlay then loses a transfer that SUCCEEDED, with the host
- * already out of transfer mode and nothing to retry from -- the same thing
+ * A completed receive can be held undelivered (`transferBridge.ts`'s `hasUnsaved()`). Since
+ * 2026-11-12 a receive downloads as it completes, so that is only transient now, or after a
+ * download that threw, which leaves the bytes held. Dismissing the overlay then loses a transfer
+ * that SUCCEEDED, with the host already out of transfer mode and nothing to retry from -- the
+ * same thing
  * `transferRun.ts` (`packages/frontend/src/transferRun.ts:338-340`, `:404-406`) refuses to do
  * when it will not report a "complete" that left no file on disk. It is NOT a memory concern: 10
  * MB held in a browser is nothing beside its normal footprint, which is Decision 8 of the design
@@ -39,7 +41,7 @@ export interface TransferOverlayDeps {
   readonly element: HTMLElement;
   /** Fill the overlay with the form. Called AT MOST ONCE, lazily, on the first show. */
   readonly build: () => void;
-  /** Does a completed transfer still need saving? */
+  /** Is a completed receive held undelivered? */
   readonly hasUnsaved: () => boolean;
   /** Ask the operator to confirm losing it. True means close anyway. */
   readonly confirmDiscard: () => boolean;

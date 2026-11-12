@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   TRANSFER_FIELDS, newTransferForm, cycleField, setFieldText, applicable, formKeywords,
-  directionLabel,
+  directionLabel, defaultLocalName, FALLBACK_LOCAL_NAME,
   type TransferFormState,
 } from '../src/transferForm.js';
 import { parseTransferKeywords, transferCommand } from '../src/transfer.js';
@@ -311,5 +311,32 @@ describe('directionLabel', () => {
     // the TUI's own suite so a future rewording is caught in the module that OWNS the text.
     expect(directionLabel('receive').length).toBeLessThanOrEqual(40);
     expect(directionLabel('send').length).toBeLessThanOrEqual(40);
+  });
+});
+
+describe('defaultLocalName', () => {
+  // The web receive spec's table (2026-11-12), plus lowercase input, extra blanks, quotes that
+  // are not balanced, and blank-only input.
+  it.each([
+    ['vm', 'NAP H A2', 'nap.h'],
+    ['vm', 'PROFILE EXEC', 'profile.exec'],
+    ['vm', 'NAP', 'nap'],
+    ['vm', '  nap   h   a2  ', 'nap.h'],
+    ['vm', 'Nap H', 'nap.h'],
+    ['tso', "'SYS1.PROCLIB(ASMHC)'", 'sys1.proclib(asmhc)'],
+    ['tso', "'HERC01.NAP.H'", 'herc01.nap.h'],
+    ['tso', 'NAP.H', 'nap.h'],
+    ['tso', "'HERC01.LOG(0)'", 'herc01.log(0)'],
+    ['tso', "'NAP.H", "'nap.h"],
+    ['tso', "  'HERC01.X'  ", 'herc01.x'],
+    ['vm', '', 'download.bin'],
+    ['tso', '   ', 'download.bin'],
+    ['tso', "''", 'download.bin'],
+  ])('%s %j -> %j', (host, input, want) => {
+    expect(defaultLocalName(input, host)).toBe(want);
+  });
+
+  it('falls back to the name the web gateway already used', () => {
+    expect(FALLBACK_LOCAL_NAME).toBe('download.bin');
   });
 });

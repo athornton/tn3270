@@ -450,8 +450,9 @@ exist in Firefox at all. Binding it would be worse than leaving it: claiming the
 
 Press `Ctrl-T`, or click `Xfer` on the keypad, to open the transfer window. Choose a local
 file with `Browse…`, name the host file, and press Start. `Direction=send` offers an Open panel;
-`receive` offers a Save panel. (The browser's version is an overlay over the page, whose files are
-on the browser's machine; see *Using the web gateway*.)
+`receive` offers a Save panel, suggested with the host file's default local name (the same name
+the browser gateway downloads a receive under; see *Using the web gateway*). (The browser's
+version is an overlay over the page, whose files are on the browser's machine.)
 
 **The form opens on `send`, and the direction names both of its endpoints** —
 `send: local to host` and `receive: host to local`, rather than the bare words.
@@ -1114,10 +1115,20 @@ inherits whatever the last one had open. A model 4 taller than the viewport scro
 directions. The file's bytes travel over the WebSocket, so "local file" is the browser's machine,
 and the gateway never touches its own disk. The options are the CLI's `Transfer()` keywords (the
 form omits `BufferSize`); the cap is 10 MB each way, staged in memory; one transfer runs per
-session at a time. The host chooses CUT or DFT, as in every front end; `-ddm off` forces CUT. A
-received file is saved through `showSaveFilePicker` in a Chromium-family browser in a secure
-context, and through an `<a download>` link elsewhere. Live-verified on VM/370 (CUT) from Firefox,
-2026-10-22; DFT from a browser is not yet live-witnessed (`docs/live-testing.md`).
+session at a time. The host chooses CUT or DFT, as in every front end; `-ddm off` forces CUT.
+
+**A receive has no Local file field, no Browse and no Save step (2026-11-12).** Start fetches the
+file and, on success, the browser downloads it on its own, through a plain `<a download>` link —
+the only route, in every browser; Chrome's `showSaveFilePicker` route was removed because it needs
+a fresh click, which the completion callback arrives too late to supply. The download is named
+`defaultLocalName(hostFile, host)`: VM `fn ft fm` → `fn.ft`; TSO lowercased with one pair of
+enclosing quotes stripped; `download.bin` when there is nothing to derive from. The status line
+reads `received <n> bytes; downloaded as <name>`; a cancel landing after the last chunk downloads
+nothing (`transfer cancelled; nothing was downloaded`).
+
+Live-verified on VM/370 (CUT) from Firefox, 2026-10-22, against the earlier Save-button flow; the
+download-on-completion flow above is not yet live-witnessed in either Firefox or Chrome
+(`docs/live-testing.md`).
 
 **A browser pressing `Enter` or `Clear` on a disconnected session makes the GATEWAY redial the
 mainframe.** That is the intended reading: the `Session` is server-side, so it is the server's own

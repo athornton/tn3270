@@ -166,9 +166,10 @@ with the picker.
 ## File transfer (`IND$FILE`)
 
 **`Ctrl-T`, or the keypad's `Xfer`, opens the transfer form as an overlay** — the GUI's fields:
-direction, host (`tso` or `vm`), local file, host file, mode, exist, cr, recfm, lrecl, blksize.
-Both directions. The bytes travel over the WebSocket in 4096-byte chunks, so the local file is on
-the **browser's** machine; the gateway holds the file in memory and never touches its own disk.
+direction, host (`tso` or `vm`), local file (omitted on a receive — see below), host file, mode,
+exist, cr, recfm, lrecl, blksize. Both directions. The bytes travel over the WebSocket in
+4096-byte chunks, so the local file is on the **browser's** machine; the gateway holds the file in
+memory and never touches its own disk.
 
 - **Options** are the CLI's `Transfer()` keywords; the form does not offer `BufferSize`.
 - **10 MB cap, each way**, because the gateway stages the whole file in memory. Over that, the
@@ -177,12 +178,19 @@ the **browser's** machine; the gateway holds the file in memory and never touche
   reattaches never inherits a half-sent upload.
 - **The host chooses CUT or DFT.** DDM is advertised by default; `-ddm off` forces CUT, which
   needs a 24x80 screen.
-- **Saving a received file** uses `showSaveFilePicker` in a Chromium-family browser in a secure
-  context, and an `<a download>` link elsewhere (Firefox and Safari always).
+- **A receive has no Local file field, no Browse and no Save step (2026-11-12).** Start fetches
+  the file and, on success, the browser downloads it on its own through a plain `<a download>`
+  link — the only route, in every browser; the Chromium `showSaveFilePicker` route was removed
+  because it needs a fresh click, which the completion callback does not have. The download is
+  named `defaultLocalName(hostFile, host)`: VM `fn ft fm` → `fn.ft`; TSO lowercased with one pair
+  of enclosing quotes stripped; `download.bin` when there is nothing to derive from. The status
+  line reads `received <n> bytes; downloaded as <name>`; a cancel landing after the last chunk
+  downloads nothing (`transfer cancelled; nothing was downloaded`).
 
 Live-verified 2026-10-22: Firefox on macOS, through a reverse proxy, 249 bytes byte-identical
-both ways against VM/370 over CUT. DFT from a browser has not been driven live
-(`docs/live-testing.md`).
+both ways against VM/370 over CUT — that run used the since-removed Save button. The
+download-on-completion flow above is not yet live-verified in either Firefox or Chrome, and DFT
+from a browser has not been driven live at all (`docs/live-testing.md`).
 
 ## The host argument, and what this gateway will NOT take
 

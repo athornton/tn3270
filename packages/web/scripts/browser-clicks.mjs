@@ -37,7 +37,10 @@
  * that `bridge.js` finishes evaluating with every element present. Real, and it closes the
  * blank-window class -- but the entire browser half of the transfer feature could have been
  * reverted to no-ops and nothing in the repository would have noticed. `TRANSFER_CHECKS` below is
- * those five survivors by name, plus the `Save…`-starts-disabled invariant that goes with them.
+ * those five survivors by name, plus the checks the receive's DOWNLOAD added later (2026-11-12):
+ * there is no Save button, a receive draws no Local file field and no Browse, a completed receive
+ * downloads ONCE under the name derived from the host file with the bytes the gateway sent, and
+ * a receive cancelled between its last chunk and its ending downloads nothing.
  *
  * ## ALL SIX MUTANTS NOW DIE, AND EACH WAS RE-RUN RATHER THAN REASONED ABOUT
  *
@@ -53,6 +56,13 @@
  *   `transferBoot.ts  fileInput.oncancel deleted`         build 0, 6/7   (browseCancel ONLY)
  *   `ui.css  #transfer-overlay { position: static }`      build 0, 2/7   (viewport FAILED)
  *   `index.html  Save without the `disabled` attribute`   build 0, 6/7   (saveDisabled ONLY)
+ *
+ * THE LAST ROW IS HISTORY: the Save button was removed on 2026-11-12, when a receive started
+ * downloading itself on completion, and `saveDisabled` went with it. `noSave` asserts the button
+ * is gone, `localFileByDirection` that a receive draws no Local file and no Browse, and
+ * `download` / `cancelRace` cover the route that replaced Save. Each of those four was mutated
+ * on 2026-11-12, one at a time with the build checked, and the measurements are in their table
+ * entries below; three of the four were surgical (22/23, the named check only).
  *
  * THE COLLATERAL FAILURES ARE EXPECTED AND THEY ARE NOT THE PROOF. `showTransfer` and `position:
  * static` both make the FORM unreachable, so every later check that needs to click it fails too;
@@ -91,9 +101,11 @@
  * `Cannot read properties of undefined (reading 'onAtlas')`, naming `renderer.js` instead. The
  * misdirection `httpstatic.ts:94-100` records is therefore not repeated here.
  *
- * `transferBoot.ts` is the file this phase exists for, and that file's own header says so: it has
- * no unit test, because `vitest.config.ts` sets `environment: 'node'`, nothing in this repo has a
- * `document`, and jsdom is not a dependency.
+ * `transferBoot.ts` is the file this phase exists for. Since 2026-11-12 it has a unit test,
+ * `packages/web/test/transferBoot.test.ts`, which drives `bootTransfer` over a small hand-made fake
+ * document (vitest's `environment` is `'node'` and jsdom is not a dependency). That test pins the
+ * receive's derived name and its single download; it cannot click real elements, lay out a page or
+ * reach a real download manager, which is what this phase is for.
  *
  * ## IT CLICKS BY LABEL
  *
@@ -287,9 +299,9 @@ for (const pkg of ['gui', 'canvas', 'web', 'frontend']) {
 
   So the browser half can be driven end to end and the server half only as far as that refusal:
 
-   - `overlay`, `viewport`, `saveDisabled`, `noFile` and `browseCancel` are ENTIRELY REAL. Real
-     keystrokes, real clicks, a real file chooser opened by Chromium, real DOM read back. Nothing
-     is injected and nothing is stubbed.
+   - `overlay`, `viewport`, `noSave`, `localFileByDirection`, `noFile` and `browseCancel` are
+     ENTIRELY REAL. Real keystrokes, real clicks, a real file chooser opened by Chromium, real DOM
+     read back. Nothing is injected and nothing is stubbed.
    - `liveRefusal` is REAL IN BOTH DIRECTIONS: the browser's own `transferStart` crosses the
      socket, the gateway's `startTransfer` refuses it, and the refusal comes back as a
      `transferDone {ok:false}` that this check reads off the status line.
@@ -311,6 +323,15 @@ for (const pkg of ['gui', 'canvas', 'web', 'frontend']) {
      what is not real is that no host sent them. They are NOT dressed up as a live transfer:
      `liveRefusal` above is what a replay gateway actually answers, and this check is labelled
      `(injected)` in its own `ok` line.
+   - `download` AND `cancelRace` ARE INJECTED THE SAME WAY, and they are the replay gateway's
+     stand-in for a host: no host is reachable under `--replay`, so the "host" is these encoded
+     frames, and what it "sent" is `INJECTED_BYTES`. What is REAL in both is everything after the
+     socket -- the page's own `endTransfer`, its `<a download>` click, and CHROMIUM'S OWN DOWNLOAD
+     MANAGER, observed from outside over CDP (`Browser.setDownloadBehavior` with `eventsEnabled`,
+     then `Browser.downloadWillBegin` / `Browser.downloadProgress` on the browser target). The
+     bytes compared are the file Chromium itself wrote, at the `<downloadPath>/<guid>` path that
+     `allowAndName` names, read once the browser reports the download `completed` -- not a
+     directory watched for whatever appears.
 
   Driving them in is what kills the `onTransfer` mutant, which is the point: `onTransfer` is the
   function that carries a gateway message to the form, and no replay gateway will ever send it a
@@ -353,8 +374,10 @@ for (const pkg of ['gui', 'canvas', 'web', 'frontend']) {
 const TRANSFER_CHECKS = [
   /*
     THE `Alt-M` PICKER, 2026-11-04 -- in this table because this is the phase with CDP and the
-    socket probe, and FIRST because it must run before `progress` leaves an unsaved receive in the
-    transfer form: opening the picker hides that form, and an unsaved one would raise a `confirm`.
+    socket probe, and FIRST because opening the picker hides the transfer form, which must not be
+    holding a receive when it does: a held receive would raise the overlay's `confirm`. (Since
+    2026-11-12 a completed receive downloads at once and holds nothing, so this is belt and braces;
+    the order is kept because it costs nothing.)
   */
   {
     name: 'picker',
@@ -379,10 +402,20 @@ const TRANSFER_CHECKS = [
     mutant: 'ui.css  #transfer-overlay { position: static }',
   },
   {
-    name: 'saveDisabled',
+    name: 'noSave',
     kind: 'live',
-    what: 'Save starts disabled, because there is nothing to save until a receive completes',
-    mutant: 'index.html  <button id="transfer-save"> without `disabled`',
+    what: 'there is no #transfer-save button: a receive downloads itself on completion',
+    mutant: 'index.html  the <button id="transfer-save"> put back (MEASURED 2026-11-12: build 0, '
+      + '22/23, this check only)',
+  },
+  {
+    name: 'localFileByDirection',
+    kind: 'live',
+    what: 'on a SEND the Local file input and Browse are drawn and visible; on a RECEIVE the Local '
+      + 'file input is not in the field list and Browse is hidden',
+    mutant: 'transferBoot.ts  deriveLocalFileOnReceive: false (MEASURED 2026-11-12: build 0, '
+      + '20/23 -- this check sees Local file drawn on the receive, and progress and download '
+      + 'follow from it, because the receive then downloads under the TYPED `typed.txt`)',
   },
   {
     name: 'noFile',
@@ -405,8 +438,30 @@ const TRANSFER_CHECKS = [
   {
     name: 'progress',
     kind: 'injected',
-    what: 'the three inbound kinds reach the form, and a completed receive enables, NAMES and FOCUSES Save',
-    mutant: 'bridge.ts  onTransfer: () => {}; transferBoot.ts  drop saveButton.focus() or the hint',
+    what: 'the three inbound kinds reach the form: the progress text, then the data (with NO '
+      + 'download yet), then the ending, whose status reads `received <n> bytes; downloaded as <name>`',
+    mutant: 'bridge.ts  onTransfer: () => {}  OR  transferBridge.ts  endTransfer\'s success status '
+      + 'reworded',
+  },
+  {
+    name: 'download',
+    kind: 'injected',
+    what: 'a completed receive of VM `NAP H A2` makes Chromium start EXACTLY ONE download, '
+      + 'suggested as `nap.h`, whose file on disk is byte-identical to the bytes the gateway sent',
+    mutant: 'transferBridge.ts  endTransfer\'s `bridge.deliver(end.saveName)` replaced by a '
+      + 'success built from `end.bytes` (MEASURED 2026-11-12: build 0, 22/23, this check only, '
+      + '"no download": the status line still claims the download, which is why only the '
+      + 'browser\'s own account can catch it)',
+  },
+  {
+    name: 'cancelRace',
+    kind: 'injected',
+    what: 'a receive cancelled AFTER its last chunk and BEFORE the gateway\'s transferDone {ok:true} '
+      + 'downloads NOTHING and says "transfer cancelled; nothing was downloaded"',
+    mutant: 'transferBoot.ts  the cancel handler\'s `receiveError = ... ? ... : undefined` as a '
+      + 'bare `receiveError = undefined` (MEASURED 2026-11-12: build 0, 22/23, this check only -- '
+      + 'status "received 0 bytes; downloaded as nap.h" and 1 download begun: the 0-byte file '
+      + 'the guard exists to prevent)',
   },
   {
     name: 'keyboard',
@@ -667,8 +722,28 @@ const CDP_SHIFT = 8;
 const CDP_META = 4;
 const XFER_LABEL = 'Xfer';
 
-/** Bytes fed to the injected `transferData`. Content is arbitrary; its LENGTH is asserted. */
-const INJECTED_BYTES = new Uint8Array([0x48, 0x45, 0x4c, 0x4c, 0x4f]);
+/**
+ * What the stand-in host "sends" in the injected receives, and what the download must hold.
+ *
+ * EVERY BYTE VALUE, NOT FIVE ASCII LETTERS. The download is compared byte for byte, and a file of
+ * `HELLO` cannot tell a binary download from one that went through a text decode: NUL, CR, LF,
+ * 0x80-0xFF and a UTF-8-invalid run are all here. `(i * 37 + 11) & 0xff` visits all 256 values in
+ * its first 256 steps, because 37 is odd.
+ *
+ * TWO CHUNKS, split at `INJECTED_SPLIT`, so the reassembly is exercised rather than one chunk
+ * being handed through whole.
+ */
+const INJECTED_BYTES = Uint8Array.from({ length: 300 }, (_, i) => (i * 37 + 11) & 0xff);
+const INJECTED_SPLIT = 200;
+
+/**
+ * The receive the injected checks run: a CMS file, so the download name is VM's rule --
+ * `defaultLocalName('NAP H A2', 'vm')` is the first two words, dotted and lowercased.
+ * The expected name is written out here, NOT computed by importing `defaultLocalName`, so a
+ * broken derivation cannot agree with itself.
+ */
+const RECEIVE_HOST_FILE = 'NAP H A2';
+const RECEIVE_NAME = 'nap.h';
 
 /**
  * A minimal CDP client over the page target's own WebSocket.
@@ -690,8 +765,29 @@ async function openCdp(port) {
     if (target === undefined) await new Promise((r) => { setTimeout(r, 200); });
   }
   if (target === undefined) throw new Error('CDP listed no page target within 20s');
+  return connectCdp(target.webSocketDebuggerUrl);
+}
 
-  const sock = new WebSocket(target.webSocketDebuggerUrl);
+/**
+ * The BROWSER target, which is where Chromium's download manager is reached.
+ *
+ * `Browser.setDownloadBehavior` and its `Browser.downloadWillBegin` / `Browser.downloadProgress`
+ * events belong to the browser session, not the page's: `/json/version`'s
+ * `webSocketDebuggerUrl` is that session. A second socket rather than `Target.attachToTarget`
+ * flattening, because the page client above already owns its event list and nothing here needs
+ * the two interleaved.
+ */
+async function openBrowserCdp(port) {
+  const version = await fetch(`http://127.0.0.1:${port}/json/version`).then((r) => r.json());
+  if (typeof version.webSocketDebuggerUrl !== 'string') {
+    throw new Error(`CDP /json/version named no browser target: ${JSON.stringify(version)}`);
+  }
+  return connectCdp(version.webSocketDebuggerUrl);
+}
+
+/** One CDP session over one DevTools WebSocket: commands, the event log, and `eval`. */
+async function connectCdp(wsUrl) {
+  const sock = new WebSocket(wsUrl);
   await new Promise((resolveP, rejectP) => {
     const timer = setTimeout(() => rejectP(new Error('the CDP socket never opened')), 20000);
     sock.onopen = () => { clearTimeout(timer); resolveP(); };
@@ -914,6 +1010,13 @@ async function runTransferPhase(url) {
    * and a run that attached to nothing would then wait out its timeout.
    */
   const profile = mkdtempSync(join(tmpdir(), 'tn3270-browser-clicks-'));
+  /**
+   * WHERE CHROMIUM WRITES THE DOWNLOADS, a fresh directory of this run's own, removed in the
+   * `finally`. It is never listed or watched: each download's file is found by the GUID the
+   * browser's own `downloadWillBegin` event names, which is what `allowAndName` saves it as.
+   */
+  const downloadDir = mkdtempSync(join(tmpdir(), 'tn3270-browser-clicks-dl-'));
+  let browserCdp;
   let cdp;
   let child;
   let childOut = '';
@@ -942,6 +1045,22 @@ async function runTransferPhase(url) {
     }
 
     cdp = await openCdp(port);
+    /**
+     * THE DOWNLOAD WITNESS: Chromium's own download manager, over CDP.
+     *
+     * `allowAndName` saves each download as `<downloadPath>/<guid>` and `eventsEnabled` reports
+     * it -- `Browser.downloadWillBegin` carries the `suggestedFilename` the page's `<a download>`
+     * gave it, and `Browser.downloadProgress` reaches `completed` when the file is whole. Set on
+     * the BROWSER target. Without it Electron applies its own default, and `gui/src/main.ts` has no
+     * `will-download` handler: Electron's documentation says that routine "usually prompts a save
+     * dialog", which under Xvfb is a modal nobody can click. (Not measured here; this check does
+     * not depend on it.)
+     *
+     * NO PRODUCTION HOOK: `gui/src/main.ts` stays untouched, as this phase's header requires.
+     */
+    browserCdp = await openBrowserCdp(port);
+    await browserCdp.cmd('Browser.setDownloadBehavior',
+      { behavior: 'allowAndName', downloadPath: downloadDir, eventsEnabled: true });
     await cdp.cmd('Runtime.enable');
     await cdp.cmd('Page.enable');
     await cdp.cmd('DOM.enable');
@@ -1109,6 +1228,37 @@ async function runTransferPhase(url) {
     };
 
     const statusText = () => cdp.eval('document.getElementById("transfer-status").textContent');
+    /**
+     * EVERY DOWNLOAD CHROMIUM HAS BEGUN THIS RUN, in order, as its download manager reported them:
+     * `{ guid, url, suggestedFilename, frameId }`. Read off the BROWSER session's event log, so a
+     * download is counted whether or not the page thinks it made one.
+     */
+    const downloadsBegun = () => browserCdp.events
+      .filter((e) => e.method === 'Browser.downloadWillBegin').map((e) => e.params);
+    /**
+     * Wait, bounded, for one download to finish, and return its last reported state.
+     *
+     * `completed` is the browser saying the file at `<downloadDir>/<guid>` is whole; reading it
+     * any earlier could compare a partial file. `canceled` and a timeout are returned rather than
+     * thrown, so the caller's assertion reports what the browser said.
+     */
+    const downloadSettled = async (guid, ms = 8000) => {
+      let last;
+      for (let waited = 0; waited < ms; waited += 100) {
+        last = browserCdp.events.filter((e) => e.method === 'Browser.downloadProgress'
+          && e.params.guid === guid).at(-1)?.params;
+        if (last?.state === 'completed' || last?.state === 'canceled') return last;
+        await new Promise((r) => { setTimeout(r, 100); });
+      }
+      return last ?? { state: 'never reported' };
+    };
+    /**
+     * HOW LONG A DOWNLOAD IS GIVEN TO APPEAR before "none" is believed. The `<a download>` click is
+     * synchronous in the page and `downloadWillBegin` followed it within a few hundred ms in every
+     * measured run; two seconds is the quiet window both the "exactly one" and the "zero" claims
+     * wait out, so neither is decided by reading too early.
+     */
+    const DOWNLOAD_QUIET_MS = 2000;
     const sentCount = () => cdp.eval('window.__tn3270Probe.sent.length');
     /**
      * Wait for the status line to say something, bounded, rather than sleeping a guess.
@@ -1251,12 +1401,12 @@ async function runTransferPhase(url) {
       // alone. `#transfer-fields` is empty in `index.html` and filled by `transferBoot.ts`'s
       // `render` from `TRANSFER_FIELDS`, so a row count is cover for that render having run.
       //
-      // SIX AND NOT TEN, and the arithmetic is `applicable()`'s, not this file's:
-      // `newTransferForm()` starts at `direction=receive, mode=binary`, so `recfm`, `lrecl` and
-      // `blksize` are withheld as send-only and `cr` is withheld because it is meaningless on a
-      // binary transfer (`frontend/src/transferForm.ts:158-177`). Ten minus four is six.
+      // NOT ALL TEN, and the arithmetic is `applicable()`'s, not this file's: `newTransferForm()`
+      // starts at `direction=send, host=tso, mode=binary`, and fields that do not apply to that
+      // are withheld (`cr`, for one, is meaningless on a binary transfer). The run prints the
+      // real count -- 7 at the time of writing.
       //
-      // ASSERTED AS `> 1` RATHER THAN `=== 6`, deliberately: pinning the number here would make
+      // ASSERTED AS `> 1` RATHER THAN AN EXACT COUNT, deliberately: pinning the number here would make
       // this a SECOND COPY of the applicability rules, which is the one thing this file's header
       // argues against for the keypad layout. What is being covered is that `render` ran at all,
       // and the count is PRINTED so a reader sees the real number either way.
@@ -1349,19 +1499,37 @@ async function runTransferPhase(url) {
         + `elementFromPoint=${geom.hit}`);
     }
 
-    // ===== saveDisabled: nothing to save until a receive completes ============================
+    // ===== noSave: there is no Save button =====================================================
     //
-    // ASSERTED HERE, BEFORE ANYTHING IS DRIVEN, which is the only moment it means anything: the
-    // injected check below ENABLES this button, so reading it afterwards would assert the
-    // opposite fact. `index.html` carries the `disabled` attribute and the completion handler in
-    // `transferBoot.ts` is the only thing that clears it.
-    const saveDisabled = await cdp.eval('document.getElementById("transfer-save").disabled');
-    if (saveDisabled === true) {
-      ok(check('saveDisabled'), 'Save starts disabled, with nothing yet received to save');
+    // SINCE 2026-11-12 A RECEIVE DOWNLOADS ITSELF when it completes (`endTransfer` calls the
+    // bridge's `deliver`), so the Save button and its picker route were removed. Its absence is
+    // asserted rather than assumed, because a button left in `index.html` with no handler is a
+    // control that does nothing -- and `bootTransfer` no longer looks it up, so nothing else
+    // would notice it.
+    const saveButton = await cdp.eval('document.getElementById("transfer-save") === null'
+      + ' ? null : document.getElementById("transfer-save").outerHTML');
+    if (saveButton === null) {
+      ok(check('noSave'), 'there is no #transfer-save: a receive downloads on completion');
     } else {
-      no(check('saveDisabled'), 'Save was enabled before any transfer had completed',
-        `disabled: ${saveDisabled}`);
+      no(check('noSave'), 'the Save button is still in the page', `found: ${saveButton}`);
     }
+
+    // ===== localFileByDirection, the SEND half: Local file and Browse are drawn ================
+    //
+    // READ HERE, on the form's starting direction (`send`, from `newTransferForm()`), and
+    // ASSERTED with the receive half once `liveRefusal` below has switched to a receive -- one
+    // check, because "absent on a receive" means nothing unless the same page draws them on a send.
+    // VISIBLE, not merely present: `offsetParent` is null for a `hidden` or `display:none` element.
+    const fieldsShown = () => cdp.eval(`(() => {
+      const lf = document.getElementById('transfer-localFile');
+      const br = document.getElementById('transfer-browse');
+      return {
+        direction: document.getElementById('transfer-direction').value,
+        localFile: lf === null ? 'absent' : (lf.offsetParent === null ? 'invisible' : 'shown'),
+        browse: br === null ? 'absent' : (br.hidden || br.offsetParent === null ? 'hidden' : 'shown'),
+      };
+    })()`);
+    const onSend = await fieldsShown();
 
     // ===== noFile: Start with nothing staged is refused, and NOTHING is sent ==================
     //
@@ -1458,10 +1626,43 @@ async function runTransferPhase(url) {
     // told anything. That refusal travels back as a `transferDone {ok:false}`, through
     // `onTransfer` and `boot.onMessage`, onto the status line. BOTH DIRECTIONS OF THE WIRE AND
     // THE WHOLE INBOUND PATH, with nothing injected.
+    //
+    // A CMS FILE ON A VM HOST, set first, so the injected receives below download under VM's
+    // name rule (`RECEIVE_HOST_FILE` -> `RECEIVE_NAME`). By real input like everything above:
+    // `End` and three Backspaces take out `A.B`, the new name is typed, and `v` is type-ahead on
+    // the focused Host `<select>`. The gateway refuses this submit for not being in 3270 mode
+    // whatever it names, so the change costs `liveRefusal` nothing.
+    await clickCenter('#transfer-hostFile');
+    await press('End', 'End', 35);
+    for (let i = 0; i < 'A.B'.length; i++) await press('Backspace', 'Backspace', 8);
+    for (const ch of RECEIVE_HOST_FILE) await typeChar(ch);
+    await cdp.eval('document.getElementById("transfer-host").focus()');
+    await typeChar('v');
+    await new Promise((r) => { setTimeout(r, 400); });
     await cdp.eval('document.getElementById("transfer-direction").focus()');
     await typeChar('r');
     await new Promise((r) => { setTimeout(r, 400); });
     const backToReceive = await cdp.eval('document.getElementById("transfer-direction").value');
+    const receiveFor = await cdp.eval('[document.getElementById("transfer-hostFile").value,'
+      + ' document.getElementById("transfer-host").value]');
+
+    // ===== localFileByDirection, the RECEIVE half, asserted with the send half read above =====
+    //
+    // A RECEIVE HAS NO LOCAL FILE in a browser: `transferBoot.ts` turns on
+    // `deriveLocalFileOnReceive`, so `transferUi.ts` leaves `localFile` out of the field list and
+    // submits the name derived from the host file; and Browse is HIDDEN, not just disabled.
+    const onReceive = await fieldsShown();
+    if (onSend.direction === 'send' && onSend.localFile === 'shown' && onSend.browse === 'shown'
+      && onReceive.direction === 'receive' && onReceive.localFile === 'absent'
+      && onReceive.browse === 'hidden') {
+      ok(check('localFileByDirection'),
+        'on a send Local file and Browse are drawn and visible; on a receive Local file is absent '
+        + 'from the field list and Browse is hidden');
+    } else {
+      no(check('localFileByDirection'), 'Local file / Browse do not follow the direction',
+        `send: ${JSON.stringify(onSend)}, receive: ${JSON.stringify(onReceive)} `
+        + '(want localFile and browse "shown" on the send; "absent" and "hidden" on the receive)');
+    }
     const sentBeforeLive = await cdp.eval('JSON.stringify(window.__tn3270Probe.sent)');
     // READ BEFORE THE CLICK AND REPORTED ON FAILURE, so a status line this check never changed
     // cannot be mistaken for an answer. The previous check leaves `choose a local file with
@@ -1488,28 +1689,35 @@ async function runTransferPhase(url) {
     const sentAfterLive = JSON.parse(await cdp.eval('JSON.stringify(window.__tn3270Probe.sent)'));
     const started = sentAfterLive.filter((m) => m.includes('"transferStart"'));
     if (backToReceive === 'receive' && started.length === 1
-      && refusal.includes('not in 3270 mode')) {
+      && refusal.includes('not in 3270 mode')
+      && receiveFor[0] === RECEIVE_HOST_FILE && receiveFor[1] === 'vm') {
       ok(check('liveRefusal'),
         `the browser sent transferStart and the gateway answered ${JSON.stringify(refusal)}`);
     } else {
       no(check('liveRefusal'), "a real submit did not produce the gateway's own refusal",
         `status before the click: ${JSON.stringify(statusBeforeLive)}, `
-        + `direction: ${backToReceive}, transferStart messages: ${started.length}, `
+        + `direction: ${backToReceive}, host file and host: ${JSON.stringify(receiveFor)} `
+        + `(want ${JSON.stringify([RECEIVE_HOST_FILE, 'vm'])}), `
+        + `transferStart messages: ${started.length}, `
         + `status after: ${JSON.stringify(refusal)}, sent before: ${sentBeforeLive}`);
     }
 
     // ===== progress: the three inbound kinds each reach the form (INJECTED) ===================
     //
-    // THE ONLY INJECTED CHECK IN THIS FILE, and the header's "WHAT IS REAL AND WHAT IS INJECTED"
-    // section is the full account. In short: the three messages are encoded by the GATEWAY'S OWN
-    // `encodeServerMessage` and handed to the page's real `onmessage`, so `inflate`,
-    // `JSON.parse`, the kind dispatch, `transferData`'s `atob` decode and `boot.onMessage` all
-    // run unmodified -- but no host sent them, and this check's `ok` line says `(injected)`.
+    // INJECTED, and the header's "WHAT IS REAL AND WHAT IS INJECTED" section is the full account.
+    // In short: the messages are encoded by the GATEWAY'S OWN `encodeServerMessage` and handed to
+    // the page's real `onmessage`, so `inflate`, `JSON.parse`, the kind dispatch,
+    // `transferData`'s `atob` decode and `boot.onMessage` all run unmodified -- but no host sent
+    // them, and this check's `ok` line says `(injected)`.
     //
     // `hold` IS SET FIRST, and without it this check cannot work: `transferUi.ts`'s `progress()`
     // DROPS its text when `isRunning` is false, and the gateway's `not in 3270 mode` refusal
     // clears that flag the moment it arrives. Holding the outgoing `transferStart` leaves the
     // form armed -- `transferring` on the status line -- with no host involved at all.
+    //
+    // THE FORM IS A RECEIVE of `RECEIVE_HOST_FILE` on VM, left so by `liveRefusal`, so this Start
+    // submits `LocalFile=nap.h` and the ending below downloads under that name.
+    const downloadsBeforeReceive = downloadsBegun().length;
     await cdp.eval('window.__tn3270Probe.hold = true');
     await clickCenter('#transfer-start');
     const armed = await waitForStatus((t) => t === 'transferring');
@@ -1518,93 +1726,138 @@ async function runTransferPhase(url) {
       await cdp.eval(`window.__tn3270Probe.feed(${JSON.stringify(b64)})`);
       await new Promise((r) => { setTimeout(r, 400); });
     };
+    /** The stand-in host's whole file, as the gateway would chunk it: two `transferData`s. */
+    const feedFile = async () => {
+      await feed({
+        kind: 'transferData', seq: 0, total: INJECTED_BYTES.length,
+        bytes: INJECTED_BYTES.subarray(0, INJECTED_SPLIT),
+      });
+      await feed({
+        kind: 'transferData', seq: 1, total: INJECTED_BYTES.length,
+        bytes: INJECTED_BYTES.subarray(INJECTED_SPLIT),
+      });
+    };
     // A DISTINCTIVE STRING, so a status line that merely still says `transferring` cannot pass.
     // `transferGateway.ts` relays progress text verbatim and both emitters are `${n} bytes`.
     await feed({ kind: 'transferProgress', text: '4096 bytes' });
     const sawProgress = await statusText();
-    await feed({
-      kind: 'transferData', seq: 0, total: INJECTED_BYTES.length, bytes: INJECTED_BYTES,
-    });
-    // MID-TRANSFER, Save must still be disabled: the bytes are staged but the transfer has not
-    // ended, and `transferBoot.ts` enables the button only on `transferDone`.
-    const saveMidData = await cdp.eval('document.getElementById("transfer-save").disabled');
-    // THE NEGATIVE HALF OF THE AFFORDANCE, read before the ending arrives: Save must NOT hold the
-    // focus mid-transfer. Without this a blanket `focus()` anywhere in the file would pass the
-    // check below, and the affordance is specifically about the COMPLETION.
-    const focusedMidData = await cdp.eval('document.activeElement?.id');
+    await feedFile();
+    // MID-TRANSFER, NOTHING IS DOWNLOADED YET: every byte is staged, but the download belongs to
+    // the ENDING -- a receive the gateway then reports as failed must leave nothing behind. A
+    // `deliver` moved up to the last chunk would download here.
+    const downloadsMidData = downloadsBegun().length - downloadsBeforeReceive;
     await feed({ kind: 'transferDone', ok: true, bytes: INJECTED_BYTES.length });
-    const sawDone = await statusText();
-    const saveAfterDone = await cdp.eval('document.getElementById("transfer-save").disabled');
+    const wantDone = `received ${INJECTED_BYTES.length} bytes; downloaded as ${RECEIVE_NAME}`;
+    const sawDone = await waitForStatus((t) => t === wantDone);
     /*
-      THE AFFORDANCE: a completed receive NAMES Save on the status line and gives it the FOCUS, so
-      Enter saves. Both come from one `hasUnsaved()` read in `transferBoot.ts`, which is what stops
-      the text and the button's enabled state from disagreeing.
-
-      `activeElement?.id` RATHER THAN THE LABEL, deliberately: the button reads `Save…` with a real
-      U+2026, which is easy to mistype in a harness and would fail for the wrong reason.
+      THE STATUS IS `endTransfer`'s, written over `transferUi.ts`'s shared `done: N bytes`, and it
+      is pinned EXACTLY: the N is the length the bridge delivered (the injected file's), and the
+      name is the derived one. A form that printed a constant, or named the file `download.bin`,
+      cannot pass.
     */
-    const focusedAfterDone = await cdp.eval('document.activeElement?.id');
-    /*
-      A RULE THAT ACTUALLY PAINTS IS ASSERTED, AND THE RING IS STILL NOT ASSERTED TO BE VISIBLE.
-
-      ## THIS ASSERTION ALREADY CAUGHT A REAL DEFECT, which is why it is phrased this way
-
-      It was first written as `matches(':focus-visible')`, because that is the pseudo-class
-      `ui.css` styles for every other button. IT FAILED on the first run -- `:focus-visible
-      matched: false` with the focus correctly on `#transfer-save`. `:focus-visible` is decided by
-      the UA's heuristic about the user's LAST INPUT MODALITY, not by how the focus was set, and
-      the operator reaches a completed transfer by CLICKING Start. So the autofocus was landing
-      with NO RING PAINTED -- invisible focus, the exact defect the autofocus exists to cure.
-      `ui.css` now gives `#transfer-save` a plain `:focus` rule as well, for that reason alone.
-
-      SO THE CHECK IS `getComputedStyle(...).outlineStyle`, NOT A PSEUDO-CLASS MATCH. Matching
-      `:focus` would be trivially true for any focused element and would prove nothing about a
-      stylesheet that forgot to style it; reading the resolved `outline` asks the question that
-      matters -- IS A RING APPLIED TO THIS BUTTON RIGHT NOW -- and would fail again if the
-      modality heuristic, the selector, or the rule's specificity ever changed.
-
-      It is the FIRST computed-style read in this repo's harnesses, which otherwise verify CSS
-      behaviourally (hit-testing, `elementFromPoint`). That is a deliberate narrow exception:
-      nothing else can distinguish "focused" from "focused and visibly so".
-
-      WHAT IT STILL CANNOT DO, said plainly because this file's convention is that an unqualified
-      claim was witnessed: `outlineStyle: solid` is not "a human can see it". Whether a 2px
-      `Highlight` outline READS clearly against the overlay's `Canvas` background is a rendering
-      judgement, and this project has recorded that apparent rendering bugs are sometimes the
-      emulator rather than the code. The user eyeballs that; this harness does not pretend to.
-    */
-    const ringStyle = await cdp.eval(
-      'getComputedStyle(document.getElementById("transfer-save")).outlineStyle');
-    const ringWidth = await cdp.eval(
-      'getComputedStyle(document.getElementById("transfer-save")).outlineWidth');
-    const ringPaints = ringStyle === 'solid' && ringWidth !== '0px';
-    /*
-      `done: N bytes` IS `transferUi.ts`'s OWN FORMAT (`finished()`), and the N asserted is the one
-      the injected `transferDone` carried -- so a form that printed a constant cannot pass.
-
-      `startsWith` RATHER THAN THE EXACT EQUALITY THIS LINE USED TO BE. `transferBoot.ts` now
-      appends its own hint, so an `===` against the bare format would fail by construction. The
-      PREFIX is still pinned exactly, which keeps the whole point of the old check -- the shared
-      module's format and the real byte count -- and the suffix is asserted separately below.
-    */
-    const doneOk = sawDone.startsWith(`done: ${INJECTED_BYTES.length} bytes`)
-      && sawDone.includes('press Save');
-    if (armed === 'transferring' && sawProgress === '4096 bytes' && doneOk
-      && saveMidData === true && saveAfterDone === false
-      && focusedMidData !== 'transfer-save' && focusedAfterDone === 'transfer-save'
-      && ringPaints === true) {
+    if (armed === 'transferring' && sawProgress === '4096 bytes' && downloadsMidData === 0
+      && sawDone === wantDone) {
       ok(check('progress'),
-        `progress reached the form (${JSON.stringify(sawProgress)}), then `
-        + `${JSON.stringify(sawDone)}, and the ${INJECTED_BYTES.length} received bytes enabled, `
-        + `named and FOCUSED Save, with a ${ringWidth} ${ringStyle} outline resolved on it`);
+        `progress reached the form (${JSON.stringify(sawProgress)}), both data chunks were staged `
+        + `with no download begun, and the ending read ${JSON.stringify(sawDone)}`);
     } else {
-      no(check('progress'),
-        'the three inbound transfer kinds did not all reach the form, or Save was not offered',
+      no(check('progress'), 'the three inbound transfer kinds did not all reach the form as they should',
         `armed: ${JSON.stringify(armed)}, after progress: ${JSON.stringify(sawProgress)}, `
-        + `after done: ${JSON.stringify(sawDone)}, Save disabled mid-data: ${saveMidData}, `
-        + `Save disabled after done: ${saveAfterDone}, focus mid-data: `
-        + `${JSON.stringify(focusedMidData)}, focus after done: `
-        + `${JSON.stringify(focusedAfterDone)}, outline: ${ringStyle} ${ringWidth}`);
+        + `downloads begun before transferDone: ${downloadsMidData} (want 0), `
+        + `after done: ${JSON.stringify(sawDone)} (want ${JSON.stringify(wantDone)})`);
+    }
+
+    // ===== download: exactly ONE download, named from the host file, with the host's bytes ====
+    //
+    // THE BROWSER'S OWN ACCOUNT, not the page's: `downloadsBegun` is Chromium's download manager
+    // reporting over CDP, and the bytes are read from the file IT wrote once it says `completed`.
+    // Waited out over `DOWNLOAD_QUIET_MS` after the first one appears, so a second download --
+    // a doubled `deliver`, or a sink clicked twice -- is seen rather than raced.
+    {
+      for (let waited = 0; waited < 8000
+        && downloadsBegun().length === downloadsBeforeReceive; waited += 100) {
+        await new Promise((r) => { setTimeout(r, 100); });
+      }
+      await new Promise((r) => { setTimeout(r, DOWNLOAD_QUIET_MS); });
+      const begun = downloadsBegun().slice(downloadsBeforeReceive);
+      const first = begun[0];
+      const settled = first === undefined ? undefined : await downloadSettled(first.guid);
+      let onDisk = null;
+      if (settled?.state === 'completed') {
+        // THE PATH THE BROWSER NAMED: `allowAndName` saves a download as its GUID.
+        const file = join(downloadDir, first.guid);
+        onDisk = existsSync(file) ? readFileSync(file) : null;
+      }
+      const sameBytes = onDisk !== null && Buffer.from(INJECTED_BYTES).equals(onDisk);
+      if (begun.length === 1 && first.suggestedFilename === RECEIVE_NAME && sameBytes) {
+        ok(check('download'),
+          `Chromium began exactly 1 download, suggested as ${JSON.stringify(first.suggestedFilename)} `
+          + `for host file ${JSON.stringify(RECEIVE_HOST_FILE)} on vm, and its ${onDisk.length}-byte `
+          + 'file is byte-identical to the two chunks the gateway sent');
+      } else {
+        // THE FIRST DIFFERING OFFSET, so a mangled download says where and how.
+        let firstDiff = -1;
+        if (onDisk !== null) {
+          const n = Math.max(onDisk.length, INJECTED_BYTES.length);
+          for (let i = 0; i < n && firstDiff < 0; i++) {
+            if (onDisk[i] !== INJECTED_BYTES[i]) firstDiff = i;
+          }
+        }
+        no(check('download'),
+          begun.length === 0
+            ? 'no download: the completed receive never reached the browser\'s download manager'
+            : 'the receive did not download exactly once, under the derived name, with the sent bytes',
+          `downloads begun: ${begun.length} (want 1) `
+          + `${JSON.stringify(begun.map((d) => d.suggestedFilename))}, `
+          + `want name ${JSON.stringify(RECEIVE_NAME)}, state: ${JSON.stringify(settled ?? null)}, `
+          + `bytes on disk: ${onDisk === null ? 'none' : onDisk.length} `
+          + `(want ${INJECTED_BYTES.length}), first differing offset: ${firstDiff}; `
+          + 'every event the browser session reported: '
+          + `${JSON.stringify(browserCdp.events.map((e) => e.method))}`);
+      }
+    }
+
+    // ===== cancelRace: a cancel between the last chunk and the ending downloads NOTHING =======
+    //
+    // THE ORDER IS THE HARNESS'S TO CHOOSE, which is what makes this deterministic: the "host" is
+    // the frames fed below, so the race a live gateway would lose by milliseconds -- its
+    // `transferDone {ok:true}` already on the wire when the operator's Cancel leaves -- is staged
+    // exactly. Every chunk arrives (the reassembler is COMPLETE), then the operator presses the
+    // REAL Cancel button, then the ending arrives as if it had crossed the cancel.
+    //
+    // WHAT IT GUARDS: `bridge.cancel()` drops the staged bytes, so the ending then sees "nothing
+    // staged, nothing refused" -- the legal ZERO-BYTE receive -- and `finishEmpty()` would
+    // download an empty `nap.h`. `transferBoot.ts`'s cancel handler holds a refusal for a
+    // cancelled receive to stop that. `transferBoot.test.ts` does not cover the cancel handler, so
+    // this is its cover.
+    {
+      const downloadsBeforeCancel = downloadsBegun().length;
+      const sentBeforeCancel = await sentCount();
+      await clickCenter('#transfer-start');
+      const armedAgain = await waitForStatus((t) => t === 'transferring');
+      await feedFile();
+      const cancelEnabled = await cdp.eval('document.getElementById("transfer-cancel").disabled === false');
+      await clickCenter('#transfer-cancel');
+      await new Promise((r) => { setTimeout(r, 300); });
+      const cancelSent = (await cdp.eval(
+        `window.__tn3270Probe.sent.slice(${sentBeforeCancel}).filter((t) => t.includes('"transferCancel"'))`)).length;
+      await feed({ kind: 'transferDone', ok: true, bytes: INJECTED_BYTES.length });
+      const wantCancelled = 'transfer cancelled; nothing was downloaded';
+      const said = await waitForStatus((t) => t === wantCancelled);
+      await new Promise((r) => { setTimeout(r, DOWNLOAD_QUIET_MS); });
+      const late = downloadsBegun().slice(downloadsBeforeCancel);
+      if (armedAgain === 'transferring' && cancelEnabled && cancelSent === 1
+        && said === wantCancelled && late.length === 0) {
+        ok(check('cancelRace'),
+          'all chunks in, a real Cancel click (one transferCancel sent), then transferDone '
+          + `{ok:true}: ${JSON.stringify(said)}, and 0 downloads begun over ${DOWNLOAD_QUIET_MS} ms`);
+      } else {
+        no(check('cancelRace'), 'a receive cancelled before its ending still downloaded, or said otherwise',
+          `armed: ${JSON.stringify(armedAgain)}, Cancel enabled: ${cancelEnabled}, `
+          + `transferCancel frames sent: ${cancelSent} (want 1), status: ${JSON.stringify(said)} `
+          + `(want ${JSON.stringify(wantCancelled)}), downloads begun: ${late.length} (want 0) `
+          + `${JSON.stringify(late.map((d) => d.suggestedFilename))}`);
+      }
     }
 
     // ===== keyboard: Ctrl-B opens it, and the regions REFLOW rather than stacking ============
@@ -3629,6 +3882,7 @@ async function runTransferPhase(url) {
     process.stdout.write(childOut);
   } finally {
     cdp?.close();
+    browserCdp?.close();
     child?.kill('SIGKILL');
     // WAITED FOR, bounded, as `browser-lan-copy.mjs`'s cleanup is. MEASURED 2026-11-03: a leak
     // count taken right after this harness exited still saw 2 `electron` processes on their way
@@ -3638,6 +3892,7 @@ async function runTransferPhase(url) {
       await new Promise((r) => { child.once('close', r); setTimeout(r, 5000); });
     }
     rmSync(profile, { recursive: true, force: true });
+    rmSync(downloadDir, { recursive: true, force: true });
   }
 
   /**

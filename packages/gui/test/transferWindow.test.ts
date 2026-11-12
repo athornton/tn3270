@@ -1,5 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createTransferController, type TransferDeps } from '../src/transferWindow.js';
+import {
+  createTransferController, saveDialogOptions, suggestedNameFrom, type TransferDeps,
+} from '../src/transferWindow.js';
 import type { StartTransferOptions, TransferRun } from '@tn3270/frontend';
 
 /**
@@ -478,5 +480,74 @@ describe('createTransferController', () => {
     const c = createTransferController(d);
     expect(await c.browse('nonsense')).toBe('/tmp/save.txt');
     expect(d.openDialog).not.toHaveBeenCalled();
+  });
+
+  /**
+   * THE RECEIVE SUGGESTION REACHES `saveDialog`, which is the whole of Task 3: `transferUi.ts`'s
+   * `browseLocal` computes `defaultLocalName` and hands it to `deps.browse` as a second argument;
+   * this is the next hop, main's controller forwarding it to the dep that will fold it into
+   * `defaultPath` (`saveDialogOptions`, tested below).
+   */
+  it('passes a receive suggestion through to the SAVE dialog', async () => {
+    const d = deps();
+    const c = createTransferController(d);
+    await c.browse('receive', 'nap.h');
+    expect(d.saveDialog).toHaveBeenCalledWith('nap.h');
+  });
+
+  it('a send never forwards a suggestion to the OPEN dialog, which takes none', async () => {
+    const d = deps();
+    const c = createTransferController(d);
+    await c.browse('send', 'nap.h');
+    expect(d.openDialog).toHaveBeenCalledWith();
+  });
+
+  it('no suggestion at all reaches the SAVE dialog as undefined, not a missing argument', async () => {
+    const d = deps();
+    const c = createTransferController(d);
+    await c.browse('receive');
+    expect(d.saveDialog).toHaveBeenCalledWith(undefined);
+  });
+});
+
+/**
+ * `saveDialogOptions` IS THE ONE DECISION IN `main.ts`'s `dialog.showSaveDialog` CALL, PULLED OUT
+ * because `main.ts` imports `electron` and vitest cannot load it -- see `transferWindow.ts`'s
+ * docstring on the function. This is the only place that decision can be tested at all.
+ */
+describe('saveDialogOptions', () => {
+  it('is just the title when there is no suggestion', () => {
+    const opts = saveDialogOptions(undefined);
+    expect(opts).toEqual({ title: 'Receive into which file?' });
+    // THE ABSENCE OF THE KEY, not merely a falsy value: `{ defaultPath: undefined }` would pass
+    // a `.toEqual` check against `{ title: ... }` too, since `toEqual` treats an explicit
+    // `undefined` property as absent -- so the key is asserted directly.
+    expect('defaultPath' in opts).toBe(false);
+  });
+
+  it('folds a suggestion in as defaultPath', () => {
+    expect(saveDialogOptions('nap.h')).toEqual({
+      title: 'Receive into which file?',
+      defaultPath: 'nap.h',
+    });
+  });
+});
+
+/**
+ * `suggestedNameFrom` IS THE IPC BOUNDARY CHECK: `transfer:browse`'s second argument crosses a
+ * process boundary where nothing enforces the `string | undefined` the preload's type claims, so
+ * this is what keeps a malformed payload from reaching `saveDialogOptions` as anything but a
+ * string or nothing -- the same role `connectDialog.ts`'s `isConnectForm` plays for the connect
+ * form.
+ */
+describe('suggestedNameFrom', () => {
+  it('passes a string straight through', () => {
+    expect(suggestedNameFrom('nap.h')).toBe('nap.h');
+  });
+
+  it.each([
+    [undefined], [null], [42], [true], [{ suggestedName: 'nap.h' }], [['nap.h']],
+  ])('%j becomes undefined, not whatever it actually was', (value) => {
+    expect(suggestedNameFrom(value)).toBeUndefined();
   });
 });

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { parseTransferKeywords } from '@tn3270/frontend';
 import { caretAfterEdit, createTransferUi, type UiDeps, type UiField } from '../src/transferUi.js';
 
 /**
@@ -122,10 +123,10 @@ describe('createTransferUi', () => {
     const ui = createTransferUi(deps);
     // The form opens on SEND, so the OPEN dialog is the first one asked for now.
     await ui.browseLocal();
-    expect(deps.browse).toHaveBeenCalledWith('send');
+    expect(deps.browse).toHaveBeenCalledWith('send', undefined);
     ui.cycle('direction', 1);
     await ui.browseLocal();
-    expect(deps.browse).toHaveBeenLastCalledWith('receive');
+    expect(deps.browse).toHaveBeenLastCalledWith('receive', undefined);
   });
 
   it('submits the model keywords, not the DOM', async () => {
@@ -307,6 +308,149 @@ describe('createTransferUi', () => {
     expect(statuses[statuses.length - 1]).toBe('128 bytes');
     // And the model must be untouched: a path arriving mid-transfer is a path for the NEXT one.
     expect(ui.values().localFile).toBe('');
+  });
+});
+
+/**
+ * `deriveLocalFileOnReceive`: the web gateway's receive has no Local file field, and the name comes
+ * from the host file (web receive spec, 2026-11-12). The GUI leaves it off and keeps its field.
+ */
+describe('createTransferUi with deriveLocalFileOnReceive', () => {
+  const lastIds = (deps: ReturnType<typeof fakeDeps>): string[] =>
+    deps.rendered[deps.rendered.length - 1]!.map((f) => f.id);
+
+  it('omits Local file on a receive and shows it on a send', () => {
+    const deps = fakeDeps();
+    const ui = createTransferUi(deps, { deriveLocalFileOnReceive: true });
+    expect(lastIds(deps), 'the form opens on send').toContain('localFile');
+    ui.cycle('direction', 1);                 // receive
+    expect(ui.values().direction).toBe('receive');
+    expect(lastIds(deps)).not.toContain('localFile');
+    ui.cycle('direction', 1);                 // back to send
+    expect(lastIds(deps)).toContain('localFile');
+  });
+
+  it('still shows Local file on a receive when the option is off, which is the GUI', () => {
+    for (const opts of [undefined, {}, { deriveLocalFileOnReceive: false }]) {
+      const deps = fakeDeps();
+      const ui = createTransferUi(deps, opts);
+      ui.cycle('direction', 1);               // receive
+      expect(lastIds(deps), JSON.stringify(opts)).toContain('localFile');
+    }
+  });
+
+  it('submits the derived LocalFile without writing it into the form', async () => {
+    const deps = fakeDeps();
+    const ui = createTransferUi(deps, { deriveLocalFileOnReceive: true });
+    ui.cycle('direction', 1);                 // receive
+    ui.cycle('host', 1);                      // vm
+    ui.type('hostFile', 'NAP H A2');
+    await ui.start();
+    expect(deps.submitted[0]).toContain('LocalFile=nap.h');
+    expect(deps.submitted[0]).toContain('HostFile=NAP H A2');
+    // A COPY, so a switch back to send shows what the operator had typed (here, nothing).
+    expect(ui.values().localFile).toBe('');
+  });
+
+  it('derives over a Local file typed before the switch to receive, and keeps the typed one', async () => {
+    const deps = fakeDeps();
+    const ui = createTransferUi(deps, { deriveLocalFileOnReceive: true });
+    ui.type('localFile', 'mine.txt');         // on send
+    ui.cycle('direction', 1);                 // receive: the field is hidden
+    ui.type('hostFile', "'SYS1.PROCLIB(ASMHC)'");
+    await ui.start();
+    const sent = deps.submitted[0]!;
+    expect(sent).toContain('LocalFile=sys1.proclib(asmhc)');
+    expect(sent.filter((k) => k.startsWith('LocalFile='))).toHaveLength(1);
+    expect(ui.values().localFile).toBe('mine.txt');
+  });
+
+  it('is not refused for a missing Local file, by the real validator', async () => {
+    // The controller doesn't validate: `transferForm.ts` says the form never does, and the refusal
+    // comes back from `submit`. So this fake submit runs `parseTransferKeywords` the way the GUI's
+    // `transferWindow.ts` and the gateway do, and an empty LocalFile would be its
+    // "missing 'LocalFile' option".
+    const deps = fakeDeps();
+    deps.submit = vi.fn(async (keywords: readonly string[]) => {
+      deps.submitted.push([...keywords]);
+      try { parseTransferKeywords(keywords); return { ok: true as const }; } catch (err) {
+        return { ok: false as const, error: (err as Error).message };
+      }
+    });
+    const ui = createTransferUi(deps, { deriveLocalFileOnReceive: true });
+    ui.cycle('direction', 1);                 // receive
+    ui.type('hostFile', 'NAP.H');
+    await ui.start();
+    expect(ui.running(), 'a submit the validator accepted is running').toBe(true);
+    const said = vi.mocked(deps.setStatus).mock.calls.map((c) => c[0]);
+    expect(said.some((t) => /LocalFile/i.test(t))).toBe(false);
+  });
+
+  it('falls back to download.bin when the host file is empty', async () => {
+    const deps = fakeDeps();
+    const ui = createTransferUi(deps, { deriveLocalFileOnReceive: true });
+    ui.cycle('direction', 1);                 // receive
+    await ui.start();
+    expect(deps.submitted[0]).toContain('LocalFile=download.bin');
+  });
+
+  it('leaves a send alone: the typed Local file is what is submitted', async () => {
+    const deps = fakeDeps();
+    const ui = createTransferUi(deps, { deriveLocalFileOnReceive: true });
+    ui.type('localFile', 'up.txt');
+    ui.type('hostFile', 'NAP H A2');
+    await ui.start();
+    expect(deps.submitted[0]).toContain('LocalFile=up.txt');
+  });
+
+  it('submits the typed Local file on a receive when the option is off', async () => {
+    const deps = fakeDeps();
+    const ui = createTransferUi(deps);
+    ui.cycle('direction', 1);                 // receive
+    ui.type('localFile', '/tmp/here');
+    ui.type('hostFile', 'NAP H A2');
+    await ui.start();
+    expect(deps.submitted[0]).toContain('LocalFile=/tmp/here');
+  });
+
+  it('does not ask for a local file in the help on a derived receive', () => {
+    const deps = fakeDeps();
+    const ui = createTransferUi(deps, { deriveLocalFileOnReceive: true });
+    ui.cycle('direction', 1);                 // receive
+    const said = vi.mocked(deps.setStatus).mock.calls.map((c) => c[0]);
+    expect(said[said.length - 1]).toBe('Name the host file, then Start.');
+  });
+});
+
+describe('browseLocal suggests a received file\'s name', () => {
+  it('passes defaultLocalName on a receive, whatever the option', async () => {
+    for (const opts of [undefined, { deriveLocalFileOnReceive: true }]) {
+      const deps = fakeDeps();
+      const ui = createTransferUi(deps, opts);
+      ui.cycle('direction', 1);               // receive (host is tso)
+      ui.type('hostFile', "'SYS1.PROCLIB(ASMHC)'");
+      await ui.browseLocal();
+      expect(deps.browse).toHaveBeenLastCalledWith('receive', 'sys1.proclib(asmhc)');
+    }
+  });
+
+  it('passes no suggestion on a send', async () => {
+    const deps = fakeDeps();
+    const ui = createTransferUi(deps);
+    ui.type('hostFile', 'NAP H A2');
+    await ui.browseLocal();
+    expect(deps.browse).toHaveBeenLastCalledWith('send', undefined);
+  });
+
+  it('passes no suggestion on a receive with an empty or blank host file', async () => {
+    for (const hostFile of ['', '   ']) {
+      const deps = fakeDeps();
+      const ui = createTransferUi(deps);
+      ui.cycle('direction', 1);               // receive
+      ui.type('hostFile', hostFile);
+      await ui.browseLocal();
+      expect(deps.browse, JSON.stringify(hostFile)).toHaveBeenLastCalledWith('receive', undefined);
+    }
   });
 });
 
