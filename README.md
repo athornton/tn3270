@@ -1467,15 +1467,20 @@ worse than one that says which quarter is missing.
 - **No keypad button has been clicked at a host, and Dup's TAB is unwitnessed.** All four special
   keys are live-verified from the CLI, which shares `applyAction` with the button but not the HTML
   button's click handler and its IPC hop; Dup's TAB needs a multi-field panel, which needs a logon.
-- **`IND$FILE` works in every front end, but nothing reads the host's `RC=` line.** `Ctrl-T`
+- **`IND$FILE` works in every front end, but a host's refusal still takes 30 s to report.** `Ctrl-T`
   opens a form in the TUI, a transfer window in the GUI and an overlay in the browser; the
   browser's bytes travel over the WebSocket, so its local file is on the operator's machine, not
   the gateway's. Closing a form mid-transfer aborts, so the host leaves transfer mode. CUT needs
   24x80; DFT works at any size, and a DFT-capable host picks it because DDM is advertised by
-  default (`-ddm off` forces CUT). The gap: when TSO's `IND$FILE` exits `RC=12` the host
-  has already left transfer mode, but we wait out the 30 s frame timeout and then say the host
-  "may still be transferring" (`frontend/src/transferRun.ts`, and its copy in
-  `cli/src/runner.ts`). Live witnesses for every front end: *Verification*.
+  default (`-ddm off` forces CUT). The gap: when the host refuses before any transfer frame
+  (TSO's `IND$FILE` exiting `RC=12`, MECAFF's `IND$FILE requires a MECAFF connected 3270
+  terminal`), we still wait out the 30 s start timeout, as x3270 does. The failure then says
+  x3270's `transfer did not start within 30s` and quotes the rows the host changed since the
+  command, up to five, so the host's own reason is in the message
+  (`frontend/src/transferStart.ts`, shared by the CLI and the other front ends). `press Attn or
+  Clear` leads only while the keyboard is still locked. Nothing matches `RC=` or ends the wait
+  early, because TSO's refusal screen has never been captured. Live witnesses for every front
+  end: *Verification*.
 - **The GUI is a first slice, not a finished app.** `packages/gui` renders live 3270
   screens from both Hercules systems and takes typed input (see *Verification*). It has a menu
   bar and a Connect dialog for a launch with no host, but still **no preferences store** and no

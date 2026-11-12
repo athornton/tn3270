@@ -7,6 +7,7 @@ import {
   O_DT_CSUM, O_DT_DATA, O_DT_FRAME_SEQ, O_DT_LEN, O_FRAME_TYPE, O_SF,
   O_UP_DATA, O_UP_FRAME_SEQ, O_UP_LEN, RO_FRAME_TYPE, RO_REASON_CODE,
 } from '@tn3270/core';
+import { startTransfer } from '@tn3270/frontend';
 import { Runner } from '../src/runner.js';
 import { parseCommand } from '../src/commands.js';
 
@@ -1440,6 +1441,10 @@ describe('Transfer(): failure paths', () => {
     const reply = await pending;
     expect(reply).toContain('no CUT frame from the host within 0.1s');
     expect(reply).toContain('press Attn or Clear');
+    // HOST_ACK is a CUT frame, so this transfer STARTED: the old wording stays, and the
+    // never-started text (owner's decision 2026-11-12) must not appear.
+    expect(reply).toContain('the host may still be in transfer mode');
+    expect(reply).not.toContain('did not start');
     expect(reply.split('\n').pop()).toBe('error');
     expect(files.store.has('/tmp/out.bin')).toBe(false);
   });
@@ -1719,10 +1724,14 @@ describe('Transfer() protocol selection', () => {
     // the weak assertion matched the exception text instead of the timeout row. A test that
     // passes against the bug it names, for the fifth time on this project's record.
     //
-    // So: assert the RECOVERY leads, the row's own wording, and that no CutFrameError text
-    // is present. The third is what actually pins the non-throwing detector.
-    expect(reply).toContain('press Attn or Clear');
-    expect(reply).toContain('host may want 24x80; this session is 43x80');
+    // So: assert the row's own wording, and that no CutFrameError text is present. The second
+    // is what actually pins the non-throwing detector.
+    //
+    // 2026-11-12: NOTHING STARTED, so this is now the shared never-started text, whose geometry
+    // clause has this wording. The host's WCC restored the keyboard, so there is no Attn/Clear.
+    expect(reply).toContain('transfer did not start within 0.2s');
+    expect(reply).toContain('(a CUT host needs 24x80; this session is 43x80)');
+    expect(reply).not.toContain('press Attn or Clear');
     expect(reply).not.toContain('offsets are meaningless');   // i.e. it did not throw
     expect(reply).not.toContain('-ddm on');     // screens DID arrive, so not that row
   });
@@ -1827,5 +1836,82 @@ describe('Transfer(): a DFT transfer that finishes before the poll loop', () => 
     expect(reply).not.toContain('press Attn or Clear');
     expect(reply).toContain('Transfer complete, 3 bytes transferred');
     expect(Array.from(files.store.get('/tmp/out.bin')!)).toEqual([0x41, 0x42, 0x43]);
+  });
+});
+
+/** The host writes these 1-based rows of text with a keyboard-restoring WCC: back at its prompt. */
+function hostWritesRows(conn: FakeConnection, rowsText: Record<number, string>): void {
+  const bytes: number[] = [SnaCmd.W, 0x02];
+  for (const [row, text] of Object.entries(rowsText)) {
+    bytes.push(Order.SBA, ...encodeAddress((Number(row) - 1) * 80, 1920), ...cp037.encode(text));
+  }
+  conn.host(...bytes, T.IAC, T.EOR);
+}
+
+/**
+ * PROVENANCE: docs/live-testing.md:757-759, VM/370 CMS 2026-09-25. MECAFF answered these three
+ * lines, with zero CUT and zero 0xd0 frames. The row positions are ours.
+ */
+const MECAFF_REFUSAL = {
+  2: 'Error: IND$FILE requires a MECAFF connected 3270 terminal',
+  3: '... aborting',
+  4: 'Ready(00032)',
+};
+
+describe('Transfer(): a transfer that NEVER STARTED', () => {
+  it("says x3270's words and quotes MECAFF's refusal, not 'may still be in transfer mode'", async () => {
+    const { runner, conn } = await transferRunner({ transferFrameSeconds: 0.1 });
+    const pending = runner.run('Transfer(Direction=receive,LocalFile=/tmp/out.bin,HostFile=FOO)');
+    await new Promise((r) => setTimeout(r, 20));
+    hostWritesRows(conn, MECAFF_REFUSAL);
+    const reply = await pending;
+    expect(reply).toContain('data: Transfer(): transfer did not start within 0.1s (we offered CUT or DFT); '
+      + 'the host wrote: "Error: IND$FILE requires a MECAFF connected 3270 terminal" / "... aborting" / "Ready(00032)"');
+    expect(reply).not.toMatch(/may still|transfer mode|Attn or Clear/);
+    expect(reply.split('\n').pop()).toBe('error');
+  });
+
+  it('a silent host still times out, says it wrote nothing, and keeps Attn/Clear (keyboard locked)', async () => {
+    const { runner, session } = await transferRunner({ transferFrameSeconds: 0.1 });
+    const reply = await runner.run('Transfer(Direction=receive,LocalFile=/tmp/out.bin,HostFile=FOO)');
+    expect(session.oia.isInhibited()).toBe(true);
+    expect(reply).toContain('data: Transfer(): press Attn or Clear: transfer did not start within 0.1s '
+      + '(we offered CUT or DFT); the host wrote nothing');
+  });
+
+  it('a DFT transfer that OPENED and then stalled keeps the old wording', async () => {
+    const { runner, conn } = await transferRunner({ transferFrameSeconds: 0.1 });
+    const pending = runner.run('Transfer(Direction=receive,LocalFile=/tmp/out.bin,HostFile=FOO)');
+    await new Promise((r) => setTimeout(r, 20));
+    dftWsf(conn, dftOpen());
+    const reply = await pending;
+    expect(reply).toContain('the host may still be in transfer mode (press Attn or Clear)');
+    expect(reply).not.toContain('did not start');
+  });
+
+  it('produces the SAME text as the event-driven driver, because both call describeNonStart', async () => {
+    // The CLI's blocking loop and `frontend/src/transferRun.ts` are separate control flows; this
+    // drives both against the same host bytes and demands identical text.
+    const { runner, session, conn } = await transferRunner({ transferFrameSeconds: 0.1 });
+    const pending = runner.run('Transfer(Direction=receive,LocalFile=/tmp/out.bin,HostFile=FOO)');
+    await new Promise((r) => setTimeout(r, 20));
+    const command = typedCommand(session);
+    hostWritesRows(conn, MECAFF_REFUSAL);
+    const cliLine = (await pending).split('\n').find((l) => l.startsWith('data: Transfer(): '));
+
+    const other = await transferRunner();
+    const done = await new Promise<{ ok: boolean; error?: string }>((resolve) => {
+      startTransfer({
+        session: other.session, files: other.files, command,
+        request: {
+          direction: 'receive', localFile: '/tmp/out2.bin', hostFile: 'FOO',
+          host: 'tso', mode: 'binary', cr: 'auto', exist: 'keep',
+        },
+        onProgress: () => {}, onDone: resolve, frameMs: 100, totalMs: 5000,
+      });
+      hostWritesRows(other.conn, MECAFF_REFUSAL);
+    });
+    expect(done.error).toMatch(/^transfer did not start within 0\.1s/);
+    expect(cliLine).toBe(`data: Transfer(): ${done.error}`);
   });
 });

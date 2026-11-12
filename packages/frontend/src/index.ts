@@ -127,6 +127,9 @@ export type {
 // collapsing the two would change the s3270 line protocol's behavior.
 export { startTransfer } from './transferRun.js';
 export type { TransferRun, StartTransferOptions } from './transferRun.js';
+// The text for a transfer that never started, shared with the CLI's own loop so the two cannot drift.
+export { describeNonStart, screenRows, NON_START_ROWS_SHOWN } from './transferStart.js';
+export type { NonStart } from './transferStart.js';
 
 // The transfer form's model. Pure data and pure functions, so the TUI and (stage 3) the
 // GUI render the same form without a second field table to drift.

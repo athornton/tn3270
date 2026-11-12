@@ -4,7 +4,7 @@ import {
   parseOversize, type GeometrySetting,
 } from '@tn3270/core';
 import {
-  tcpConnect, DEFAULT_TLS, resolveHostSpec, transferCommand,
+  tcpConnect, DEFAULT_TLS, resolveHostSpec, transferCommand, describeNonStart, screenRows,
   type TlsOptions, type TransferFiles, type TransferRequest,
 } from '@tn3270/frontend';
 import { parseCommand } from './commands.js';
@@ -616,9 +616,12 @@ export class Runner {
     // NOW the host is involved. Everything from here can leave it in transfer
     // mode, which is why nothing above could.
     this.primeAndType(command);
+    // The screen just before Enter, after typing: a deadline that finds the transfer NEVER
+    // STARTED quotes the rows the host changed since. See `frontend/src/transferStart.ts`.
+    const before = screenRows(this.session.screen);
     this.session.sendAID(AID.ENTER);
 
-    const result = await this.runTransferFrames(transfer, dft);
+    const result = await this.runTransferFrames(transfer, dft, before);
 
     for (const warning of transfer.warnings) data.push(`Transfer(): ${warning}`);
 
@@ -749,7 +752,9 @@ export class Runner {
    *
    * TWO DEADLINES, because the two ways a transfer wedges look different — see
    * `TRANSFER_TIMEOUT_MS`. A timeout is reported as a failure rather than thrown,
-   * so the caller's single "did it work" branch handles it, and it says that the
+   * so the caller's single "did it work" branch handles it. A transfer that NEVER
+   * STARTED (no CUT frame, no DFT frame) gets the shared `describeNonStart` text,
+   * x3270's "did not start" plus the host's changed rows; one that started says the
    * host may still be mid-transfer: we deliberately do NOT invent an abort
    * sequence here. x3270's abort writes the response area and presses PF2
    * (`cut_abort`, ft_cut.c:662-678), which is `CutTransfer`'s to do from a frame
@@ -759,7 +764,7 @@ export class Runner {
    * a real terminal.
    */
   private async runTransferFrames(
-    transfer: CutTransfer, dft: DftTransfer,
+    transfer: CutTransfer, dft: DftTransfer, before: readonly string[],
   ): Promise<TransferResult> {
     const overallDeadline = Date.now() + this.transferMs;
     // The screen the host wrote most recently that we have already processed.
@@ -770,6 +775,8 @@ export class Runner {
     // message reads it: "nothing at all" and "screens, none of them a frame" want
     // different diagnoses and an operator cannot tell them apart from a deadline.
     let sawNonFrameScreen = false;
+    // Has a CUT frame been processed? With `dft.started`, the "did the transfer start" test.
+    let cutStarted = false;
 
     for (;;) {
       // NO SEPARATE "CHECK STATE BEFORE WAITING" LINE HERE, and its absence is
@@ -803,7 +810,24 @@ export class Runner {
           processedOutput = this.outputCount;
         }
         if (Date.now() >= frameDeadline) {
-          const why = Date.now() >= overallDeadline
+          const overall = Date.now() >= overallDeadline;
+          if (!cutStarted && !dft.started) {
+            // NEVER STARTED: no CUT frame and no DFT frame of any kind, so the host is not in
+            // transfer mode and "may still be in transfer mode" would be false. x3270's words
+            // and the host's own, from the function the event-driven driver also calls, so the
+            // two cannot drift (owner's decision 2026-11-12).
+            return {
+              ok: false,
+              error: describeNonStart({
+                seconds: (overall ? this.transferMs : this.transferFrameMs) / 1000,
+                before, after: screenRows(this.session.screen),
+                keyboardLocked: this.session.oia.isInhibited(), sawHostWrite: sawNonFrameScreen,
+                ddmAdvertised: this.session.ddmAdvertised,
+                rows: this.session.screen.rows, cols: this.session.screen.cols,
+              }),
+            };
+          }
+          const why = overall
             ? `did not complete within ${this.transferMs / 1000}s`
             : `no CUT frame from the host within ${this.transferFrameMs / 1000}s`;
           // WHAT WAS OBSERVED, not what we guess, and the same two rows the
@@ -846,6 +870,7 @@ export class Runner {
         return dft.result ?? { ok: false, error: 'DFT transfer ended without a result' };
       }
       processedOutput = this.outputCount;
+      cutStarted = true;
 
       // CUT HAS WON. Release the DFT registration before stepping, so a stray
       // inbound read cannot replay a retained frame at a host now running CUT.

@@ -1433,10 +1433,23 @@ describe('the transfer form: submitting', () => {
     // did not complete within 600s after 0 bytes; " with nothing about what to do. The
     // recovery now leads the message. Same shape as the help string that did not fit, one
     // layer down.
+    //
+    // 2026-11-12: nothing started here (no frame of either kind), so the message is x3270's
+    // "did not start", and the recovery leads only while the keyboard is still locked -- which
+    // `sendAID` being a spy never does, so that half is forced through the OIA.
+    const h = app({ files: fakeFiles(SOURCE) });
+    fillAndSubmit(h);
+    vi.spyOn(h.session.oia, 'isInhibited').mockReturnValue(true);
+    vi.advanceTimersByTime(700_000);
+    expect(h.stdout.all).toMatch(/Attn or Clear: transfer did not/);
+  });
+
+  it('a host back at its prompt gets no recovery advice, and the drawn line leads with the fact', () => {
     const h = app({ files: fakeFiles(SOURCE) });
     fillAndSubmit(h);
     vi.advanceTimersByTime(700_000);
-    expect(h.stdout.all).toMatch(/Attn or Clear/);
+    expect(h.stdout.all).toMatch(/transfer did not start within 30s/);
+    expect(h.stdout.all).not.toMatch(/Attn or Clear|may still be/);
   });
 });
 

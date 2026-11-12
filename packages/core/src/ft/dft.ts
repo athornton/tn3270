@@ -156,6 +156,9 @@ export class DftTransfer {
 
   private outcome: TransferResult | undefined;
 
+  /** Has the host sent any frame at all? See `started`. */
+  private sawFrame = false;
+
   constructor(opts: DftOptions) {
     this.direction = opts.direction;
     if (opts.direction === 'send') {
@@ -177,6 +180,12 @@ export class DftTransfer {
   get isMessage(): boolean { return this.messageFlag; }
   /** The last upload frame, for the Read Modified hook. */
   get retainedFrame(): Uint8Array | undefined { return this.savedFrame; }
+  /**
+   * Has the host sent ANY DFT frame? The drivers' "did this transfer start" test: an Open moves
+   * no bytes, so `transferred` is zero for a host that opened and then stalled -- which is in
+   * transfer mode, unlike one that never answered in DFT at all.
+   */
+  get started(): boolean { return this.sawFrame; }
   /** Bytes transferred so far, for a progress display. */
   get transferred(): number {
     return this.direction === 'send' ? this.offset : this.receivedLength;
@@ -196,6 +205,7 @@ export class DftTransfer {
   /** Feed one `SF_TRANSFER_DATA` payload in; get the reply out. */
   handle(payload: Uint8Array): DftStep {
     if (this.outcome !== undefined) return { done: this.outcome };
+    this.sawFrame = true;
 
     const frame = parseDftFrame(payload);
 
