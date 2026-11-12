@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  CHECKS, GOLDEN, NO_SEAMS, TRACE, defaultStage, dialogConnects, drawsGolden, probeSeen, routeDefaults, switches,
+  CHECKS, GOLDEN, NO_SEAMS, TRACE, defaultStage, dialogConnects, drawsGolden, probeSeen, routeDefaults, start, switches,
   type Route,
 } from '../../../scripts/package-checks.mjs';
 
@@ -141,5 +141,26 @@ describe('package-checks drive the route\'s stage and probe', () => {
     const work = mkdtempSync(join(tmp, 'w-'));
     const stage = (d: string) => ({ ...defaultStage(d), trace: join(tmp, 'nowhere.trace') });
     await expect(drawsGolden(route({ stage }), work)).rejects.toThrow(/expected exit 0/);
+  }, 30_000);
+});
+
+describe('start: no inherited APP_SANDBOX_CONTAINER_ID (it would fake the probe line)', () => {
+  it('drops it from the inherited env, the route env and the extra env alike', async () => {
+    const saved = { id: process.env.APP_SANDBOX_CONTAINER_ID, display: process.env.DISPLAY };
+    process.env.APP_SANDBOX_CONTAINER_ID = 'io.github.athornton.tn3270';
+    process.env.DISPLAY = saved.display ?? ':fake';
+    const tmp = mkdtempSync(join(tmpdir(), 'pkgchecks-env-'));
+    try {
+      const r: Route = { exe: process.execPath, prefix: ['-e', 'process.stdout.write("id=" + (process.env.APP_SANDBOX_CONTAINER_ID ?? "unset") + " probe=" + process.env.TN3270_GUI_PROBE)'],
+        env: { APP_SANDBOX_CONTAINER_ID: 'from.route' }, probe: true };
+      const p = await start(r, [], { APP_SANDBOX_CONTAINER_ID: 'from.extra' }, tmp);
+      p.child.stdin.end();
+      await p.closed;
+      expect(p.stdout).toBe('id=unset probe=1');
+    } finally {
+      if (saved.id === undefined) delete process.env.APP_SANDBOX_CONTAINER_ID; else process.env.APP_SANDBOX_CONTAINER_ID = saved.id;
+      if (saved.display === undefined) delete process.env.DISPLAY; else process.env.DISPLAY = saved.display;
+      rmSync(tmp, { recursive: true, force: true });
+    }
   }, 30_000);
 });

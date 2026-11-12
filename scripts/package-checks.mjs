@@ -106,6 +106,9 @@ export async function start(r, args, extraEnv, cwd) {
   const probe = routeDefaults(r).probe ? { TN3270_GUI_PROBE: '1' } : {};
   const env = await displayEnv({ ...process.env, ...r.env, ...NO_SEAMS, ...probe, ...extraEnv });
   delete env.TN3270_GUI_MAIN;
+  // macOS sets APP_SANDBOX_CONTAINER_ID itself in a sandboxed process (probe.ts reports it): an
+  // inherited one would let an UNSANDBOXED launch print `sandbox=<id>` and pass the probe.
+  delete env.APP_SANDBOX_CONTAINER_ID;
   // windowsHide OFF (unmeasured caution): it puts SW_HIDE in STARTUPINFO, which Windows applies
   // to a process's first ShowWindow -- possibly the very window being captured.
   return launch(r.exe, [...r.prefix, ...args], env, { group: true, spawnOptions: { cwd, windowsHide: false } });

@@ -26,6 +26,13 @@ export function routeDefaults(route: Route): {
   stage: (dir: string) => Staged; probe: boolean; processDir: string | undefined;
 };
 export function switches(userData: string): string[];
+/** A started launch (smoke-lib's `launch`): output growing as it runs. */
+export interface Started {
+  child: import('node:child_process').ChildProcessWithoutNullStreams; stdout: string; stderr: string; exited: boolean;
+  closed: Promise<{ code: number | null; signal: string | null }>;
+}
+/** Starts the route's app (NO_SEAMS, the probe seam, TN3270_GUI_MAIN and APP_SANDBOX_CONTAINER_ID removed). */
+export function start(route: Route, args: string[], extraEnv: Record<string, string>, cwd: string): Promise<Started>;
 export function probeSeen(stdout: string): string | null;
 export function winProcessesUnder(dir: string): string[];
 export const drawsGolden: Check;
