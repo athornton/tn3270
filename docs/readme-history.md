@@ -126,3 +126,406 @@ that licence and is not redistributed here: IBM's GA23-0059 3270 Data Stream
 Programmer's Reference, x3270 (Paul Mattes, BSD-3-Clause), tnz/zti, and the host-side
 `IND$FILE` implementations. The `packages/fixtures/` captures are our own recordings
 of traffic between this client and hosts the author runs locally.
+
+## From README § Using the web gateway (moved 2026-11-12)
+
+Three paragraphs on the keypad overlay, as they stood:
+
+**`Ctrl-B` gives the full 122-key keyboard here, as the same kind of overlay**, and **opening
+either surface closes the other** — two things claiming the page at once is a state the operator
+cannot read. Both toggles are intercepted CLIENT-SIDE and never reach the gateway, which holds no
+state for either.
+
+**Clicking a button is an ordinary action** — the same message a keystroke sends, so **nothing
+about the protocol changed** to add it. The keypad itself is now **entirely client-side**: the
+toggle never reaches the gateway, which holds no keypad state at all. It used to be a region of the
+draw list the server built, with a flag held **per connection** rather than per session — because a
+3270 session deliberately outlives its socket, so a keypad forced on whoever attaches next,
+possibly a different person, is not a preference worth inheriting. That reasoning survived the
+move: the overlay starts hidden on every page load, which is the same rule one layer up.
+
+**The screen no longer grows when the keypad opens**, since the overlay floats over it rather than
+being appended below. A model 4 taller than the viewport still scrolls, as it always did.
+
+## From README § Layout (moved 2026-11-12)
+
+The layout block and the paragraph under it, as they stood:
+
+```
+packages/core      protocol: telnet framing, 3270 parse/execute, screen, keyboard, OIA,
+                   color resolution, Query Reply, IND$FILE, trace
+packages/frontend  rules every front end shares: host argument, TLS flags, session
+                   factory, keymap, action dispatch, binding intent, the keypad key table
+packages/canvas    the canvas renderer, glyph atlas, keymap-to-action layer and the virtual
+                   keypad's layout and hit-testing, shared by the GUI and the web gateway
+packages/cli       s3270-style scripting CLI
+packages/gui       Electron GUI: canvas renderer over a 3270 bitmap-font atlas, plus a second
+                   HTML BrowserWindow for IND$FILE transfers (its own preload and boot module)
+packages/tui       c3270-style terminal front end, plus the live/pty harnesses
+packages/web       browser gateway: the same renderer, served over a WebSocket
+packages/fixtures  recorded traces, golden screens, x3270 reference captures
+docs/              spec, plans, live-host runbook, handoff
+```
+
+Start with `docs/HANDOFF.md`. The design spec is
+`docs/superpowers/specs/2026-08-15-tn3270-client-design.md`, the stage-1 plan is
+in `docs/superpowers/plans/`, and `docs/live-testing.md` is both the runbook for
+recording against a real host and the log of what was found doing so.
+
+## From README § Staging (moved 2026-11-12)
+
+The whole section, as it stood. The README now keeps one line per done item and a short
+remaining list.
+
+Done:
+
+1. **Protocol core + s3270-style CLI.**
+2. **Extended data stream + Query Reply** — configurable terminal type, five Query
+   Reply units, SFE. This is what MVS/TSO requires, and it was reprioritised ahead of
+   the GUI because MVS 3.8j is expected to be the largest group of users.
+3. **`IND$FILE`** (CUT mode), both hosts, both directions.
+4. **3279 color and the TUI** — per-cell extended attributes, four-level color
+   resolution, terminfo-driven depth detection, and a c3270-style front end.
+5. **TLS** — and it did jump the queue, for the reason earlier drafts of this section
+   predicted: a 3270 client that cannot do TLS is unusable against anything modern.
+   **On by default**, with `-cafile`, `-noverifycert` and `-insecure`; s3270's option
+   spellings with its default inverted. Verified against both hosts through an in-repo
+   TLS proxy, since neither Hercules system can speak it — and, since 2026-11-08, by the user
+   against a real TLS host (`pubvm.org` port 623, a public VM/SP 5 or VM/ESA 2.4 system whose
+   Let's Encrypt certificate verifies against the system store, so the default verified path is
+   the one exercised; see `docs/live-testing.md`). Client certificates,
+   `-accepthostname` and negotiated `START_TLS` are **not** done — see *What is not
+   implemented*.
+
+6. **TN3270E proper** — the telnet option (40), DEVICE-TYPE/FUNCTIONS subnegotiation,
+   the data header, SNA responses, SYSREQ, device-name (LU) selection, and now
+   BIND-IMAGE with BIND/UNBIND. Separated from item 2 deliberately: measurement shows
+   TSO needs neither the option nor any of this, so bundling them would have delayed a
+   working TSO session for no benefit. **Done, including BIND/UNBIND**, and it remains
+   the stage with no *host* verification path for anything past DEVICE-TYPE — neither
+   Hercules system offers the option, and the one public host that does withdraws it
+   (its own fault: real s3270 is refused too) before FUNCTIONS. What stands in for a
+   host is a **recorded** one: x3270's `playback -b` replays a real host's TN3270E
+   negotiation including a real BIND, and our client is diffed against it byte for
+   byte. See *TN3270E* and *Verification*.
+
+7. **The Electron GUI** — done, and verified against both live hosts. Canvas renderer over
+   an atlas baked from x3270's own bitmap font; the window sizes itself to whatever model
+   the host negotiates. Not everything about it is live-verified, and the spec says so: PF
+   and Clear travel the same path as typing but were not exercised live in this sandbox, and
+   no VM logon has been attempted here — that arms VM's reconnect trap and could put a
+   password in a screenshot. **An MVS TSO logon has been completed live, though**: through
+   the GUI itself, by the user on their own Mac, at 43 rows; and separately in this sandbox
+   as `HERC03`, over the CLI's identical AID wire path — which is what confirmed PA1 and PA2
+   each get a real, distinct host reaction. See *Using the GUI*. **Both halves of the PA1/PA2
+   gap are now closed**: the protocol half by those host reactions, and the local half first by
+   hand (the author reported PA1 working from a real keypress against MVS on 2026-09-15) and
+   then by `packages/gui/scripts/keys.mjs`, which drives 19 real Chromium chords and asserts 17
+   ordered actions plus two required absences. The packaged app is now smoke-tested too
+   (`npm run smoke:package`, and in CI on five OS/arch runners), merged 2026-11-06 — see *Installing* and `docs/releasing.md` for what is still owed before a release.
+
+8. **A webserver serving the same front end** over HTTP — done, and verified against both
+   live hosts. `packages/web` serves the GUI's own canvas renderer to a browser over a
+   WebSocket; the canvas layer moved to `packages/canvas`, which both front ends now share.
+   That the renderer is genuinely shared rather than merely similar is checked in pixels
+   against the Electron app's own screenshot golden. See *Using the web gateway*.
+
+9. **A menu of special keys, and a show/hide virtual keypad** — done. Requested 2026-09-14 and
+   moved ahead of Programmable Symbol Sets on 2026-09-15. `Ctrl-K` shows a clickable 48-button
+   keypad in the Electron GUI and in a browser, and opens a keyboard-navigable list of the same
+   keys in the TUI, which has no mouse. It brought canvas hit-testing with it, and made **Dup,
+   Field Mark, Sys Req and Newline** reachable — four keys `core` could do and no interactive
+   front end could press. Proven with real mouse events (`clicks.mjs`) and in pixels, identically
+   in Electron and in the browser. **THE CANVAS KEYPAD THIS DESCRIBES WAS REPLACED ON 2026-10-06**
+   by real HTML controls in both front ends, and the canvas hit-testing it brought was deleted
+   with it — the author's verdict on the drawn version was *ugly* and *modal*. The 48 keys, their
+   actions and the TUI's list are unchanged; `clicks.mjs` still proves nine of them by label, now
+   through DOM clicks. The pixel half of that proof is gone, because HTML in system fonts is not
+   reproducible the way a blitted atlas is. At the time this was written the mouse did keypad buttons and
+   nothing else; **drag-to-select landed later, for the GUI's copy and paste** (see *Using the
+   GUI*). **Click-to-place-cursor and the light pen are still absent**, and text selection is
+   **not** the light pen: `lightpen_select()` sends an AID and sets MDT, so a selection built on it
+   would transmit on every copy attempt. x3270 keeps the two apart deliberately, and so does this
+   implementation — the selection path sends no AID at all. **Sys Req was
+   reachable but inert on this branch until the classic path landed**; it now sends a test
+   request read, **live-verified on both hosts 2026-09-21** — see *What is not implemented*.
+
+Remaining, in the order the author wants it.
+
+**REORDERED AGAIN 2026-10-05: GUI COPY AND PASTE went first of all of these, ahead of the GUI
+keypad window — and is now BUILT** (see *Using the GUI*; the live paste against a real host is the
+one piece still unwitnessed). It is a fifth UI item rather than one of the four below:
+`docs/superpowers/specs/2026-10-05-gui-copy-paste-design.md` and
+`docs/superpowers/plans/2026-10-05-gui-copy-paste.md`. The reason is the user's experience of the
+shipped GUI — *neither copying text out of the window nor pasting into it was possible*, which is a
+**behaves-like-a-normal-application** gap and so belongs before packaging, on the same argument that
+put packaging ahead of graphics. The keypad window is a restyle of something that already works;
+this is absent capability. **Text selection here is NOT the light pen** — that distinction is spelled
+out two paragraphs above and is why the light pen keeps its own later spec.
+
+**AND THE WEB GATEWAY REACHES PARITY BEFORE PACKAGING, decided by the user the same day:** **web
+copy/paste** and the **web transfer form** are both required before any packaging work. Web copy
+needs its own spec rather than coming along with the GUI's — a claim the GUI's spec made and
+implementation disproved. `sendAction` crossing the WebSocket transmits the *action* for free, but
+nothing can return the *text*: the server's only messages to a browser are `frame` and `error`, the
+bridge has no clipboard function, and the browser's renderer holds a draw list whose cells carry an
+atlas glyph and no character — so the gateway would extract the text onto its own machine rather than
+the operator's. Until that lands the gateway **refuses** `copy` at decode, and the refusal is
+load-bearing: without it the first browser copy would end the gateway process and every session on
+it. **(Web copy and paste LANDED 2026-10-27; see *Copy and paste*.)**
+
+**REORDERED 2026-09-30: the four remaining UI pieces come FIRST, ahead of oversize and everything
+after it.** Two features across the two canvas front ends — ~~the GUI transfer UI~~ (**BUILT
+2026-10-01**), ~~the GUI keypad window~~ (**BUILT 2026-10-06, and it took the WEB keypad with
+it**), then **the web transfer UI**, so one of the original four remains. They were grouped
+deliberately rather than by coincidence: the shared halves already exist in `packages/frontend`
+(`transferForm.ts` and `transferRun.ts` for transfers, `keypad.ts` for the key table), so doing
+them consecutively means the GUI's answer is still in hand when the browser's is written.
+
+**AND THAT GROUPING PAID OFF MORE THAN EXPECTED ON THE KEYPAD: the two front ends landed in ONE
+change rather than two.** The plan had the web following later, which is what the idea doc assumed
+too — but once the keypad was real HTML controls, the view itself (`keypadUi.ts`) was shared
+outright, and the only thing that differed was the container: a window in Electron, an overlay in
+the browser. Doing the second front end separately would have meant building that view twice or
+extracting it afterwards. The flip side is that the canvas keypad ended up with **no** consumers
+rather than one, so it was deleted rather than left for the gateway.
+
+Interleaving these with oversize would have meant deciding twice what a native-window front end
+looks like. It also settled everything the **menu bar** touches — the keypad needed one, and so
+does the connect dialog — before packaging puts that chrome in front of a first-time user. Items
+11 onward keep the order agreed on 2026-09-29.
+
+
+9a. **Interactive `IND$FILE` — stages 1, 2 and 3 of four are DONE.** The transfer itself was finished and
+   live-verified long before any interactive front end could reach it, which is the same shape as
+   Sys Req and Newline before item 9. **Stage 1, the TUI's `Ctrl-T` form, is built** — see
+   *Using the TUI*. **STAGE 2, DFT, IS DONE AND LIVE — 2026-09-29.** It matters because it is
+   **geometry-free**: `ft_dft.c` contains zero screen-buffer references against 25 in `ft_cut.c`, so
+   it moves data through structured fields rather than the display, and it is what lifts the 24x80
+   restriction CUT imposes. **Measured on MVS 3.8j TK5 at 43x80: 11 DFT frames, zero CUT frames, 249
+   bytes byte-identical both directions.** The last piece was not the engine but the *selection* —
+   nothing chose DFT, so `startDftTransfer` had no caller outside tests; both drivers now build both
+   engines and the first inbound frame decides, because the host chooses and not the client.
+   **MVS/TSO DOES offer DFT, measured 2026-09-24** — an earlier version of this line said neither
+   Hercules host spoke it. What was really missing was on *our* side: a host offers DFT only to a
+   client that advertised the Query Reply (DDM) unit, and we had never sent one. See `-ddm` under
+   *Using the CLI* and the wire bytes in `docs/live-testing.md`. VM/370's MECAFF declines it and
+   stays on CUT, which makes it the control. **Stage 2 is now COMPLETE**: `Transfer(BufferSize=N)`
+   sets the DFT frame size, and it is the SAME number advertised in the DDM Query Reply — verified
+   live, `BufferSize=512` moving the host's own `Open` record size to 495.
+   **STAGE 3, THE GUI's TRANSFER WINDOW, IS BUILT — 2026-10-01**:
+   `docs/superpowers/specs/2026-09-30-gui-transfer-ui-design.md` and
+   `docs/superpowers/plans/2026-09-30-gui-transfer-ui.md` (ten tasks, all executed). It was a
+   renderer rather than
+   a rewrite — the model and the driver were already shared in `packages/frontend`, and the `Xfer`
+   keypad button already existed — but **not a CANVAS renderer**, which earlier drafts of this line
+   assumed. The user's decision was a **separate `BrowserWindow` with real HTML controls** and a
+   native file dialog for the local file: the canvas preload has to stay at four functions for
+   `renderer.ts` to keep being shared with the browser, and teaching a canvas text editing, focus and
+   a file chooser buys nothing. x3270 puts its own transfer dialog in Xaw widgets for the same reason.
+   **Stage 3's live verification LANDED 2026-10-02**: VM/CMS drove the window for real (249 bytes
+   both ways, byte-identical, twice) and the user verified the macOS dialog by hand in ASCII mode.
+   **TSO/DFT is still unrun.** The work also found that **`Ctrl-T` in the GUI was DEAD** — mapped in
+   `frontend` and absent from `canvas/src/keys.ts`, so the chord did nothing while the keypad button
+   worked, which is why `keys.mjs` now drives it.
+   **Stage 4** is the web gateway, and it is a security decision before it is a UI one: the gateway
+   still **refuses** the action, because a browser-initiated transfer would move bytes to the
+   gateway's filesystem and not the operator's — **and the refusal message now says that**, where it
+   used to blame a missing front end. **The decided answer is real browser file I/O** —
+   bytes over the WebSocket, so "local file" means the operator's machine — which is a new protocol
+   message pair, chunking and a `TransferFiles` over the socket, and therefore its own spec.
+10. **Programmable Symbol Sets** — its hard dependency is item 2's Query Reply (the host
+   sends no PS structured fields until the capability is advertised), not TN3270E as
+   earlier drafts of the spec assumed. The GUI's blitter was built with this in mind: a PS
+   glyph is a host-supplied bitmap, which is exactly what it already draws, so PS should be
+   an addition rather than a second renderer.
+**THE ORDER HERE IS THE USER'S, 2026-09-29, AND THE REASONING IS WORTH KEEPING.** Packaging came
+ahead of all graphics work because *without graphics this is still a useful tool, but without
+packaging it is a hard one to RUN*. Then oversize moved ahead of packaging in turn, so that **strange
+screen sizes are available in the first packaged build a user ever sees** — a shipped app that cannot
+do the geometry an operator's host asks for is a worse first impression than a shipped app with no
+vector graphics.
+
+**And printer sessions moved BACK, behind graphics, for a reason the research already supports:
+GDDM drives printers and plotters as output devices, so the printing work is likely CONVOLVED with
+vector graphics rather than independent of it.** `docs/goca-reference-notes.md` says the same thing
+from the other side: the primary GOCA reference is the **AFP edition, bound to MO:DCA and IPDS —
+printers** — and the 3270 binding is what diverges from it. Doing printers first would mean building
+an SCS/3287 path and then revisiting it once GOCA lands; doing graphics first means the printer work
+can reuse whatever the drawing layer turns out to be. **Cheap is not the same as first.**
+
+11. **Oversize + `IBM-DYNAMIC`.** **Step 1 (the `-oversize` flag) is done on branch `oversize`,
+   2026-11-04; see *Oversize*.** **Step 2, changing the model and oversize while running (applied at
+   the next connect), is done on the same branch, 2026-11-05: the CLI's `Set()`, the GUI's Model
+   menu and the browser's `Alt-M` picker.** Really oversize — the advertisement is a by-product. See the
+   out-of-scope section of the bind-image spec for the measurements.
+12. **Local model-switching** -- **DONE as item 11's step 2, 2026-11-05**: a choice applies at the next
+   connect, never to a live screen, so it adds no client-driven mid-session resize; what follows is
+   the reasoning that scheduled it, kept for the record. Immediately after it and before packaging. The two belong together:
+   both let the *user* do unpredictable things with their window, and in the code both drive the one
+   `Screen.resize()` path — which today has four callers, all in `core` and all HOST-driven (EW/EWA
+   and BIND/UNBIND). These two add the first CLIENT-driven resizing, so they meet the same questions
+   about renderer invalidation and mid-session geometry change; answering those once is the point of
+   scheduling them adjacently. x3270's `Common/model.c` is the reference to steal.
+   **Neither is well testable against any host reachable from this project** — `IBM-DYNAMIC` has one
+   live path (TK5's TSO issues a Read Partition to any `-E` client) and a client-initiated switch has
+   none, so expect unit tests, the playback oracle and by-hand GUI runs rather than a live witness.
+13. **Packaging, for macOS, Linux AND WINDOWS — DONE, merged into `main` 2026-11-06 (`5669a3a`).** npm
+   packages for all four front ends (`@tn3270/cli`, `@tn3270/tui`, `@tn3270/web`, `@tn3270/gui`,
+   lockstep version, Node ≥20.19 since 0.1.1), and native installers via electron-builder: macOS universal
+   `.dmg`/`.zip`, Linux x64 and arm64 AppImage/`.deb`, a Windows x64 NSIS installer — all unsigned
+   in that milestone (signing came later: item 14). Build, test, pack, smoke and package all run on five CI runners (ubuntu-latest,
+   ubuntu-24.04-arm, macos-latest, macos-26-intel, windows-latest), and all five passed on
+   2026-11-06 (run 6), and again on the merge commit — see `docs/HANDOFF.md`. **Published to npm as
+   0.1.0 on 2026-11-08** (the registry's tarballs are byte-identical to CI run 42504570737's, on tag
+   `v0.1.0`); nothing was signed then. The hand checks were done by the user on 2026-11-08: macOS on Apple Silicon
+   runs once permitted (*Open Anyway*), and the Linux arm64 `.deb`, Linux x64 AppImage and
+   Windows 11 all just run, each through the Connect dialog (on Linux launched from a shell, as
+   neither box has a desktop environment).
+   The Windows target was a deliberate addition rather than a stretch goal: there are **zero
+   native dependencies** (every package depends only on other workspace packages, with Electron
+   the single external), and there is not one `process.platform` branch anywhere in
+   `packages/*/src`.
+**ROADMAP FROM HERE, AGREED WITH THE USER 2026-11-06, after packaging merged.** It supersedes the
+old items 14 (PS + VMGIF, then GOCA) and 15 (printer sessions last). Two corrections came with it,
+both below: **VMGIF cannot run without GDDM** (measured from its module), so our own GIF-to-PS
+converter is the test vehicle; and **the printer splits in two**, so "printer last" no longer
+holds as one item.
+
+14. **Close out packaging.** The live checks by hand are **done** (the user, 2026-11-08: Apple Silicon
+   macOS runs once permitted, the Linux arm64 `.deb`, Linux x64 AppImage and Windows 11 just run;
+   Connect dialog used on each). The first
+   `npm publish` is **done** (0.1.0, 2026-11-08), and so is the icon (see *Installing*). **npm
+   trusted publishing from GitHub Actions is built and proven** (2026-11-09): a pushed
+   `vX.Y.Z` tag runs `.github/workflows/package.yml`'s `release-check` and `publish` jobs, which
+   publish the CI-built tarballs over OIDC after one approval in the `npm` GitHub environment, with
+   provenance and no long-lived npm token anywhere, then read the registry back to prove it landed.
+   **Proven by release 0.1.3** (0.1.2 was skipped, a path bug in the publish job): published by
+   "GitHub Actions", every shasum equal to the run's tarballs, an SLSA provenance attestation per
+   package, `npm audit signatures` verified (`docs/releasing.md`, *Release history*). **The same tag
+   run now also cuts the GitHub release** (built 2026-11-09, branch `gh-release`; proof owed:
+   release 0.1.4): a `github-release` job after `publish` attaches the run's seven native
+   installers and a `SHA256SUMS`, with notes from the version's `CHANGELOG.md` entry, which scriv
+   collects from a fragment written with each functional change (`docs/releasing.md`).
+   **macOS code signing is built and proven** (2026-11-10; merged 2026-11-11 as `db5a93d`; a
+   signed CI run, 42959265358, signed, notarized, stapled, verified and launched the app). A tag
+   run signs the mac app with a Developer ID, notarizes and staples it, and verifies it
+   (`docs/releasing.md`, *Code signing*). **Windows is not signed in CI**: Azure Artifact Signing
+   was dropped (no Azure subscription; spec amendment 2026-11-11), and every run verifies the
+   Windows installer is unsigned. Windows signing is planned through the **Microsoft Store as an
+   MSIX** (Microsoft signs it); the unsigned NSIS `.exe` stays a release artifact. The Mac App
+   Store is planned too, and neither store gets a submission before x3270 parity.
+   **Store probe** (2026-11-12, merged `559ea78`): every CI run builds and launches an
+   App-Sandboxed Mac App Store stand-in and an installed MSIX, each proving its confinement and
+   passing package-smoke's two checks; nothing is uploaded (`docs/releasing.md`, *Store probe*).
+15. **The rest of the GUI ("milestone B").** `File` → `Connect…` in a running window (which means
+   hoisting the startup block's once-only IPC handlers and quit hook), recent hosts, a config file
+   and preferences, light and dark modes, font choice. Moved up from the "super-terminal" stretch
+   goal because it is what a person who has just installed the app meets first.
+16. **Code pages.** Only `cp037` exists (`packages/core/src/codepage.ts`), which is wrong for any
+   host outside the US: 273 (Germany/Austria), 285 (UK), 297 (France), 500 (international), 1047
+   (z/OS Unix), the 1140-family euro pages, and so on. Self-contained, and a correctness gap rather
+   than a feature. **DBCS** (Japanese, Chinese and Korean hosts) is a separate, larger item and is
+   not scheduled.
+17. **Click-to-place-cursor, then the light pen.** Own spec, as already recorded above: the light
+   pen (`lightpen_select()`) sends an AID and sets MDT, so it must not be built on text selection.
+18. **Text printing.** A 3270 printer session is a separate telnet session to a printer LU; the host
+   sends SCS (LU type 1) or the 3270 data stream addressed to a printer (LU type 3). Output to a
+   text file, a PDF or the OS print dialog. Reference: x3270's `pr3287`. The LU3 side reuses the
+   existing data-stream parser; SCS is the new decoder. Cheap, and placeable anywhere; here because
+   it does not depend on graphics.
+19. **Programmed Symbols — the 3279's all-points-addressable graphics — tested with our own
+   `gif2ps`.** On a 3279, APA graphics WAS PS: the host loads pixel patterns into loadable symbol
+   sets and then writes characters from them. The emulator needs the Load PS structured field,
+   the symbol-set selection attribute, and drawing host-supplied cell bitmaps (the blitter was built
+   for this; see item 10). **The test vehicle is a converter in this repo, `gif2ps`**: decode a GIF,
+   map it onto the 3279 palette, cut it into cells, reuse identical cells, and emit the PS loads and
+   screen writes as a trace, replayed through the existing seams and screenshot goldens, or served
+   by a fake host. No mainframe needed. **Before planning, read the 3279's PS capacity from the 3270
+   Data Stream Reference (GA23-0059), not memory**: the number of loadable sets and symbols per set,
+   cell size per model, and the colour-plane format; together they cap how many unique cells an
+   image can use. A later, separate step for authenticity: a small CMS program on VM/CE that writes
+   the same generated stream to the terminal (what VM/370's CMS offers for full-screen output needs
+   checking; MECAFF shows it can be done). **Truly native APA terminals (3179G, 3192G, 3472G), which
+   took graphics data directly rather than through PS, would be a separate later item if wanted.**
+20. **Printer graphics through PS, IF it is real.** As understood (to verify against GDDM's device
+   documentation before relying on it), GDDM printed graphics on 3270-family printers that had the
+   PS feature (some 3287 and 3268 models) with the same PS mechanism as the screen. If so, this
+   follows item 19 almost for free. GOCA/IPDS page-printer output (MO:DCA, channel- or SNA-attached
+   printers) is out of scope unless a need appears.
+21. **GOCA vector graphics.** Unverifiable until the user finds a host with GDDM that this client
+   can reach; that same host is also the only way to run VMGIF itself. `docs/goca-reference-notes.md`
+   holds the research.
+22. **Stretch goals.** (a) The "3270 super-terminal": antialiased fonts, any font rather than only a
+   3270 face, GOCA rendered directly as SVG. (b) **5250 support**: the terminal hardware is close to a 3279 and
+   the protocol not far off; RFC 1205 (TN5250) is the spec to work from, and the user's System/36
+   emulator is the host to validate against. The front ends already separate protocol from
+   rendering, which is where a second protocol would plug in. Emulator support for 5250 is far
+   thinner than for 3270, so expect less to compare against.
+
+**Also open, not scheduled above** (see *What is not implemented*): MF orders are parsed and not
+applied; `Attn` sends `IAC BREAK` on TN3270E where x3270 sends `IAC IP`; NEW-ENVIRON carries only
+a device name; no TLS client certificates; the web gateway has no connect dialog and takes fewer
+flags; `forwardKeys` forwards action kinds from the GUI's child windows unfiltered; the keypad's
+appearance has no visual test; on Linux at a forced scale factor 2 glyph edges are blended where
+Retina macOS doubles cleanly (found 2026-11-06, not investigated); accessibility (screen readers,
+keyboard-only use of the dialog and menus) and auto-update have never been looked at. Live
+witnesses still owed: TK5 against oversize, a modern z/OS or z/VM host (real TN3270E,
+`IBM-DYNAMIC`, BIND size 0x03 — `pubvm.org` does not fill this: probed 2026-11-08, it negotiates
+TTYPE, EOR and BINARY only and never offers TN3270E), the GUI Model menu on a real desktop, CLI
+`Set()`+reconnect against VM, Sys Req over TN3270E, keypad buttons against a host.
+
+Alternate screen sizes and models 3, 4 and 5 are complete and live-verified, and were merged long
+ago — an earlier version of this line said they were sitting unmerged on a branch, which stopped
+being true on 2026-08-27. Adding screen sizes turned out not to be part of TN3270E at all — the
+geometry rides in the terminal-type string — so it never depended on item 6.
+
+## From README § Graphics: the fidelity target, and why GDDM is not the route (moved 2026-11-12)
+
+The whole subsection, as it stood. Superseded by the plan to do Programmed Symbols and then GOCA,
+tested against a GDDM-licensed host the author has found.
+
+The target is what a real 3279 could display, and the concrete reference is the
+GIF viewing Rick Troth was doing on his own 3279 around 1992. **Provenance now
+established from Troth himself**, which corrects earlier drafts of these docs:
+the viewer was reached through **CMS Gopher** (his, Rice University, 1993 —
+`troth@rice.edu`), but Gopher did not contain it. `GOPHER24 FILELIST` says so in
+one line:
+
+```
+* To display GIFs with CMS Gopher, get the VMGIF package from BLEKUL11.
+```
+
+So CMS Gopher dispatched to a separate package, **VMGIF from BLEKUL11** (the VM
+system at Katholieke Universiteit Leuven), via a `GOPCLIGV REXX` glue exec.
+`GOPHERT GIF` in the archive is a test image, not the viewer. Local copies of
+CMS Gopher 2.4.2 are in `$HOME/cmsgopher`; the `.tar.gz` pair yields only
+`FILELIST` and `README`, `gop242s.vmarc` unpacks to service patches, and
+`gopher24.vmarc` has not been unpacked (`:CFF` compressed members).
+
+**VMGIF HAS SINCE BEEN FOUND — BUT AS OBJECT MODULES ONLY.** It is on disk at
+`$HOME/vmgif`, dated April 1993: `VMGIF.MODULE.T1` at 84600 bytes, the wrapper execs,
+`HELPCMS`, and `TONETABL` — its palette/dither table, which is the most directly useful
+piece. **There is no source.** **AND IT CANNOT RUN WITHOUT GDDM — MEASURED 2026-11-06 from the
+module itself:** GDDM's application interface stub is linked in with its build tag beside it
+(`ADMASLV 91067 V2R3.0 PL77871`, GDDM V2R3, linked March 1991); the loader table resolves `FSINN`,
+`GSWIN`, `GSSEG` and twenty-odd `ADM*` entry points to that stub, which passes them to GDDM's
+resident code; and its own messages assume GDDM (`Sorry, GDDM could not open the device`, `This is
+not a graphics device`, saving to `ADMGDF`). The wrapper EXEC loads nothing because sites provided
+GDDM as a shared segment. So running VMGIF needs the same GDDM host as GOCA, and **our own
+`gif2ps` (roadmap item 19) is how PS gets tested.** Disassembling it is probably unnecessary: decoding GIF
+from the published spec is no harder than reverse-engineering a 1993 implementation once
+PS can push pixels, so VMGIF is best treated as a *behavioral* reference — evidence of
+what a 3279 could be made to do, and a palette to compare against.
+
+**VMGIF used GDDM, and we will not.** IBM is sunsetting GDDM and would be
+unlikely to license it even to a current paying VM customer, so the route for us
+is **Programmable Symbol Sets driving the 3279 screen directly** — decomposing an
+image into custom character cells and loading them, which is how the era's
+viewers worked underneath anyway. GDDM would need those same primitives beneath
+it, so nothing is wasted by starting there.
+
+**A stretch goal, recorded because it is the natural end point:** an open-source
+implementation of the GDDM spec targeting VM/370 R6 and MVS 3.8j. That would let
+period-authentic graphics software run against these hosts rather than only our
+own client. Unscheduled, and much larger than this project.

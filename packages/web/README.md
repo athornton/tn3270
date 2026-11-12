@@ -110,6 +110,10 @@ with a single dash, exactly as the other front ends do — so `-insecure`, not `
 | `-model NAME` | `IBM-3278-2-E` | screen model, e.g. `3278-4-E` |
 | `-oversize <cols>x<rows>\|auto\|none` | `none` | a screen past the model, advertised as `IBM-DYNAMIC`; needs a `-E` model. **Columns first**, x3270's order: `160x62` is 62 rows by 160 columns. See below |
 | `-scheme NAME` | `default` | color scheme: `default`, `3279`, `x3270`, `green` |
+| `-bind-image on\|off` | `on` | request the TN3270E BIND-IMAGE function |
+| `-bind-limit on\|off` | `on` | range-check a BIND's geometry against `-model` (or the oversize) before honoring it |
+| `-ddm on\|off` | `on` | advertise the DDM Query Reply, so a host can choose DFT for a transfer; `off` forces CUT |
+| `-devname NAME` | none | answer NEW-ENVIRON's `DEVNAME` with `NAME` (trailing `=` become a counter); absent, option 39 is refused |
 
 ### `-oversize`
 
@@ -164,6 +168,27 @@ open the socket can send `setGeometry` for any of the eight models and any overs
 names, and through the viewport it reports, `-oversize auto` can come to any size up to 16383
 cells. That is the same reach the operator already has; restrict the gateway with `--auth`, not
 with the picker.
+
+## File transfer (`IND$FILE`)
+
+**`Ctrl-T`, or the keypad's `Xfer`, opens the transfer form as an overlay** — the GUI's fields:
+direction, host (`tso` or `vm`), local file, host file, mode, exist, cr, recfm, lrecl, blksize.
+Both directions. The bytes travel over the WebSocket in 4096-byte chunks, so the local file is on
+the **browser's** machine; the gateway holds the file in memory and never touches its own disk.
+
+- **Options** are the CLI's `Transfer()` keywords; the form does not offer `BufferSize`.
+- **10 MB cap, each way**, because the gateway stages the whole file in memory. Over that, the
+  transfer is refused before it starts (a send) or before any byte is relayed (a receive).
+- **One transfer per session at a time.** Staging belongs to the connection, so a tab that
+  reattaches never inherits a half-sent upload.
+- **The host chooses CUT or DFT.** DDM is advertised by default; `-ddm off` forces CUT, which
+  needs a 24x80 screen.
+- **Saving a received file** uses `showSaveFilePicker` in a Chromium-family browser in a secure
+  context, and an `<a download>` link elsewhere (Firefox and Safari always).
+
+Live-verified 2026-10-22: Firefox on macOS, through a reverse proxy, 249 bytes byte-identical
+both ways against VM/370 over CUT. DFT from a browser has not been driven live
+(`docs/live-testing.md`).
 
 ## The host argument, and what this gateway will NOT take
 
