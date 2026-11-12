@@ -535,6 +535,53 @@ tested on Linux.
   Record each run ID. Revert each commit, check the tree matches the commit before the mutation,
   and push.
 
+### Mutation results (Task 7)
+
+Step 5, run 2026-11-12 on `store-probe` from 44284b8. Each mutation was one temporary commit
+(`MUTATION (revert): ...`) followed by its `git revert`; after each revert `git diff 44284b8 --stat`
+was empty. Each mutation commit also skipped or narrowed the ONE unit test that pins the mutated
+setting (storeConfig.test.ts, and storeProbe.test.ts's Windows happy path for mutation 3). The
+vitest step runs before the probe, so without that the job stops at the unit-test gate and the
+probe never runs. That means the unit tests catch all four mutations too. Every run was
+`-f sign=false`. The FAIL lines are verbatim from the `store probe` step, with timestamps removed.
+
+- **Mutations 1 + 3, run 43146283873** (mutation 7e64846, revert e56e45e). Only macos-latest and
+  windows-latest failed, both in the `store probe` step.
+  - **1, mac main entitlements without `com.apple.security.app-sandbox`:** the probe's own signing-stage
+    entitlement check fired first, so nothing was launched:
+    `FAIL mac-sandbox: the signature does not entitle com.apple.security.app-sandbox (codesign -d --entitlements); not launched`
+    then `mac-sandbox: 0 of 4 required ok lines`. **Matched**: the reason is missing confinement,
+    at the signing stage, as the expectation allowed.
+  - **3, Windows route launching `artifacts\gui\win-unpacked\TN3270.exe` (electron-builder's unpacked,
+    non-packaged exe) instead of the alias.** The appx was still signed and installed:
+    `FAIL win-msix: the app reports windowsStore=false: it has no package identity`
+    `FAIL win-msix: the started process's package is none (APPMODEL_ERROR_NO_PACKAGE), not TN3270.Probe_0.1.4.0_x64__5j71tdef09jdy`
+    then `win-msix: the checks were not run: without the confinement nothing else counts` and
+    `win-msix: 0 of 3 required ok lines`. **Matched**: both identity witnesses failed
+    (`windowsStore=false` and the package-full-name mismatch). It was not the NSIS install:
+    package-smoke installs that only after the probe, and spike round 2 measured that a direct
+    launch of the installed MSIX exe is ALSO `windowsStore=true`, so that exe would not have been a
+    mutation.
+- **Mutation 2, run 43147299556** (mutation 6dc0ddb, revert 4d8910e): `application-groups` added to
+  `entitlements.mas.inherit.plist`. Only macos-latest failed. The signing passed
+  (`ok mac-sandbox: signed (...)`), and the probe line was `probe: sandbox=io.github.athornton.tn3270 windowsStore=false`. Then
+  Chromium printed `[35592:1112/032247.607864:FATAL:content/browser/gpu/gpu_data_manager_impl_private.cc:417] GPU process isn't usable. Goodbye.`
+  and the probe printed:
+  `FAIL mac-sandbox: the app did not hold after its probe line: it exited within 5 s without showing the Connect dialog (a crash, as variant C's "GPU process isn't usable")`
+  then `mac-sandbox: the checks were not run: without the confinement nothing else counts` and
+  `mac-sandbox: 1 of 4 required ok lines`. **Matched**: the GPU crash, caught by the 5 s hold
+  even though the probe line itself said sandboxed.
+- **Mutation 4, run 43148372652** (mutation ae3bf7e, revert b9c6199): `network.client` removed from
+  `entitlements.mas.plist`. Only macos-latest failed. Signed, confined and golden were all ok, and
+  then:
+  `FAIL mac-sandbox: with no host, opens the Connect dialog and connects: missing: IAC WILL TERMINAL-TYPE within 10 s of the submit; server saw 0 connection(s), bytes (none); exit null signal SIGKILL, stdout "connect: dialog shown\nconnect: submitted\nconnect: error cannot connect to 127.0.0.1:49421: connect EPERM 127.0.0.1:49421 - Local (0.0.0.0:0)\nconnect: dialog still open", stderr "cannot connect to 127.0.0.1:49421: connect EPERM 127.0.0.1:49421 - Local (0.0.0.0:0)\n"`
+  then `mac-sandbox: 3 of 4 required ok lines`. **Matched**: the Connect check failed, and the reason
+  is the sandbox's `connect EPERM`.
+- **Final clean run, 43149256628** on b9c6199 (tree identical to 44284b8): **success**, all six jobs
+  green, all four `ok mac-sandbox:` lines and all three `ok win-msix:` lines present. (Run 43149179377
+  was dispatched right after the last revert's push, ran on the stale mutated head ae3bf7e, and was
+  cancelled. After a push, check the run's `headSha` before trusting a dispatch.)
+
 ### Task 8: remove the spike, docs, and the merge gate
 
 - [ ] **Step 1:** Delete `scripts/spike/` and the `spike` job and input from `package.yml`. Add a
