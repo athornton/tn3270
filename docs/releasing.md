@@ -295,7 +295,7 @@ uploading runner: `ubuntu-latest`, `ubuntu-24.04-arm`, `macos-latest`, `windows-
 `macos-26-intel` builds the same universal mac app and does not re-upload it). A tag run attaches
 them to the GitHub release `vX.Y.Z` (*The GitHub release* above). On a tag run the mac app is
 signed (*Code signing* below). The Windows installer is not signed in CI (a Microsoft Store MSIX
-route is planned), and the Linux ones never are. There is no auto-update.
+route is planned; *Store probe* below), and the Linux ones never are. There is no auto-update.
 
 ## Code signing (release installers)
 
@@ -653,6 +653,172 @@ For the unsigned builds, the workarounds still apply:
   but not refused.
 - **Windows** (every installer, releases included): SmartScreen flags the installer, and
   *More info → Run anyway* gets past it.
+
+## Store probe
+
+**Built 2026-11-12 on branch `store-probe`.** Spec
+`docs/superpowers/specs/2026-11-11-store-probe-design.md` (its *Amendment 2026-11-12* supersedes
+the parts it names), plan `docs/superpowers/plans/2026-11-11-store-probe.md`. Both stores are
+planned (Mac App Store, and the Microsoft Store as an MSIX), but nothing goes to either before
+feature parity with x3270. Until then, every CI run builds a **stand-in** for each store's package,
+confines it the way that store would, and launches it. A feature that breaks under the App Sandbox
+or inside an MSIX then fails the PR that adds it, not the submission months later.
+
+**Nothing is uploaded or submitted.** No `upload-artifact` path names `.appx` or `mas-universal`,
+the `gui-*` upload is exactly the five one-level globs (`*.AppImage *.deb *.dmg *.zip *.exe`), and
+`packages/core/test/workflow.test.ts` pins both. If an `.appx` ever reached a release anyway,
+`release-notes.mjs --check-installers` refuses any unexpected file.
+
+The step is `store probe` (`node scripts/store-probe.mjs artifacts/gui`), on the matrix entries
+with `probe: true`: `macos-latest` and `windows-latest`. It runs on **every** event, tags included,
+after package:gui and both verify steps, and before package-smoke and the uploads. A tag whose
+probe fails does not release, because `release-check` needs `package`.
+
+### What is built and launched
+
+- **macOS: Electron's MAS build, ad-hoc signed into the App Sandbox.** A separate step (matrix key
+  `masbuild`, `macos-latest` only, after both verify steps) runs
+  `npm run package:gui -- --mac mas --universal -c.mac.identity=null`. It is `-c.mac.identity`,
+  not `-c.mas.identity`: electron-builder turns the string `null` into a real null only for
+  `config.mac`, which the mas config inherits. A null identity makes no `.pkg` and leaves an
+  unsigned `artifacts/gui/mas-universal/TN3270.app`. The step has no signing env, so it never signs
+  or notarizes, on a signing run too. The probe copies that app into scratch (under `RUNNER_TEMP`),
+  sets `ElectronTeamID` = `H68TN685J4` in its `Info.plist` (Electron's MAS guide requires it), and
+  signs it ad hoc, inside out:
+  1. the dylibs under `Contents/Frameworks`, then the frameworks with `--deep`;
+  2. the helper apps in `Contents/Frameworks` with `entitlements.mas.inherit.plist`
+     (`app-sandbox`, `inherit`);
+  3. `Contents/Library/LoginItems/*.app` with `entitlements.mas.loginhelper.plist`
+     (`app-sandbox` only);
+  4. the app with `entitlements.mas.plist` (`app-sandbox`, `network.client`,
+     `files.user-selected.read-write`, `cs.allow-jit`, `cs.allow-unsigned-executable-memory`, and
+     `application-groups` = [`H68TN685J4.io.github.athornton.tn3270`]).
+
+  Then `codesign --verify --deep --strict` must pass, naming no unsigned subcomponent. The three
+  files are in `packages/gui/resources/` and follow Electron's `mac-app-store-submission-guide.md`.
+  **The application group is in the main file only**: with it on the helpers as well (spike
+  variant C), the app crashes with `GPU process isn't usable`. The ordinary (Developer ID) Electron
+  build cannot be the stand-in: under the sandbox it dies at `mach_port_rendezvous_mac.cc:159` on
+  every launch, with or without the group.
+- **Windows: the appx, installed as an MSIX.** `win.target` builds an x64 `appx` beside the NSIS
+  `.exe` (`TN3270-<v>-win-x64.appx`, `appx.minVersion` `10.0.17763.0`), with an app execution
+  alias, `tn3270-gui.exe`, from `packages/gui/resources/appx-extensions.xml`. The alias is how a
+  packaged app is started with arguments and package identity. The probe copies the appx into
+  scratch and makes a **throwaway self-signed certificate** whose subject is the placeholder
+  publisher, with the code-signing EKU. It imports it into `LocalMachine\TrustedPeople` on that
+  runner only, signs with the newest **Windows SDK** `signtool.exe` (under
+  `C:\Program Files (x86)\Windows Kits\10\bin\<version>\x64\`, chosen by version number; never
+  electron-builder's winCodeSign one, which cannot sign an appx), runs `Add-AppxPackage`, and
+  launches through the alias. The default manifest is `Windows.FullTrustApplication`, so this is
+  package identity with redirected AppData and registry writes, not a strict sandbox.
+
+Each route then gets package-smoke's two checks (`scripts/package-checks.mjs`, shared with
+package-smoke): replay `synthetic-ispf-like.trace` and draw the golden, and with no host, have the
+Connect dialog reach a throwaway telnet server. On macOS the trace and the user-data directory are
+staged inside the container, where the sandbox allows them.
+
+Cleanup runs on every path: processes by PID (never by name), the container and the scratch on
+macOS; on Windows `Remove-AppxPackage` of exactly the installed full name, the certificate from
+both stores, the pfx and cer, and the scratch.
+
+### The confinement proofs
+
+Confinement comes first, and without it nothing else counts: the checks are not run.
+
+- **macOS:** the signature must entitle `com.apple.security.app-sandbox`. Then the app, launched
+  with `TN3270_GUI_PROBE=1`, must print `probe: sandbox=io.github.athornton.tn3270 ...` (its own
+  `APP_SANDBOX_CONTAINER_ID`), and `~/Library/Containers/io.github.athornton.tn3270` must exist.
+- **Windows:** `Get-AppxPackage` must list exactly one `TN3270.Probe` package, the app must report
+  `windowsStore=true` (Electron's `process.windowsStore`), and the process the alias started must
+  have that package's full name, measured from outside the app (`GetPackageFullName` of its pid).
+- **Both:** after its probe line, the confinement launch must hold: show the Connect dialog, or
+  still be running 5 s later. A crash right after a good probe line is the variant-C shape.
+
+Output is `ok <route>: <check>` or `FAIL <route>: <reason>`, plus `time <phase>: <s>s` lines.
+Success is counted, not assumed: exit 0 only when every required ok line was printed and no FAIL
+was (`mac-sandbox`: signed, confined and the two checks, 4; `win-msix`: confined and the two
+checks, 3). Exit 1 on any FAIL, 2 on a setup problem (no artifact, no signtool, the alias not on
+PATH). `STORE_PROBE_ECHO=1`, set in CI, logs every command and its raw output.
+
+**It refuses to replace what it did not make.** If the container already exists (macOS), or a
+`TN3270.Probe` package is already installed (Windows), the probe exits 2 unless it is on a
+GitHub-hosted runner (`GITHUB_ACTIONS=true` and `RUNNER_ENVIRONMENT=github-hosted`) or
+`STORE_PROBE_FORCE=1` is set. The cleanup removes the container and the package, and on anyone
+else's Mac the container may be their real TN3270 data. A GitHub-hosted runner is fresh per job,
+so anything there is ours. `CI=true` alone is not enough: self-hosted runners and `act` set it too,
+and a self-hosted Mac may be the owner's own machine.
+
+### Cost
+
+Run 43144824628 (the first green run with the probe, 44284b8) against main's run 43065643116 (the
+last green run without it, db5a93d), whole jobs: **macos-latest 345 s against 382 s, and
+windows-latest 243 s against 273 s**. The jobs got shorter because the same branch fixed
+package-smoke's exit tail (44284b8): it waited out a timer left from each launch race, so its step
+went from 121 s to 8 s on macOS and from 127 s to 16 s on Windows. The probe's own steps: the MAS
+build 23 s and the probe 11 s on macOS; the probe 25 s on Windows, where the appx also lengthened
+package:gui from 36 s to 52 s. This is the input for reconsidering "every run".
+
+### The spike that settled the recipe
+
+Four dispatch-only rounds on `store-probe`; the spec's Amendment has the full table. The spike job
+and its scripts (`scripts/spike/mac-sandbox.sh`, `win-appx.ps1`, `appx-extensions.xml`) were removed
+once the probe was proven; they are in git at bcdb031, the last commit that has them.
+
+- **43110403997:** macOS enforces the sandbox on an ad-hoc copy launched from the shell (the
+  container appears, the kernel logs denials). makeappx accepts the inline-namespaced `uap5` alias.
+  electron-builder's winCodeSign signtool cannot sign an appx.
+- **43112504521:** Windows works end to end with the Windows SDK signtool (10.0.26100.0): install,
+  alias on PATH, arguments and environment passed, `windowsStore=true`, golden MATCH. A direct
+  launch of the installed exe has package identity too. macOS: ordinary Electron dies at
+  `mach_port_rendezvous_mac.cc:159`; the `mas` target builds with a null identity.
+- **43114227702:** ordinary Electron still dies there when properly sandboxed with
+  `application-groups`, so it is ruled out. The MAS build has a login helper, which must be signed
+  too.
+- **43115293433:** the MAS build works with Electron's entitlement split: `sandbox=` the bundle id,
+  golden MATCH with inputs in the container, and a read outside it DENIED. The group on the helpers
+  as well crashes with `GPU process isn't usable`.
+
+### Mutations
+
+Each a temporary commit on `store-probe` and its revert, from 44284b8, `-f sign=false`. Each also
+skipped the one unit test that pins the mutated setting, since the unit tests run first and would
+otherwise stop the job before the probe; so the unit tests catch all four as well. The FAIL lines
+are verbatim:
+
+- **1, the main entitlements without `app-sandbox` (run 43146283873):**
+  `FAIL mac-sandbox: the signature does not entitle com.apple.security.app-sandbox (codesign -d --entitlements); not launched`
+- **2, `application-groups` in the inherit file too (run 43147299556):** the probe line still said
+  `sandbox=io.github.athornton.tn3270`, then Chromium's `GPU process isn't usable. Goodbye.`, and
+  `FAIL mac-sandbox: the app did not hold after its probe line: it exited within 5 s without showing the Connect dialog (a crash, as variant C's "GPU process isn't usable")`
+- **3, Windows launching `artifacts\gui\win-unpacked\TN3270.exe` instead of the alias (run
+  43146283873, with mutation 1):**
+  `FAIL win-msix: the app reports windowsStore=false: it has no package identity` and
+  `FAIL win-msix: the started process's package is none (APPMODEL_ERROR_NO_PACKAGE), not TN3270.Probe_0.1.4.0_x64__5j71tdef09jdy`.
+  Not the installed exe: a direct launch of that has identity too (43112504521), so it would not be
+  a mutation.
+- **4, `network.client` removed from the main file (run 43148372652):** signed, confined and golden
+  ok, then
+  `FAIL mac-sandbox: with no host, opens the Connect dialog and connects: missing: IAC WILL TERMINAL-TYPE within 10 s of the submit; server saw 0 connection(s), bytes (none); exit null signal SIGKILL, stdout "connect: dialog shown\nconnect: submitted\nconnect: error cannot connect to 127.0.0.1:49421: connect EPERM 127.0.0.1:49421 - Local (0.0.0.0:0)\nconnect: dialog still open", stderr "cannot connect to 127.0.0.1:49421: connect EPERM 127.0.0.1:49421 - Local (0.0.0.0:0)\n"`
+
+The clean run after the reverts, 43149256628 (b9c6199, the tree of 44284b8), was green with all
+seven ok lines.
+
+### The rule
+
+**Any feature that touches files outside the app's own data, starts other processes, or opens a
+new kind of network connection adds a probe check here when it lands.** Its PR names the
+entitlement or capability it needs, or says why it needs none. The probe as built covers only the
+two smoke checks: a replayed trace, and an outbound telnet connection (`network.client`). File
+transfer's file dialogs, for example, rely on `files.user-selected.read-write`, which no check
+exercises yet.
+
+### Placeholders until submission
+
+The identity values are **placeholders** until piece 3 (submission) replaces them with the names
+reserved in Partner Center and App Store Connect: `appx.identityName` `TN3270.Probe`,
+`appx.publisher` `CN=TN3270 Store Probe`, `appx.publisherDisplayName` `TN3270 store probe`, and
+the entitlements files marked PLACEHOLDER. The Team ID `H68TN685J4` (in `ElectronTeamID` and the
+application group) is not one of them, and is not secret: it is in every signature we ship.
 
 ## Release history
 

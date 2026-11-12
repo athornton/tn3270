@@ -1,4 +1,4 @@
-# Handoff — state as of 2026-11-11 (0.1.4 RELEASED: npm by the tag workflow with provenance, and the first GitHub release with the seven installers, SHA256SUMS and scriv notes; macOS CODE SIGNING PROVEN on branch `signing` (not merged; released installers up to 0.1.4 are UNSIGNED), Windows CI signing DROPPED for a future Microsoft Store MSIX; next: the merge, then README *Remaining* item 15)
+# Handoff — state as of 2026-11-12 (0.1.4 RELEASED: npm by the tag workflow with provenance, and the first GitHub release with the seven installers, SHA256SUMS and scriv notes; macOS CODE SIGNING MERGED (`db5a93d`; released installers up to 0.1.4 are UNSIGNED), Windows CI signing DROPPED for the Microsoft Store; STORE PROBE BUILT AND PROVEN on branch `store-probe` (not merged); next: the merge, then the x3270 parity checklist)
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
@@ -9,8 +9,48 @@ documentation pass).
 
 ## START HERE — PACKAGING IS MERGED (`5669a3a`); NEXT IS THE ROADMAP IN README *Remaining* 14-22
 
-**2026-11-11, LATEST: macOS CODE SIGNING IS PROVEN; WINDOWS CI SIGNING IS DROPPED. Branch
-`signing`, pushed, not merged.** Spec `docs/superpowers/specs/2026-11-10-code-signing-design.md`
+**2026-11-12, LATEST: THE STORE PROBE IS BUILT AND PROVEN. Branch `store-probe`, pushed, not
+merged.** Spec `docs/superpowers/specs/2026-11-11-store-probe-design.md` (read its *Amendment
+2026-11-12*), plan `docs/superpowers/plans/2026-11-11-store-probe.md` (Tasks 0-8 done; the merge,
+`--no-ff`, is the user's call). Every CI run, tags included, builds and launches a confined
+stand-in for each store and fails if it is not confined or fails package-smoke's two checks:
+`macos-latest` builds Electron's MAS app (`--mac mas --universal -c.mac.identity=null`), signs a
+copy ad hoc into the App Sandbox with three entitlements files (the application group in the main
+one only); `windows-latest` builds an appx, signs it with a throwaway self-signed certificate and
+the Windows SDK signtool, installs it, and launches it through its `tn3270-gui.exe` alias. Nothing
+is uploaded. `docs/releasing.md`, *Store probe*, has the recipe, the confinement proofs, the cost
+(the probe adds 34 s on macOS and 25 s on Windows, plus 16 s of appx build), the four spike runs,
+the four mutation runs with their FAIL lines, and **the rule: a feature that touches files outside
+the app's data, starts other processes, or opens a new kind of network connection adds a probe
+check, and its PR names the entitlement or capability.** The identity values (`TN3270.Probe`,
+`CN=TN3270 Store Probe`) are placeholders; the Team ID `H68TN685J4` is public.
+
+- **The user's decisions (2026-11-11):** both stores, the Mac App Store and the Microsoft Store
+  (MSIX; the unsigned NSIS `.exe` stays a GitHub release artifact). Nothing goes into either before
+  feature parity with x3270; the 026 punch is optional for parity.
+- **The three-piece store plan:**
+  1. **the probe: DONE** (this branch);
+  2. **the parity checklist: NEXT.** Each x3270 feature marked ours, missing or deliberately
+     skipped; it is the store gate. Its own spec, not yet written;
+  3. **submission: at parity.** Name reservation, the real identities, the `mas` target's
+     certificates and provisioning profile, listings. The tag run builds the store packages and
+     the user uploads them by hand; the stores get a chosen subset of the GitHub releases, not
+     every version. Its own spec, written when parity is near.
+- **Also on this branch.** `fc5e988`: the GUI's replay and screenshot seams (`TN3270_GUI_REPLAY`,
+  `TN3270_GUI_SHOT`) exit 1 with one stderr line on a file error instead of hanging (the spike's
+  sandboxed EPERM sat until killed). `packages/gui/scripts/seam-errors.mjs` is the harness for it:
+  a missing, directory and chmod-000 trace and an unwritable shot path, each a non-zero exit within
+  10 s with the line. `9f5a4e9` runs it in CI, and a `workflow.test.ts` test now derives the
+  harness loop's list from `packages/gui/scripts/`, so a new harness can't be left out of CI
+  again. `44284b8`: package-smoke and the probe no longer idle ~2 minutes at exit (a race's losing
+  timer kept Node alive); package-smoke's step went from 121/127 s to 8/16 s.
+- **STILL OPEN: three hang shapes found in `fc5e988`'s review, not fixed.** Each would sit until a
+  harness kills it, not fail fast: the transfer window's load (`tw.loadFile('transfer.html')` in
+  `openTransferWindow`), `capturePage()` in `maybeCapture` (awaited before the seam's `try`), and
+  a trace that is readable but malformed (`session.replay(trace)`, after the read's `try`).
+
+**2026-11-11, PREVIOUS: macOS CODE SIGNING IS PROVEN; WINDOWS CI SIGNING IS DROPPED. Branch
+`signing`, pushed; MERGED 2026-11-11 as `db5a93d`.** Spec `docs/superpowers/specs/2026-11-10-code-signing-design.md`
 (with its *Amendment 2026-11-11*), plan `docs/superpowers/plans/2026-11-10-code-signing.md`. A `v*`
 tag run, or a `workflow_dispatch` with `sign` ticked, signs on `macos-latest` only, in the GitHub
 environment `signing`: the mac app gets a Developer ID and is notarized and stapled. Signed CI run
