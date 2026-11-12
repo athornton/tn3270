@@ -90,7 +90,7 @@ describe('transferForm.js is servable to a browser', () => {
     const src = readFileSync(formJs, 'utf8');
     for (const name of [
       'TRANSFER_FIELDS', 'newTransferForm', 'cycleField', 'setFieldText',
-      'applicable', 'formKeywords', 'moveField',
+      'applicable', 'formKeywords', 'moveField', 'defaultLocalName',
     ]) {
       expect(src, `transferForm.js must export ${name}`).toMatch(new RegExp(`\\b${name}\\b`));
     }

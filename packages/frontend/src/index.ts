@@ -136,6 +136,7 @@ export type { NonStart } from './transferStart.js';
 export {
   TRANSFER_FIELDS, newTransferForm, cycleField, setFieldText,
   applicable, formKeywords, moveField, directionLabel,
+  defaultLocalName, FALLBACK_LOCAL_NAME,
 } from './transferForm.js';
 
 /*

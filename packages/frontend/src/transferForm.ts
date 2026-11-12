@@ -330,3 +330,46 @@ export function moveField(state: TransferFormState, delta: number): TransferForm
   }
   return state;
 }
+
+/**
+ * The name a received file gets when nobody typed one (web receive spec, 2026-11-12). The web
+ * gateway already used it for a receive whose `LocalFile` was empty.
+ */
+export const FALLBACK_LOCAL_NAME = 'download.bin';
+
+/**
+ * The local file name a received host file defaults to.
+ *
+ * - VM: `fn ft fm` becomes `fn.ft`. The filemode names a minidisk and isn't part of the file's
+ *   name. A lone filename stays as it is.
+ * - TSO: one pair of enclosing quotes is stripped and the rest is kept literally, so
+ *   `'SYS1.PROCLIB(ASMHC)'` becomes `sys1.proclib(asmhc)`. Quotes that aren't balanced are kept.
+ *   An unquoted name is used as typed: TSO would prefix the userid, but the default doesn't.
+ * - Both are lowercased. Empty, blank or `''` gives `FALLBACK_LOCAL_NAME`.
+ *
+ * NO OS SANITIZING. Browsers sanitize download names themselves, and the GUI's native dialog
+ * lets the operator edit the name before anything is written.
+ *
+ * ## WHY IT LIVES IN THIS FILE AND NOT IN A `transferName.ts` OF ITS OWN
+ *
+ * The plan put it in a new module. `canvas/src/transferUi.ts` needs it, and that module is
+ * loaded by a browser through an import map that names exactly ONE frontend file, this one.
+ * `transferUiModule.test.ts` pins that import list by exact equality, and
+ * `gui/test/transferModule.test.ts` pins that this file has no runtime imports. The web gateway
+ * also serves a fixed list of modules (`httpstatic.ts`). A second module would need entries in
+ * both import maps and in that list, and missing one gives a blank window with no error. Putting
+ * it here costs nothing.
+ */
+export function defaultLocalName(hostFile: string, host: string): string {
+  const t = hostFile.trim();
+  let name: string;
+  if (host === 'vm') {
+    // After the trim, splitting on runs of blanks leaves no empty words, and `''` splits to
+    // `['']`, which joins back to `''`.
+    name = t.split(/\s+/).slice(0, 2).join('.');
+  } else {
+    name = t.length >= 2 && t.startsWith("'") && t.endsWith("'") ? t.slice(1, -1).trim() : t;
+  }
+  name = name.toLowerCase();
+  return name === '' ? FALLBACK_LOCAL_NAME : name;
+}
