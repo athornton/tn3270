@@ -529,3 +529,150 @@ it, so nothing is wasted by starting there.
 implementation of the GDDM spec targeting VM/370 R6 and MVS 3.8j. That would let
 period-authentic graphics software run against these hosts rather than only our
 own client. Unscheduled, and much larger than this project.
+
+## From README § Using the TUI (moved 2026-11-12)
+
+The no-host prompt's dated heading and its wording note, as they stood:
+
+**`tn3270` with no host, run AT A TERMINAL, prompts for one instead of the usage error**
+(2026-11-08), the TUI's counterpart of the GUI's Connect dialog:
+
+[...]
+
+in any case, or Enter for the default. **A host starting with `-` is refused** before Model or TLS
+are even asked. A failed connect prints the failure and starts a new round, with the last round's
+answers as this round's defaults — the TLS-plaintext-host cases read `Answer n to TLS: ...` here,
+a third wording alongside `-insecure` on the command line and `Untick TLS in the Connect dialog` in
+the GUI. **`Ctrl-D` (EOF) or `Ctrl-C` at any prompt quits**, exit status 1 — nothing was
+
+The keypad list's chord sentence (20 of the 22 blanks were in fact bound F-keys; corrected in the README) and the opacity fix, as they stood:
+
+(**Sys Req** and **Newline** included) would be unreachable. That is the point of the list: those
+two are the keys with no chord anywhere, and this is their only keyboard route. Each line shows
+the key's chord where it has one, read from the same `BINDING_INTENT` table the keymap is checked
+against, so 22 of the 48 correctly show a blank rather than a guess.
+
+**The list is opaque, and that took fixing.** Every line is padded to one width — 27 columns: the
+selection mark, the name column, a two-space gap and the widest chord — so the 3270 screen behind
+it never shows through. It used to draw each line at its natural length, and the 22 lines with no
+chord therefore ended at the name: on a pty against a host whose first row read `HELLO TN3270`, the
+PF16 line rendered as `  PF16 TN3270`, which reads as though `TN3270` were PF16's chord. Against a
+real MVS or VM screen every chordless line would have invented one that way. The selected line is
+a full-width reverse-video bar for the same reason.
+
+`Esc` mid-transfer, as it stood (CUT only; DFT became the default on 2026-09-29):
+
+**`Esc` mid-transfer ABORTS** — `CutTransfer.cancel` writes the response area and presses PF2, so
+the host leaves transfer mode rather than waiting for a frame that will never come.
+
+## From README § Connecting over TLS (moved 2026-11-12)
+
+That same failure is worded for the GUI's Connect dialog (`Untick TLS in the Connect dialog: ...`,
+naming the checkbox beside it) and the TUI's no-host prompt (`Answer n to TLS: ...`) — see
+*Installing* and *Using the TUI*.
+
+**A plaintext connect has a deadline too: 30 seconds** (`CONNECT_TIMEOUT_MS`, since 2026-11-09).
+A host that silently drops packets used to be given up on only by the OS's TCP retries, around
+two minutes on Linux. Now it is `cannot connect to HOST:PORT: no answer within 30 s
+(CONNECT_TIMEOUT)` — measured against the blackholed TEST-NET address 192.0.2.1: exit 1 after
+31 s. It is a connect deadline only, disarmed the moment the socket connects, so an idle session
+is never dropped by it.
+
+**A host that is down or misspelled is not a TLS problem, even with TLS on.** Refused, no such
+host, unreachable and timed-out connects happen before any TLS byte is exchanged, so every front
+end words them as `cannot connect to HOST:PORT: connection refused (ECONNREFUSED)` or `no such
+host (ENOTFOUND)`, never `TLS connection to ... failed` (since 2026-11-09; before, only a
+plaintext attempt was worded that way). A reset or a stall during the handshake is still a TLS
+failure, and says so.
+
+## From README § TN3270E (moved 2026-11-12)
+
+**We ask for BIND-IMAGE, RESPONSES, SYSREQ and CONTENTION-RESOLUTION.** Grant
+BIND-IMAGE and send no BIND, and real s3270 never enters 3270 mode at all: the
+Erase/Write is delivered and silently ignored (x3270's `telnet.c:2339`, and the gate
+at `:2681` that drops 3270 data until `tn3270e_bound`). That hazard is real and we do
+not deny it — but 29 of 29 hosts in x3270's own trace collection that grant
+BIND-IMAGE send a BIND in the same turn as FUNCTIONS (counted by bytes across all 71
+traces, not by grepping decoded `< BIND` lines, which older traces do not carry), and
+the advertise-then-stay-silent case exists only in our own `e-server.py`, which we
+configured to do it. So we ask for the function and refuse to inherit the hang
+instead: a 3270-DATA record that arrives before any BIND is **retained, not dropped**,
+and a **5-second timeout** (`-bind-image` cannot change the duration, only whether the
+gate exists at all) executes it at our own geometry if no BIND shows up. x3270 has no
+such timeout and would simply sit there.
+
+**Why 5 seconds and not one round-trip.** Every host in x3270's traces binds
+immediately, so a much shorter deadline would satisfy all of them — but some of this
+client's users are on real 370-class hardware (P/370s and similar), not an emulator,
+and that hardware is slow and has no other working client. A short timeout would
+punish exactly the users who can least afford it. The constant is `NO_BIND_TIMEOUT_MS`
+in `packages/core/src/bind.ts` and is deliberately easy to find for anyone who needs it
+longer.
+
+**One deliberate difference from s3270, still an open question (found 2026-09-17).**
+`-model 3278-2` makes us send the bare `IBM-3278-2` as the TN3270E DEVICE-TYPE. **s3270 sends
+`IBM-3278-2-E` there whatever the model** — it appends `-E` unless extended data stream is
+off or the `S:` prefix is used, so `-model` reaches only its TERMINAL-TYPE. RFC 2355 permits
+both, and `-model 3278-2` meaning "not extended" arguably makes the bare form the more honest
+one, so this is **recorded as a decision to make rather than a bug**; no host has been
+observed caring. With no `-model` flag both clients send `IBM-3278-2-E`.
+
+## From README § Using the CLI (moved 2026-11-12)
+
+**`Transfer`** is `IND$FILE`, and it works on both hosts in both directions and in both protocols —
+the host chooses CUT or DFT.
+**The TUI and the GUI reach it too, through `Ctrl-T`** — the same validator and the same command
+builder, so a form, a window and a script cannot disagree about what is legal. The browser is the
+one front end that cannot; see *What is not implemented*.
+
+(The browser has transferred files since 212df60, 2026-10-06.)
+
+**`-ddm on` IS HOW YOU GET DFT, AND IT IS NOW SAFE TO PASS WHILE TRANSFERRING A FILE.** Earlier
+versions of this README said the opposite — "do not pass `-ddm on` while transferring a file",
+because a host that took the offer sent `Open` requests we could not parse and both directions
+timed out at 0 bytes. **That is fixed as of 2026-09-29**: DFT is implemented and the transfer
+drivers build both engines, so whichever protocol the host chooses is handled. The flag advertises
+the Query Reply (DDM) unit, QCODE `0x95`, and **the client does not choose CUT or DFT — the host
+does**, on seeing that unit.
+
+| Flag | Effect |
+|---|---|
+| *(none)* | **the default as of 2026-09-29: DDM IS advertised**, so a DFT-capable host chooses DFT |
+| `-ddm off` | advertise nothing, so every host falls back to CUT — how pre-2026-09-29 CUT runs reproduce |
+| `-ddm on` | advertise DDM, QCODE `0x95`, built to match x3270's `do_qr_ddm` (`sf.c:899-906`). **A host may then answer in DFT, which now works** — and is the only way to transfer at a geometry other than 24x80 |
+
+**THE DEFAULT FLIPPED ON 2026-09-29, which was always the plan and is the user's call.** It shipped
+off on 2026-09-24 because DFT did not work yet — advertising it made a host offer a protocol we could
+not parse, so every transfer would have broken. DFT now works and is live-verified, so the flag has
+done its job as a measurement instrument and DFT is the better default: it is faster, and it is the
+only protocol that works at a geometry other than 24x80.
+
+**What that costs, stated plainly: the CUT path gets less live exercise than it did**, because a
+DFT-capable host will now pick DFT. CUT is still fully implemented and is still the only option
+against a CUT-only host such as VM/370's MECAFF. **`-ddm off` restores the old behavior exactly**,
+which is what keeps every pre-flip CUT measurement in `docs/live-testing.md` reproducible — and there
+is a test pinning that, because if it ever broke, that evidence would become unverifiable rather than
+merely old.
+
+**IT IS ONE NUMBER: the size advertised to the host and the size we chunk by are the same value,
+read from the in-flight transfer.** That is x3270's design too — `do_qr_ddm` takes
+`ftc->dft_buffersize` from the running transfer and falls back to the default only when none is
+running (`sf.c:890-897`). It matters because **the host sizes its side from what we advertise**,
+measured live on TK5: `BufferSize=512` moved MVS's own `Open` record size to **495** (= 512 − 17,
+the DFT frame overhead) while un-keyworded transfers in the same session stayed at 16367. Before
+this was wired the two could differ by 32× — advertising 512 while chunking by 16384.
+
+The unit is inserted in ascending-QCODE order rather than appended, so a capture stays
+comparable with x3270's. The flag exists because it is what *measured* which hosts offer DFT:
+MVS/TSO does and VM/370's MECAFF does not, which was invisible until we sent the unit at all.
+Design and wire bytes: `docs/superpowers/specs/2026-09-24-dft-file-transfer-design.md`; the
+protocol-selection design is
+`docs/superpowers/specs/2026-09-25-transfer-protocol-selection-design.md`.
+
+**The advertisement's own evidence is still a live probe rather than a unit test.** `-ddm` has no
+test that pins its bytes directly; what covers it is `dftSession.test.ts`'s
+*the DDM advertisement through a Session* suite, which drives a real Read Partition and asserts
+`0x95` is on the wire with the flag on and absent with it off — added later than the flag itself.
+**And it is witnessed live**: the 2026-09-29 TK5 run shows `00 0c 81 95` in answer to the host's
+own `ReadPartition`. Note that **a host may issue no Query at all** — VM did not on that day's
+control run — so check `grep -c "81 95"` in a trace before reading it as evidence about DDM.

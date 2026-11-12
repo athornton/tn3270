@@ -654,8 +654,10 @@ line against real byte counts.
 ## Using the TUI
 
 ```sh
-node packages/tui/dist/main.js [-model M] [--terminal-type T] [-oversize <cols>x<rows>|auto|none] \
-    [--colors N] [-scheme S] [-insecure] [-noverifycert] [-cafile FILE] host[:port]
+node packages/tui/dist/main.js [-model M] [--terminal-type T] [--colors N] [-scheme S] \
+    [-tn3270e on|off] [-bind-image on|off] [-bind-limit on|off] [-ddm on|off] [-devname NAME] \
+    [-oversize <cols>x<rows>|auto|none] [-insecure] [-noverifycert] [-verifycert] [-cafile FILE] \
+    [prefix:][LU,LU@]host[:port]
 ```
 
 `-model 3278-2-E` is usually what you want: TSO rejects a plain `IBM-3278-2`. Port
@@ -664,8 +666,8 @@ defaults to 23. Models 2–5 are accepted, with or without `-E`; see *Screen mod
 `0` is monochrome because you said so — the distinction matters, since it is how the
 monochrome path gets tested on a color terminal.
 
-**`tn3270` with no host, run AT A TERMINAL, prompts for one instead of the usage error**
-(2026-11-08), the TUI's counterpart of the GUI's Connect dialog:
+**`tn3270` with no host, run AT A TERMINAL, prompts for one instead of the usage error**, the
+TUI's counterpart of the GUI's Connect dialog:
 
 ```
 $ tn3270
@@ -684,19 +686,19 @@ and then the full-screen terminal starts exactly as `tn3270 host` would. **Defau
 answers** — round 1's come from the command line's `-model` and TLS flags (or the product
 defaults), and every later round's are what was typed the round before, so a retry is Enter until
 the field that needs changing. Host has no default on round 1, and an empty answer re-asks. An
-unknown model is answered with the list of known names and re-asked; TLS takes `y`/`yes`/`n`/`no`
-in any case, or Enter for the default. **A host starting with `-` is refused** before Model or TLS
-are even asked. A failed connect prints the failure and starts a new round, with the last round's
-answers as this round's defaults — the TLS-plaintext-host cases read `Answer n to TLS: ...` here,
-a third wording alongside `-insecure` on the command line and `Untick TLS in the Connect dialog` in
-the GUI. **`Ctrl-D` (EOF) or `Ctrl-C` at any prompt quits**, exit status 1 — nothing was
+unknown model is answered with the list of known names and re-asked; Model is not asked at all
+when `--terminal-type` is given. TLS takes `y`/`yes`/`n`/`no` in any case, or Enter for the
+default. **A host starting with `-` is refused** before Model or TLS are even asked. A failed
+connect prints the failure and starts a new round, with the last round's answers as this round's
+defaults; a plaintext host reached with TLS reads `Answer n to TLS: ...` (see *Connecting over
+TLS*). **`Ctrl-D` (EOF) or `Ctrl-C` at any prompt quits**, exit status 1 — nothing was
 connected — and `Ctrl-C` while a connect is already in flight (the attempt cannot be aborted)
 prints `cancelled; waiting for the connection attempt to end` and waits for it rather than
 appearing to ignore the keystroke. Other flags still apply: `tn3270 -scheme green --colors 16`
 prompts too, and both are used once the session starts. **This only happens at a real terminal** —
-stdin and stdout must both be TTYs. A script or a pipe on either end still gets the usage error,
-exit 2, with no host, exactly as before; a script never meets a prompt. An unknown `-model` given
-on the command line is still a usage error regardless of a terminal being present.
+stdin and stdout must both be TTYs. A script or a pipe on either end gets the usage error, exit 2,
+with no host; a script never meets a prompt. An unknown `-model` given on the command line is
+still a usage error regardless of a terminal being present.
 
 **`Ctrl-]` quits. `Ctrl-C` does not** — it is the Clear AID, which a 3270 user needs
 constantly, so a hint line says so. Given a spare row (27 or more for a 24-row screen)
@@ -729,18 +731,16 @@ screen, arrows to move, `Enter` to fire the marked key, `Esc` or `Ctrl-K` again 
 is c3270's own binding for its keypad (`Common/fb-c3270:191`), not a divergence. While the list is
 open **it owns the keyboard** — nothing falls through to the field behind it — and the window
 follows the selection rather than showing only the first screenful, or everything past `Attention`
-(**Sys Req** and **Newline** included) would be unreachable. That is the point of the list: those
-two are the keys with no chord anywhere, and this is their only keyboard route. Each line shows
-the key's chord where it has one, read from the same `BINDING_INTENT` table the keymap is checked
-against, so 22 of the 48 correctly show a blank rather than a guess.
+(**Sys Req** and **Newline** included) would be unreachable. Those two have no chord anywhere, so
+the list is their only keyboard route. Each line shows a chord read from the `BINDING_INTENT`
+table, which lists only representative function keys: 22 of the 48 lines show a blank, and 20 of
+those (PF2, PF4–11 and PF14–24) are in fact bound to their F-keys. Only Sys Req and Newline really
+have none.
 
-**The list is opaque, and that took fixing.** Every line is padded to one width — 27 columns: the
-selection mark, the name column, a two-space gap and the widest chord — so the 3270 screen behind
-it never shows through. It used to draw each line at its natural length, and the 22 lines with no
-chord therefore ended at the name: on a pty against a host whose first row read `HELLO TN3270`, the
-PF16 line rendered as `  PF16 TN3270`, which reads as though `TN3270` were PF16's chord. Against a
-real MVS or VM screen every chordless line would have invented one that way. The selected line is
-a full-width reverse-video bar for the same reason.
+**The list is opaque.** Every line is padded to one width — 27 columns: the selection mark, the
+name column, a two-space gap and the widest chord — so the 3270 screen behind it never shows
+through a blank chord column. The selected line is a full-width reverse-video bar for the same
+reason.
 
 **`k`/`w` also move up and `j`/`s` down**, in either case, while the list is open. Bare letters are
 bindable nowhere else in this emulator — everywhere else a letter is data you type into a field —
@@ -763,8 +763,9 @@ rather than kept invisibly, since a hidden value that breaks a later submit name
 operator never typed. **The form never validates.** It collects strings and hands them to the same
 `parseTransferKeywords` the CLI uses, so a refusal shows the validator's own message with the form
 still open and nothing retyped; a form and a script cannot drift on what is legal.
-**`Esc` mid-transfer ABORTS** — `CutTransfer.cancel` writes the response area and presses PF2, so
-the host leaves transfer mode rather than waiting for a frame that will never come.
+**`Esc` mid-transfer ABORTS**: under CUT, `CutTransfer.cancel` writes the response area and presses
+PF2; under DFT, `DftTransfer.cancel` aborts on the next inbound frame. Either way the host leaves
+transfer mode rather than waiting for a frame that will never come.
 
 **Colors come from one shared table in `packages/frontend`, and `-scheme` picks which.**
 `default` is the readable one — zti's own values for F0–F7 (eight codes), x3270's for the
@@ -834,7 +835,7 @@ and the size itself goes to the host in the Query Reply (Usable Area and Implici
 The default size stays 24x80; the oversize is the ALTERNATE, so a host still reaches it with
 Erase/Write Alternate. **It needs an extended (`-E`) model**, since a Query Reply is part of the
 extended data stream. The default with no `-model` is `3278-2-E`, which already is one.
-`-bind-limit on` then bounds a BIND by the oversize rather than by the model.
+A BIND is bounded by the oversize rather than the model; see `-bind-limit` under *TN3270E*.
 
 **`auto` measures the window, at each connect and reconnect only:**
 
@@ -843,7 +844,7 @@ extended data stream. The default with no `-model` is `3278-2-E`, which already 
 | TUI | the terminal, less one row for the status line: a 41x100 terminal asks for 40 rows by 100 columns |
 | GUI | the display's work area, at the scale the window would pick anyway (80% of the work area, the model's scale), less the OIA row |
 | web gateway | the browser's viewport at scale 1, less the OIA row, sent by the page in `hello` and kept up to date by later resizes |
-| CLI | **refused**: there is no window to measure. Give `<cols>x<rows>` |
+| CLI | **refused** with a usage error, as is `Set(oversize,auto)`: there is no window to measure. Give `<cols>x<rows>` |
 
 **A resize mid-session does NOT change the live screen.** The host learned the size from the
 Query Reply and will not ask again, so the new size applies at the NEXT reconnect. The TUI says
@@ -868,7 +869,7 @@ fewer rows, which is noted in the trace only, not on stderr.
 - a fixed size below the model's alternate (`160x20` on any model; `100x40` on a model 4, which
   is 43 rows);
 - more than 16383 cells, the 14-bit address limit;
-- `auto` in the CLI.
+- `auto` in the CLI (see the table above).
 
 **`--replay` (the gateway) and `TN3270_GUI_REPLAY` (the GUI) ignore it**, because a replay never
 connects, and only a connect resolves the geometry.
@@ -891,6 +892,7 @@ certificate chain verified against the system trust store.
 | Flag | Effect |
 |---|---|
 | *(none)* | TLS, chain verified |
+| `-verifycert` | the default, stated explicitly |
 | `-cafile FILE` | TLS, verified against that PEM instead of the system store |
 | `-noverifycert` | TLS, chain not verified. `-no-verify` is accepted too |
 | `-insecure` | no TLS at all |
@@ -923,23 +925,24 @@ flag that would fix it:
 does not speak TLS — a Hercules or other vintage system — use -insecure.
 ```
 
-That same failure is worded for the GUI's Connect dialog (`Untick TLS in the Connect dialog: ...`,
-naming the checkbox beside it) and the TUI's no-host prompt (`Answer n to TLS: ...`) — see
-*Installing* and *Using the TUI*.
+**The remedy is worded for the front end you are in.** The two plaintext-host cases lead with
+`Untick TLS in the Connect dialog: ...` in the GUI's Connect dialog and with `Answer n to TLS: ...`
+at the TUI's no-host prompt (see *Installing* and *Using the TUI*); everywhere else they name
+`-insecure`, as above.
 
-**A plaintext connect has a deadline too: 30 seconds** (`CONNECT_TIMEOUT_MS`, since 2026-11-09).
-A host that silently drops packets used to be given up on only by the OS's TCP retries, around
-two minutes on Linux. Now it is `cannot connect to HOST:PORT: no answer within 30 s
+**A plaintext connect has a deadline too: 30 seconds** (`CONNECT_TIMEOUT_MS`). A host that
+silently drops packets gets `cannot connect to HOST:PORT: no answer within 30 s
 (CONNECT_TIMEOUT)` — measured against the blackholed TEST-NET address 192.0.2.1: exit 1 after
 31 s. It is a connect deadline only, disarmed the moment the socket connects, so an idle session
 is never dropped by it.
 
 **A host that is down or misspelled is not a TLS problem, even with TLS on.** Refused, no such
-host, unreachable and timed-out connects happen before any TLS byte is exchanged, so every front
-end words them as `cannot connect to HOST:PORT: connection refused (ECONNREFUSED)` or `no such
-host (ENOTFOUND)`, never `TLS connection to ... failed` (since 2026-11-09; before, only a
-plaintext attempt was worded that way). A reset or a stall during the handshake is still a TLS
-failure, and says so.
+host and unreachable connects happen before any TLS byte is exchanged, so every front end words
+them as `cannot connect to HOST:PORT: connection refused (ECONNREFUSED)` or `no such host
+(ENOTFOUND)`, never `TLS connection to ... failed`. **One exception:** with TLS on, a host that
+never answers the TCP connect hits the 10-second handshake deadline and is reported as `accepted
+the connection but never completed a TLS handshake`, although it accepted nothing. A reset or a
+stall during the handshake is a TLS failure, and says so.
 
 **Reconnect always replays the LAST EXPLICIT TLS choice, never a keystroke, menu or host
 frame.** On the command line that choice is fixed for the run — there is nothing else to replay.
@@ -971,8 +974,8 @@ assumed — see *Verification*.
 | `LU@host` | request a specific LU by name |
 | `LUA,LUB@host` | request each in turn as rejections come back |
 | `-bind-image on\|off` | request the BIND-IMAGE function (default **on**); `off` means the gate below never closes, because it is conditional on the host having *agreed* the function |
-| `-bind-limit on\|off` | range-check a BIND's geometry against `-model` before honoring it (default **on**, matching x3270's `bind_limit` resource, `Common/glue.c:458`); `off` honors an out-of-range BIND anyway |
-| `-devname NAME` | offer telnet option 39 (NEW-ENVIRON) and answer a host's `DEVNAME` request with `NAME`. **Trailing `=` characters become a counter**: `foo===` yields `foo001`, `foo002`, … a fresh name per request, because a host refuses a name already in use. Absent, option 39 is **refused outright** — the feature is dark unless asked for |
+| `-bind-limit on\|off` | range-check a BIND's geometry before honoring it (default **on**); see below |
+| `-devname NAME` | offer telnet option 39 (NEW-ENVIRON) and answer a host's `DEVNAME` request; see *Naming a session with `-devname`* |
 
 The host argument's full shape is `[prefix:][LU,LU@]host[:port]`. In the CLI an LU list
 must be **quoted** — `Connect("LUA,LUB@host")` — because the LU separator and the
@@ -987,38 +990,32 @@ connect to a plain host and then to a TN3270E one and be right about both.
 **We ask for BIND-IMAGE, RESPONSES, SYSREQ and CONTENTION-RESOLUTION.** Grant
 BIND-IMAGE and send no BIND, and real s3270 never enters 3270 mode at all: the
 Erase/Write is delivered and silently ignored (x3270's `telnet.c:2339`, and the gate
-at `:2681` that drops 3270 data until `tn3270e_bound`). That hazard is real and we do
-not deny it — but 29 of 29 hosts in x3270's own trace collection that grant
-BIND-IMAGE send a BIND in the same turn as FUNCTIONS (counted by bytes across all 71
-traces, not by grepping decoded `< BIND` lines, which older traces do not carry), and
-the advertise-then-stay-silent case exists only in our own `e-server.py`, which we
-configured to do it. So we ask for the function and refuse to inherit the hang
-instead: a 3270-DATA record that arrives before any BIND is **retained, not dropped**,
-and a **5-second timeout** (`-bind-image` cannot change the duration, only whether the
-gate exists at all) executes it at our own geometry if no BIND shows up. x3270 has no
-such timeout and would simply sit there.
+at `:2681` that drops 3270 data until `tn3270e_bound`). Every host in x3270's own trace
+collection that grants BIND-IMAGE sends a BIND at once, so we ask for the function and
+refuse to inherit the hang instead: a 3270-DATA record that arrives before any BIND is
+**retained, not dropped**, and a **5-second timeout** (`-bind-image` cannot change the
+duration, only whether the gate exists at all) executes it at our own geometry if no BIND
+shows up. x3270 has no such timeout and would simply sit there.
 
-**Why 5 seconds and not one round-trip.** Every host in x3270's traces binds
-immediately, so a much shorter deadline would satisfy all of them — but some of this
-client's users are on real 370-class hardware (P/370s and similar), not an emulator,
-and that hardware is slow and has no other working client. A short timeout would
-punish exactly the users who can least afford it. The constant is `NO_BIND_TIMEOUT_MS`
-in `packages/core/src/bind.ts` and is deliberately easy to find for anyone who needs it
-longer.
+**Why 5 seconds and not one round-trip.** Some of this client's users are on real
+370-class hardware (P/370s and similar), not an emulator, and that hardware is slow and
+has no other working client. A short timeout would punish exactly the users who can least
+afford it. The constant is `NO_BIND_TIMEOUT_MS` in `packages/core/src/bind.ts` and is
+deliberately easy to find for anyone who needs it longer.
 
 **A BIND may resize the screen mid-session, and we honor it — geometry included.**
 `-bind-limit on` (the default) range-checks a BIND's rows/cols against `-model` before
-applying them, matching x3270's `bind_limit` resource: the upper bound is the
-configured model, the lower bound is 24x80 (model 2). **On a model-2 session those two
-bounds are the same number**, so a BIND asking for anything other than exactly 24x80 is
-refused and our own geometry stands. **This is a safety rail, not a missing feature**:
-with the limit on, BIND can only ever *narrow* a larger model toward 24x80, never grow
-one past what `-model` configured. Growing past the model is `-oversize`'s job (see
-*Oversize*; with an oversize, the upper bound is the oversize), and letting BIND do it here
-would silently turn this feature into that one. A user who sees a refused BIND while running `-model 3278-2`
-has not found a bug; `-bind-limit off` honors the BIND's geometry anyway. UNBIND
-reverts the screen to the model's own geometry, not to whatever the previous BIND left
-it at.
+applying them, matching x3270's `bind_limit` resource (`Common/glue.c:458`): the upper
+bound is the configured model, the lower bound is 24x80 (model 2). **On a model-2 session
+those two bounds are the same number**, so a BIND asking for anything other than exactly
+24x80 is refused and our own geometry stands. **This is a safety rail, not a missing
+feature**: with the limit on, BIND can only ever *narrow* a larger model toward 24x80,
+never grow one past what `-model` configured. Growing past the model is `-oversize`'s job
+(see *Oversize*; with an oversize, the upper bound is the oversize), and letting BIND do it
+here would silently turn this feature into that one. A user who sees a refused BIND while
+running `-model 3278-2` has not found a bug; `-bind-limit off` honors the BIND's geometry
+anyway. UNBIND reverts the screen to the model's own geometry, not to whatever the previous
+BIND left it at.
 
 CONTENTION-RESOLUTION (`0x05`) is not in RFC 2355 at all — x3270 requests it anyway,
 and so do we.
@@ -1028,7 +1025,7 @@ and so do we.
 Some hosts identify a session by a **device name** rather than by an SNA LU, and ask for
 it over telnet option 39, NEW-ENVIRON (RFC 1572), as a `DEVNAME` uservar. That is a
 second, independent route to what TN3270E's `CONNECT` does with `LU@host` — different
-hosts use different ones, and this client now does both.
+hosts use different ones, and this client does both.
 
 ```sh
 node packages/tui/dist/main.js -insecure -devname 'foo===' HOST:PORT
@@ -1080,13 +1077,9 @@ Two things worth knowing:
   (§8.1.4). With RESPONSES agreed the counter advances, so that byte arrives after 255
   records — reachable in a long session, not theoretical.
 
-**One deliberate difference from s3270, still an open question (found 2026-09-17).**
-`-model 3278-2` makes us send the bare `IBM-3278-2` as the TN3270E DEVICE-TYPE. **s3270 sends
-`IBM-3278-2-E` there whatever the model** — it appends `-E` unless extended data stream is
-off or the `S:` prefix is used, so `-model` reaches only its TERMINAL-TYPE. RFC 2355 permits
-both, and `-model 3278-2` meaning "not extended" arguably makes the bare form the more honest
-one, so this is **recorded as a decision to make rather than a bug**; no host has been
-observed caring. With no `-model` flag both clients send `IBM-3278-2-E`.
+**The TN3270E DEVICE-TYPE follows `-model`.** `-model 3278-2` sends the bare `IBM-3278-2`
+there, where s3270 appends `-E` whatever the model. With no `-model` flag both clients send
+`IBM-3278-2-E`.
 
 Design and every measurement:
 `docs/superpowers/specs/2026-08-27-stage2b-tn3270e-design.md`.
@@ -1111,8 +1104,8 @@ node packages/cli/dist/main.js -insecure < packages/cli/scripts/record-vm.txt
 `Connect()` routes through the same TLS decision as the command line, so the flag goes
 on the invocation and cannot be written into the script.
 
-`-oversize <cols>x<rows>` works here as in the other front ends; **`-oversize auto` is refused**
-with a usage error, since a script has no window to measure. See *Oversize*.
+`-oversize <cols>x<rows>` works here as in the other front ends, but not `-oversize auto`; see
+*Oversize*.
 
 **Commands.** `Connect` `Disconnect` `Reconnect` `Quit` · `String` `Enter` `Clear` `PF` `PA`
 `Attn` `Reset` `SysReq` · `Up` `Down` `Left` `Right` `Home` `Tab` `BackTab` `Newline`
@@ -1132,8 +1125,8 @@ call — e.g. going from model 5 oversized to 140x30 to model 4 at 80x45, where 
 alone is refused against the old oversize and `Set(oversize,...)` alone is refused against the
 old model's floor. The name is case-insensitive; the value is validated eagerly, the same way
 `-model`/`-oversize` are, so a bad model, a non-`-E` model under an oversize, or
-`Set(oversize,auto)` (no window here to measure) is refused immediately rather than at the next
-connect, and the setting is left unchanged. `Set(...)` is refused while connected
+`Set(oversize,auto)` is refused immediately rather than at the next connect, and the setting is
+left unchanged. `Set(...)` is refused while connected
 (`disconnect first; ...`), while a connection attempt is still in flight (`wait for the
 connection attempt to finish; ...`), and on a
 session started with `--terminal-type`, which has no model or oversize to change.
@@ -1153,50 +1146,37 @@ connect to`.
 `Dup`, `FieldMark` and `SysReq` are conformance rather than symmetry: s3270 has all three by
 these names (`Common/kybd.c:223`, `:230`, `:254`), so a script written for it should not fail
 here. All three take no arguments — s3270's optional `FailOnError`/`NoFailOnError` on `Dup` and
-`FieldMark` is refused by name rather than accepted and ignored, because failing on an operator
-error already *is* s3270's behavior for a scripted call. **`SysReq()` answers `ok` whatever
-happens** — it reports no refusal, because the key exists on the keyboard whatever the host
-granted. What it sends depends on the session: a test request read heading plus any modified field
-data against a classic host such as either Hercules system, Telnet `IAC AO` under TN3270E. There is no
-command for the keypad toggle: a script-driven client has no renderer, which is why `-scheme` is
-absent here too.
+`FieldMark` is refused (`Dup() requires 0 arguments`) rather than accepted and ignored, because
+failing on an operator error already *is* s3270's behavior for a scripted call. **`SysReq()`
+answers `ok` whatever happens** — it reports no refusal, because the key exists on the keyboard
+whatever the host granted. What it sends depends on the session: a test request read heading plus
+any modified field data against a classic host such as either Hercules system; Telnet `IAC AO`
+under TN3270E when the host agreed SYSREQ, and nothing otherwise. There is no command for the
+keypad toggle: a script-driven client has no renderer, which is why `-scheme` is absent here too.
 
-**`Transfer`** is `IND$FILE`, and it works on both hosts in both directions and in both protocols —
-the host chooses CUT or DFT.
-**The TUI and the GUI reach it too, through `Ctrl-T`** — the same validator and the same command
-builder, so a form, a window and a script cannot disagree about what is legal. The browser is the
-one front end that cannot; see *What is not implemented*.
+**`Transfer`** is `IND$FILE`, in both directions on both hosts; the host chooses CUT or DFT
+(MVS/TSO offers DFT, VM/370's MECAFF only CUT).
+**The TUI, the GUI and the browser reach it too, through `Ctrl-T`** — the same validator and the
+same command builder, so a form, a window and a script cannot disagree about what is legal. For
+the browser, see *Using the web gateway*.
 Two things that will otherwise cost you an afternoon: quote CMS file names, because the
 argument splitter breaks on spaces (`HostFile="PROFILE EXEC A"`), and use
 `-model 3278-2-E` — MECAFF's `IND$FILE` refuses a plain `IBM-3278-2` outright. See
 `packages/cli/scripts/transfer-vm.txt`.
 
-**`-ddm on` IS HOW YOU GET DFT, AND IT IS NOW SAFE TO PASS WHILE TRANSFERRING A FILE.** Earlier
-versions of this README said the opposite — "do not pass `-ddm on` while transferring a file",
-because a host that took the offer sent `Open` requests we could not parse and both directions
-timed out at 0 bytes. **That is fixed as of 2026-09-29**: DFT is implemented and the transfer
-drivers build both engines, so whichever protocol the host chooses is handled. The flag advertises
-the Query Reply (DDM) unit, QCODE `0x95`, and **the client does not choose CUT or DFT — the host
-does**, on seeing that unit.
+**DDM is advertised by default; `-ddm off` forces CUT, which needs 24x80.** The flag controls the
+Query Reply (DDM) unit, QCODE `0x95`, built to match x3270's `do_qr_ddm` (`sf.c:899-906`), and
+**the client does not choose CUT or DFT — the host does**, on seeing that unit. DFT is the only
+protocol that works at a geometry other than 24x80.
 
 | Flag | Effect |
 |---|---|
-| *(none)* | **the default as of 2026-09-29: DDM IS advertised**, so a DFT-capable host chooses DFT |
-| `-ddm off` | advertise nothing, so every host falls back to CUT — how pre-2026-09-29 CUT runs reproduce |
-| `-ddm on` | advertise DDM, QCODE `0x95`, built to match x3270's `do_qr_ddm` (`sf.c:899-906`). **A host may then answer in DFT, which now works** — and is the only way to transfer at a geometry other than 24x80 |
+| *(none)*, `-ddm on` | advertise DDM, so a DFT-capable host chooses DFT |
+| `-ddm off` | advertise nothing, so every host falls back to CUT |
 
-**THE DEFAULT FLIPPED ON 2026-09-29, which was always the plan and is the user's call.** It shipped
-off on 2026-09-24 because DFT did not work yet — advertising it made a host offer a protocol we could
-not parse, so every transfer would have broken. DFT now works and is live-verified, so the flag has
-done its job as a measurement instrument and DFT is the better default: it is faster, and it is the
-only protocol that works at a geometry other than 24x80.
-
-**What that costs, stated plainly: the CUT path gets less live exercise than it did**, because a
-DFT-capable host will now pick DFT. CUT is still fully implemented and is still the only option
-against a CUT-only host such as VM/370's MECAFF. **`-ddm off` restores the old behavior exactly**,
-which is what keeps every pre-flip CUT measurement in `docs/live-testing.md` reproducible — and there
-is a test pinning that, because if it ever broke, that evidence would become unverifiable rather than
-merely old.
+CUT is still fully implemented and is the only option against a CUT-only host such as VM/370's
+MECAFF. `-ddm off` reproduces the CUT measurements in `docs/live-testing.md` exactly, and a test
+pins that.
 
 The advertised LIMIN/LIMOUT default to 16384, bounded 256..32767, and **`Transfer(BufferSize=N)`
 sets them** — clamped by `boundDftBufferSize` after x3270's `ft_dft.c:740-747`.
@@ -1204,10 +1184,9 @@ sets them** — clamped by `boundDftBufferSize` after x3270's `ft_dft.c:740-747`
 **IT IS ONE NUMBER: the size advertised to the host and the size we chunk by are the same value,
 read from the in-flight transfer.** That is x3270's design too — `do_qr_ddm` takes
 `ftc->dft_buffersize` from the running transfer and falls back to the default only when none is
-running (`sf.c:890-897`). It matters because **the host sizes its side from what we advertise**,
-measured live on TK5: `BufferSize=512` moved MVS's own `Open` record size to **495** (= 512 − 17,
-the DFT frame overhead) while un-keyworded transfers in the same session stayed at 16367. Before
-this was wired the two could differ by 32× — advertising 512 while chunking by 16384.
+running (`sf.c:890-897`). It matters because **the host sizes its side from what we advertise**:
+on TK5, `BufferSize=512` moved MVS's own `Open` record size to **495** (= 512 − 17, the DFT frame
+overhead), while un-keyworded transfers in the same session stayed at 16367.
 
 `BufferSize` is the one transfer keyword that **never reaches the `IND$FILE` command**: it sizes our
 frames, not the host's dataset, so unlike `Recfm`/`Lrecl`/`Blksize` it is legal on a receive and on
@@ -1216,19 +1195,14 @@ derived from its field labels and a longer one would shift the status line's 54-
 `SessionOptions.dftBufferSize` remains the programmatic default and is still reachable from no flag.
 
 The unit is inserted in ascending-QCODE order rather than appended, so a capture stays
-comparable with x3270's. The flag exists because it is what *measured* which hosts offer DFT:
-MVS/TSO does and VM/370's MECAFF does not, which was invisible until we sent the unit at all.
-Design and wire bytes: `docs/superpowers/specs/2026-09-24-dft-file-transfer-design.md`; the
-protocol-selection design is
+comparable with x3270's. Design and wire bytes:
+`docs/superpowers/specs/2026-09-24-dft-file-transfer-design.md`; the protocol-selection design is
 `docs/superpowers/specs/2026-09-25-transfer-protocol-selection-design.md`.
 
-**The advertisement's own evidence is still a live probe rather than a unit test.** `-ddm` has no
-test that pins its bytes directly; what covers it is `dftSession.test.ts`'s
-*the DDM advertisement through a Session* suite, which drives a real Read Partition and asserts
-`0x95` is on the wire with the flag on and absent with it off — added later than the flag itself.
-**And it is witnessed live**: the 2026-09-29 TK5 run shows `00 0c 81 95` in answer to the host's
-own `ReadPartition`. Note that **a host may issue no Query at all** — VM did not on that day's
-control run — so check `grep -c "81 95"` in a trace before reading it as evidence about DDM.
+**Tests:** `queryreply.test.ts` (*the DDM advertisement, QCODE 0x95*) pins the unit's bytes, and
+`dftSession.test.ts` (*the DDM advertisement through a Session*) drives a real Read Partition and
+asserts `0x95` is on the wire with the flag on and absent with it off. **A host may issue no Query
+at all**, so check `grep -c "81 95"` in a trace before reading it as evidence about DDM.
 
 **`Wait(condition[,seconds])`** takes `3270Mode`, `Output`, `Unlock`, `Settle`,
 or `InputField`. Which one you want is not obvious and gets hosts wrong in
