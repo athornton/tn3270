@@ -1,6 +1,6 @@
 import {
-  TRANSFER_FIELDS, applicable, cycleField, directionLabel, formKeywords, newTransferForm,
-  setFieldText,
+  TRANSFER_FIELDS, applicable, cycleField, defaultLocalName, directionLabel, formKeywords,
+  newTransferForm, setFieldText,
   type TransferFieldId, type TransferFormState, type TransferValues,
 } from '@tn3270/frontend/dist/transferForm.js';
 
@@ -64,8 +64,9 @@ import {
  * `transferForm.js`. The browser applies the map BEFORE it fetches anything, so
  * `packages/frontend/dist/index.js` -- the package barrel -- is never requested, and `tls.js`'s
  * `node:net`/`node:tls`/`node:fs` imports, which no browser can resolve, are never reached. All
- * six names imported here are exported directly by `transferForm.js` (verified), so that single
- * entry satisfies the whole list.
+ * eight runtime names imported here are exported directly by `transferForm.js` (verified
+ * 2026-11-12, when `defaultLocalName` joined; this said "six" after `directionLabel` had already
+ * made it seven), so that single entry satisfies the whole list.
  *
  * TWO DOCUMENTS DO THIS AS OF 2026-10-06: `packages/gui/transfer.html` for the Electron window,
  * and `packages/web/static/index.html` for the gateway. Both carry a key spelling this deep
@@ -194,8 +195,14 @@ export interface UiDeps {
   setStatus(text: string): void;
   /** Enable or disable the inputs, per the running state. */
   setRunning(running: boolean): void;
-  /** Open a native file dialog. Resolves to a path, or undefined if canceled. */
-  browse(direction: string): Promise<string | undefined>;
+  /**
+   * Open a native file dialog. Resolves to a path, or undefined if canceled.
+   *
+   * `suggestedName` is `defaultLocalName` of the host file on a receive whose host file isn't
+   * blank, and `undefined` otherwise. The GUI's save dialog uses it as `defaultPath`. A front end
+   * with no use for it can ignore it: a one-parameter function still satisfies this type.
+   */
+  browse(direction: string, suggestedName?: string): Promise<string | undefined>;
   /** Hand the keywords to main. A local refusal comes back as `ok: false`. */
   submit(keywords: readonly string[]): Promise<{ ok: boolean; error?: string }>;
   /** Abort a running transfer. */
@@ -215,16 +222,66 @@ export interface TransferUi {
 }
 
 const HELP = 'Choose a local file and name the host file, then Start.';
+/** The help on a receive whose local name is derived, where there is no local file to choose. */
+const HELP_DERIVED = 'Name the host file, then Start.';
 
-export function createTransferUi(deps: UiDeps): TransferUi {
+/** How one front end differs from another in what this form shows and submits. */
+export interface TransferUiOptions {
+  /**
+   * On a receive, don't show `localFile`, and submit `defaultLocalName(hostFile, host)` as
+   * `LocalFile`. The web gateway turns this on: a browser has no path to receive into, and the
+   * download is named from the keywords submitted. Off by default, which is the GUI, whose receive
+   * writes a real path the operator chooses.
+   *
+   * ## WHY HERE AND NOT IN `applicable`
+   *
+   * `applicable` is the one rule every front end shares, and the TUI and the GUI need `localFile`
+   * on a receive. This is a front end's presentation choice, so it is an option of the view.
+   *
+   * ## THE DERIVED NAME NEVER ENTERS THE FORM STATE
+   *
+   * `start()` submits the keywords of a COPY. Written into `state`, it would replace whatever the
+   * operator had typed for a send, and a switch back to send would show a name they never chose.
+   */
+  readonly deriveLocalFileOnReceive?: boolean;
+}
+
+/**
+ * `opts` is a second parameter because `createTransferUi` had no options before, and an option
+ * isn't something `UiDeps` supplies from the outside world: it is fixed when the form is made.
+ */
+export function createTransferUi(deps: UiDeps, opts: TransferUiOptions = {}): TransferUi {
   let state: TransferFormState = newTransferForm();
   let isRunning = false;
+  const derive = opts.deriveLocalFileOnReceive === true;
+
+  /** Is `localFile` derived from the host file, rather than typed, for this form right now? */
+  const derivedLocal = (): boolean => derive && state.values.direction === 'receive';
+
+  /**
+   * The state whose keywords are submitted: `state` itself, or on a derived receive a copy whose
+   * `localFile` is the derived name. Whatever validates the submit downstream -- the GUI's
+   * `transferWindow.ts`, the gateway -- runs `parseTransferKeywords` on these keywords, so it sees
+   * the derived `LocalFile` and doesn't refuse an empty one. This controller validates nothing.
+   */
+  const submitted = (): TransferFormState => (derivedLocal()
+    ? {
+      ...state,
+      values: {
+        ...state.values,
+        localFile: defaultLocalName(state.values.hostFile, state.values.host),
+      },
+    }
+    : state);
 
   /** Every applicable field, in tab order, with its current value and options. */
   const view = (): UiField[] => {
     const out: UiField[] = [];
     for (const f of TRANSFER_FIELDS) {
       if (!applicable(f.id, state.values)) continue;
+      // Shown-or-not only: the value stays in `state`, and `submitted()` replaces it on the way
+      // out. `applicable` is not changed for this, because the GUI and the TUI share it.
+      if (f.id === 'localFile' && derivedLocal()) continue;
       // The VM/Recfm asymmetry lives in the model's own cycle logic, so the options offered
       // here are derived by asking it rather than by re-filtering the table.
       const options = f.kind === 'cycle' ? offered(f.id) : [];
@@ -280,7 +337,7 @@ export function createTransferUi(deps: UiDeps): TransferUi {
 
   const show = (): void => {
     if (state.error !== undefined) { deps.setStatus(state.error); return; }
-    deps.setStatus(HELP);
+    deps.setStatus(derivedLocal() ? HELP_DERIVED : HELP);
   };
 
   redraw();
@@ -309,7 +366,16 @@ export function createTransferUi(deps: UiDeps): TransferUi {
       // The DIRECTION decides which dialog, which is why it is passed rather than inferred in
       // main: a send must choose an existing file (Open) and a receive names a destination
       // (Save). The dialog deliberately does NOT set `Exist` -- see the spec.
-      const chosen = await deps.browse(state.values.direction);
+      //
+      // A RECEIVE ALSO GETS A SUGGESTED NAME, whatever `deriveLocalFileOnReceive` says: the GUI's
+      // Save dialog offers it, so the operator needn't retype what the host file already says.
+      // None when the host file is blank, so the dialog opens on its own default rather than on
+      // `download.bin`.
+      const { direction, hostFile, host } = state.values;
+      const suggested = direction === 'receive' && hostFile.trim() !== ''
+        ? defaultLocalName(hostFile, host)
+        : undefined;
+      const chosen = await deps.browse(direction, suggested);
       // THE `isRunning` CHECK IS DELIBERATELY DUPLICATED, because the `await` above is a
       // SUSPENSION POINT and the state can change across it. The check before it is not enough:
       // if the native dialog is not modal to this window the operator can press Start while it is
@@ -413,7 +479,7 @@ export function createTransferUi(deps: UiDeps): TransferUi {
        */
       let refusal: string | undefined;
       try {
-        const result = await deps.submit(formKeywords(state));
+        const result = await deps.submit(formKeywords(submitted()));
         if (!result.ok) refusal = result.error ?? 'transfer refused';
       } catch (err) {
         refusal = `transfer refused: ${err instanceof Error ? err.message : String(err)}`;
