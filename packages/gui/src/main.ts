@@ -124,24 +124,21 @@ const SEAM = Object.freeze({
    * A FIFTH TEST SEAM: `TN3270_GUI_CLICKS='PF1,PA2,SysRq'` clicks keypad buttons by LABEL.
    *
    * Labels, not coordinates. A coordinate list would be a second copy of the layout, and it would
-   * pass while the layout was wrong -- which is the one thing this seam exists to catch. Main asks
-   * the renderer for the button's center and delivers a real `mouseDown`/`mouseUp` pair through
-   * `sendInputEvent`, so the click enters at the top of Chromium's input pipeline exactly as
-   * `TN3270_GUI_KEYS` does for keys.
+   * pass while the layout was wrong -- which is the one thing this seam exists to catch. Main finds
+   * the labelled button in the keypad window's DOM and calls its real `.click()`, so the browser
+   * does its own hit testing and the same listener a real press runs is the one that fires; see
+   * `maybeSendClicks` below for the mechanism in full.
    *
    * IT DOES NOT IMPLY THE KEYPAD, and the plan for it said it did -- so this is written down rather
    * than left as an omission. `clicks.mjs` shows the keypad with `TN3270_GUI_KEYS=Ctrl+K`, which
    * proves the chord and the click path in one run, and a second on-switch here would be wrong.
    * So the caller opens the keypad; this seam only clicks.
    *
-   * **STALE AS OF 2026-10-06 AND REWRITTEN IN TASK 8 OF THE KEYPAD WORK.** The description below
-   * this point was written for the CANVAS keypad: a per-window `showKeypad` flag, a `list.keypad`
-   * region, and `__tn3270ButtonCenter` returning canvas coordinates for `hitTestAt`. None of that
-   * exists in this front end any more -- `Ctrl-K` opens a `BrowserWindow` of real HTML controls,
-   * and a DOM button has no canvas coordinates to aim at. The seam becomes a DOM query by label,
-   * keeping the by-LABEL property deliberately, since a coordinate list would be a second copy of
-   * the layout that passes while the layout is wrong. Marked rather than silently deleted so the
-   * reasoning that survives the rewrite is not lost with the mechanism that does not.
+   * REWRITTEN 2026-10-06, when the keypad became a real HTML window: a per-window `showKeypad`
+   * flag, a `list.keypad` canvas region and `__tn3270ButtonCenter`'s coordinates for `hitTestAt`
+   * are all gone, along with the `sendInputEvent` `mouseDown`/`mouseUp` pair this comment used to
+   * describe. `Ctrl-K` now opens a separate `BrowserWindow` of real HTML controls, and a DOM
+   * button has no canvas coordinates to aim at.
    */
   clicks: process.env['TN3270_GUI_CLICKS'] ?? '',
   /**
@@ -687,12 +684,12 @@ async function openConnectDialog(
  * WAITS FOR CONNECT TO BE ENABLED first, because the page disables it until the model list has
  * arrived -- clicking a disabled button does nothing at all, which would read as a broken dialog.
  * And then for the submit to settle: either the window closes (connected) or Connect is enabled
- * again (refused or failed, with the reason in the error line). The settle wait allows 35 s: a
- * submit now resolves only after its connect attempt, which can take the whole 10-second TLS
- * handshake deadline (`HANDSHAKE_TIMEOUT_MS`) or the 30-second plaintext connect deadline
- * (`CONNECT_TIMEOUT_MS`). A submit that has not settled past both prints
- * `connect: submit never settled` and ends the drive, rather than reporting the in-flight
- * `Connecting to ...` as an error.
+ * again (refused or failed, with the reason in the error line). The settle wait allows 45 s: a
+ * submit now resolves only after its connect attempt, which can take the whole 30-second connect
+ * deadline (`CONNECT_TIMEOUT_MS`) and then, with TLS on, the 10-second handshake deadline
+ * (`HANDSHAKE_TIMEOUT_MS`) that starts only once TCP connects. A submit that has not settled
+ * past both prints `connect: submit never settled` and ends the drive, rather than reporting the
+ * in-flight `Connecting to ...` as an error.
  *
  * ENDS BY SAYING WHERE THE DIALOG IS -- `connect: dialog closed` or `connect: dialog still open` --
  * because the harness asserts on it: a failure that closed the dialog is the defect this retry
@@ -727,7 +724,7 @@ async function driveConnectDialog(cw: BrowserWindow, forms: readonly ConnectForm
       })()`);
       process.stdout.write('connect: submitted\n');
       // Settled = the window closed (connected) or Connect came back (refused or failed).
-      const settled = await until("document.querySelector('#connect').disabled === false", 35_000);
+      const settled = await until("document.querySelector('#connect').disabled === false", 45_000);
       if (cw.isDestroyed()) break;
       if (!settled) {
         process.stdout.write('connect: submit never settled\n');
@@ -2223,35 +2220,35 @@ async function maybeSendKeys(
 /**
  * A FIFTH TEST SEAM: `TN3270_GUI_CLICKS='PF1,PA2,SysRq'` clicks keypad buttons by LABEL.
  *
- * The click path -- canvas `mousedown`, the primary-button guard, `hitTestAt`, `sendAction`, the IPC
- * hop, `applyAction` -- is plumbing no unit test can reach, for the reason `hittest.ts:53-58` gives:
- * `renderer.ts` throws at module load outside a browser, so the barrel cannot export it. The same
- * argument the chord seam won. `hitTestAt`'s ARITHMETIC is separately unit-tested at scale 3 with a
- * non-zero offset (`canvas/test/keypad.test.ts:297`), so what this seam carries is the wiring, which
- * is provable at any scale -- and just as well, because in native Electron mode the centring offset
- * can never be non-zero at ANY scale: `fit` sets the content size to exactly `list.width * scale` by
- * `list.height * scale`, so `center` returns (0,0) for every model on every display. The SCALE does
- * vary with the display -- `fit` takes 80% of the work area -- and this seam does not care, because
- * it asks the renderer for a point rather than computing one.
+ * The click path -- a DOM `click` on a real button in the keypad `BrowserWindow`, the listener
+ * `createKeypadUi` attaches, the keypad preload's `contextBridge`, the IPC hop, `applyAction` -- is
+ * plumbing no unit test can reach past `createKeypadUi` itself: `keypadBoot.ts` reads `document` in
+ * its module body, `vitest.config.ts` runs with `environment: 'node'`, and no vitest file can
+ * execute a line of it, nor of the preload, nor of the IPC hop into this file. `createKeypadUi`'s
+ * own label-to-action wiring IS unit-tested, against an injected fake DOM
+ * (`canvas/test/keypadUi.test.ts`), so what this seam adds is everything downstream of that: the
+ * real window, the real preload, the real IPC call, and the real `.click()` that a label resolves
+ * to in `maybeSendClicks` below.
  *
- * ASKS THE RENDERER WHERE THE BUTTON IS, rather than carrying coordinates. A coordinate list here
- * would be a second copy of the layout that agreed with itself while the layout was wrong -- the one
- * failure this seam exists to catch. `__tn3270ButtonCenter` returns a point; the CLICK still goes in
- * through Chromium, so nothing about the path under test is bypassed.
+ * NO COORDINATES ANYWHERE. Until 2026-10-06 this seam asked the renderer for a button's center and
+ * delivered a real `mouseDown`/`mouseUp` pair through `sendInputEvent`, because the keypad was a
+ * region blitted into the terminal's own canvas. It is a separate HTML window now, the browser does
+ * its own hit testing, and `.click()` runs the same listener a real press does -- see
+ * `maybeSendClicks` for why that is the right call and `sendInputEvent` is not.
  *
- * THE SETTLE IS NOT DECORATION. `clicks.mjs` shows the keypad with a real `Ctrl+K` first, and that
- * action makes the window GROW (`fit` re-sizes from the new draw list: 720x350 to 720x476 for a
- * model 2). Every keypad button is in the pixels that resize adds, so a click delivered before it
- * lands outside the content area entirely and hits nothing. `maybeSendKeys` has already waited
- * `keysMs` before its own first chord; this waits again because the chord that matters is the LAST
- * one, and because a clicks-only run gets no settle from `maybeSendKeys` at all.
+ * THE SETTLE IS NOT DECORATION. Opening the keypad window is asynchronous relative to the `Ctrl+K`
+ * that triggers it -- a `BrowserWindow` is created, `keypad.html` is loaded, and the preload and
+ * `createKeypadUi` have to run before a single button exists in its DOM -- so a click dispatched
+ * immediately could run before the window, or its buttons, exist. `maybeSendKeys` has already
+ * waited `keysMs` before its own first chord; this waits again because the chord that matters is
+ * the LAST one, and because a clicks-only run gets no settle from `maybeSendKeys` at all.
  *
  * NOT CALLED FROM THE URL BRANCH, unlike `maybeSendKeys`. In that mode the served page owns the
- * protocol and main sees no frames, so nothing here would be wrong -- `__tn3270ButtonCenter` reads
- * the renderer's own `last` -- but no harness drives it that way and an untested call site is a
- * claim this file has not earned. `TN3270_GUI_CLICKS` is therefore IGNORED alongside
- * `TN3270_GUI_URL`, which fails loudly rather than quietly: no `clicks: sent` line is printed, and
- * `clicks.mjs`'s seam-ran bail is exactly the check for that.
+ * keypad as an overlay in its own document and main sees no frames at all, so nothing here would be
+ * wrong on its own terms -- but no harness drives it that way and an untested call site is a claim
+ * this file has not earned. `TN3270_GUI_CLICKS` is therefore IGNORED alongside `TN3270_GUI_URL`,
+ * which fails loudly rather than quietly: no `clicks: sent` line is printed, and `clicks.mjs`'s
+ * seam-ran bail is exactly the check for that.
  */
 async function maybeSendClicks(
   win: BrowserWindow,
@@ -2282,12 +2279,11 @@ async function maybeSendClicks(
   }
   for (const label of SEAM.clicks.split(',')) {
     /**
-     * VIEWPORT PIXELS, which is what `sendInputEvent` wants -- and that equality is a property of
-     * `gui/index.html`, not of the renderer: `html,body{margin:0}`, `canvas{display:block}` and
-     * `overflow:hidden`, so the canvas box starts at the viewport origin and cannot scroll away
-     * from it. The renderer computes the point from the canvas's own origin (that is where its
-     * `offsetX` is measured from too). Give the page a body margin and every click here misses by
-     * it.
+     * ONE ATOMIC SNIPPET, not a find-then-click round trip: `executeJavaScript` already pays for
+     * a context switch into the page, and splitting the query from the click would let the DOM
+     * change between the two (the keypad closing, say) and strand a result that no longer means
+     * anything. The visibility check travels with it for the same reason -- see the `!clicked`
+     * branch below for what `offsetParent === null` is covering.
      */
     let clicked;
     try {
@@ -2310,10 +2306,11 @@ async function maybeSendClicks(
        * rectangle -- reintroducing exactly the geometry this change removes, and with it the
        * possibility of aiming at the wrong place.
        *
-       * WHICH DOCUMENT IS SEARCHED DIFFERS BY FRONT END, and the same expression serves both: in
-       * the browser the keypad is an OVERLAY in this window's own page, so `document` finds it; in
-       * Electron it is a SEPARATE WINDOW, and `clickKeypadButton` below is what reaches that one.
-       * This path handles the overlay case.
+       * WHICH DOCUMENT IS SEARCHED DIFFERS BY FRONT END, and the SAME `executeJavaScript` call
+       * below serves both, because it runs against `target` rather than `win`: in the browser the
+       * keypad is an OVERLAY in this window's own page, so `keypadTarget` defaults to `win` and
+       * `document` finds it there; in Electron it is a SEPARATE WINDOW, and `keypadTarget` returns
+       * that one instead. No second function is needed because only the target differs.
        */
       clicked = await target.webContents.executeJavaScript(
         `(() => {

@@ -144,12 +144,12 @@ const CTRL: Readonly<Record<string, Action>> = Object.freeze({
    * the one no harness drove.
    *
    * ACCEPTED BY THE WEB FRONT END TOO, since this mapper is shared, and that is safe rather than
-   * merely tolerable: `protocol.ts:129-131` REJECTS the kind at decode with a per-client `error`
-   * frame, and `web/src/main.ts:151-154` answers a decode failure on that one socket without
-   * touching the session or the process. The browser could already produce this kind from the
-   * `Xfer` button it draws today, so this adds a second route to an answer that already exists --
-   * no new failure mode, and the refusal names its reason. When stage 4 gives the gateway a
-   * transfer path that rejection becomes an interception, and this entry needs no change.
+   * merely tolerable: `protocol.ts` now ACCEPTS the kind at decode, 2026-10-06 (`:382` and
+   * following), and `web/src/transferGateway.ts` is the gateway half that runs a real transfer over
+   * the socket -- file I/O against the OPERATOR's filesystem, not the gateway's. The browser could
+   * already produce this kind from the `Xfer` button it draws today, so this entry needs no change:
+   * it was already routing to an answer that exists, and that answer is now a real transfer rather
+   * than a refusal.
    */
   t: { kind: 'transferForm' },
 });

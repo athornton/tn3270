@@ -557,7 +557,8 @@ function copiedFromCache(): void {
  * ## THE ARITHMETIC IS `hitTestAt`'s INVERSE, OFFSET AND ALL
  *
  * `paint` multiplies the scale-1 draw list by `scale` and adds the centring offset `at`, so going
- * back subtracts `at` and divides by `scale` -- exactly what `hitTestAt` does for a keypad button.
+ * back subtracts `at` and divides by `scale` -- exactly what `hitTestAt` did for a keypad button,
+ * before the canvas keypad (and `hitTestAt` with it) was deleted in favor of a real HTML window.
  * The plan for this feature omitted the offset and divided only by the scale, which is correct ONLY
  * when the drawing exactly fills the viewport: `center` clamps at 0, so in a window wider than the
  * screen every selected cell would be shifted left by the margin, and at scale 1 in a tight window
@@ -826,7 +827,8 @@ function copyByChord(): void {
  *
  * A `window` GLOBAL, NOT A FIFTH BRIDGE FUNCTION -- `bridgecore.ts` records that a fifth function
  * means the renderer has stopped being shared between Electron and the browser, and both hosts get
- * a global for free because both load this file. Same mechanism as `__tn3270ButtonCenter` below.
+ * a global for free because both load this file. Same mechanism `__tn3270ButtonCenter` used,
+ * before it was deleted (see the note below).
  *
  * TWO CALL SITES DEPEND ON IT, BOTH IN ELECTRON, and it is a one-line delegation precisely so
  * that the extraction above cannot change what either observes. CITED BY NAME AND NEVER BY LINE,
@@ -858,11 +860,12 @@ function copyByChord(): void {
 /**
  * TEST SEAM: the viewport-pixel center of a SCREEN CELL, or `null`.
  *
- * The twin of `__tn3270ButtonCenter` below and it exists for the same reason: `select.mjs` drives a
- * real drag through Chromium's input pipeline, and it must name CELLS rather than pixels, because a
- * pixel list in the harness would be a second copy of the geometry that would pass while the
- * geometry was wrong. Returning coordinates rather than setting `anchor`/`focus` directly is what
- * keeps `mousedown`, `mousemove`, `cellAt` and the highlight all under test.
+ * The twin of the now-deleted `__tn3270ButtonCenter` (see the note below), and it exists for the
+ * same reason: `select.mjs` drives a real drag through Chromium's input pipeline, and it must name
+ * CELLS rather than pixels, because a pixel list in the harness would be a second copy of the
+ * geometry that would pass while the geometry was wrong. Returning coordinates rather than setting
+ * `anchor`/`focus` directly is what keeps `mousedown`, `mousemove`, `cellAt` and the highlight all
+ * under test.
  *
  * THE INVERSE OF `cellAt`, so the two must agree: this adds the offset and multiplies by the
  * scale where `cellAt` subtracts and divides. A harness built on a different expression would be

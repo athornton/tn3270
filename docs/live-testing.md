@@ -4475,6 +4475,33 @@ the host's code. Two cares if it is implemented: do not over-match (a dataset wh
 that text must not trigger it), and `cli/src/runner.ts` has its own copy of the message, so both
 must change or they diverge.
 
+**UPDATE 2026-11-12: THE FALSE CLAUSE IS FIXED; THE 30 s WAIT IS NOT.** By the owner's decision
+(option A), a transfer that never started (no CUT frame, no DFT frame of any kind) now fails with
+x3270's `ftStartTimeout` wording, `transfer did not start within 30s` (suite3270-4.5
+`fb-common:34`, `ft_didnt_start` at `ft.c:488-501`; x3270 also waits 30 s and reads nothing off the
+screen), followed by the rows the host changed since the command was sent, quoted. Both drivers
+call one function, `frontend/src/transferStart.ts`. `press Attn or Clear` leads only while the
+keyboard is still locked. **Nothing matches `RC=`**, because the exact TSO text was never
+captured: the `IND$FILE ended with RC=` above is a guess, not a quote.
+
+**THE CAPTURE THAT WOULD LET THE WAIT END EARLY (option B), not yet run.** On TK5 from `READY`, with
+`Trace(on)` as the FIRST script line (there is no `-trace` argv flag; see *The probe*) and
+`TraceText` at the end, so every host write is recorded, not only the final screen:
+
+1. `LISTDS 'HERC01.NOSUCH.BIN'` first, to prove the dataset does not exist (expect `NOT IN
+   CATALOG`), then `IND$FILE GET 'HERC01.NOSUCH.BIN'`, quoted. This is the 2026-10-27 RC=12
+   reproduction. Run it once with `-ddm on` and once with `-ddm off`, because FFTP may refuse
+   differently, or open DFT first, depending on what we advertised.
+2. The same `IND$FILE GET` unquoted (`IND$FILE GET NOSUCH.BIN`), since that was the real cause.
+3. A WORKING `IND$FILE GET` of an existing dataset, the control. Its writes between Enter and the
+   first CUT frame or `0xd0` are what an early-ending rule must NOT misread as a refusal.
+
+What to keep from each trace: every outbound record after Enter, in order, with its WCC
+(keyboard-restore bit) and time from Enter; the screen text after each one; and whether a fresh
+`READY` appears and on which row, relative to the `READY` already on screen. Those decide whether
+"a new `READY` after Enter, with no frame" is a safe signal and how fast it arrives, and they
+become the fixtures for the tests.
+
 ## The GUI transfer window — LIVE-VERIFIED ON BOTH HOSTS AND BOTH ENGINES, 2026-10-02
 
 **THE WINDOW HAS NOW DRIVEN A REAL TRANSFER, BOTH DIRECTIONS, AGAINST VM/370 CMS: 8 of 8 checks and

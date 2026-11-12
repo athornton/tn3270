@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { BINDING_INTENT } from '../src/bindings.js';
-import { lookup, PARTIAL } from '../src/keymap.js';
+import { lookup, PARTIAL, TERMINAL_BINDINGS } from '../src/keymap.js';
 
 const bytes = (s: string): Uint8Array =>
   Uint8Array.from(Array.from(s, (c) => c.charCodeAt(0) & 0xff));
@@ -59,8 +59,8 @@ describe('BINDING_INTENT', () => {
     // Ctrl-D, Ctrl-F and Ctrl-K joined the list when the keypad chords landed, and MEASURED at
     // the time: deleting the Ctrl-K row left ALL 1621 TESTS GREEN. The keymap still maps \x0b, so
     // the chord kept working; what vanished silently was the written intent, which is the one
-    // thing this table is for. Ctrl-D and Ctrl-F at least redden the TUI overlay's chord column
-    // in another package -- Ctrl-K is not a keypad BUTTON, so not even that saw it go.
+    // thing this table is for. (The TUI overlay's chord column no longer reads this table -- it
+    // reads `TERMINAL_BINDINGS` -- so nothing outside this file notices any of these going.)
     const keys = BINDING_INTENT.map((b) => b.key);
     for (const needed of ['Alt-1', 'Alt-2', 'Alt-3', 'Ctrl-A', 'Insert',
       'Ctrl-D', 'Ctrl-F', 'Ctrl-K']) {
@@ -86,6 +86,25 @@ describe('BINDING_INTENT', () => {
       const entry = BINDING_INTENT.find((b) => b.key === key);
       expect(entry, `${key} missing`).toBeDefined();
       expect(entry!.terminal, key).toBeUndefined();
+    }
+  });
+
+  it('spells every key the way the TERMINAL keymap names it', () => {
+    // The TUI overlay shows `TERMINAL_BINDINGS`' names and the canvas tooltips read this table, so
+    // the same key must not be "End" in one and "Select" in the other. A row with a sequence must
+    // match that sequence's row; a sequence-less row the terminal binds (the arrows, Home) must
+    // match SOME row with its action. Canvas-only rows (Ctrl-B, Alt-M, Ctrl-Shift-C) bind nothing
+    // in the terminal and are skipped -- which is what their missing `terminal` already says.
+    for (const b of BINDING_INTENT) {
+      if (b.terminal !== undefined) {
+        const row = TERMINAL_BINDINGS.find((t) => t.sequence === b.terminal);
+        expect(row?.chord, `${b.key} -> ${show(b.terminal)}`).toBe(b.key);
+        continue;
+      }
+      const rows = TERMINAL_BINDINGS.filter(
+        (t) => JSON.stringify(t.action) === JSON.stringify(b.action));
+      if (rows.length === 0) continue;
+      expect(rows.map((t) => t.chord), b.key).toContain(b.key);
     }
   });
 });

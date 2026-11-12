@@ -816,8 +816,13 @@ chord would `preventDefault` away the paste that currently works in Chromium.
 - **`forwardKeys` forwards any kind unfiltered** from the GUI child windows, so the next kind
   `applyAction` throws on reproduces the main-process freeze. Seven throw today. The `kbd:` seam is
   the tool to catch it; the structural gap is untouched.
-- **The host's `RC=` line is unparsed**, so an `IND$FILE` RC=12 waits the full 30 s and then says
-  "host may still be transferring" — false at that moment. The user said LEAVE IT.
+- ~~**The host's `RC=` line is unparsed**, so an `IND$FILE` RC=12 waits the full 30 s and then says
+  "host may still be transferring" — false at that moment. The user said LEAVE IT.~~
+  **SUPERSEDED 2026-11-12 by the owner's decision (option A):** a transfer that never started now
+  says `transfer did not start within 30s` and quotes the host's changed rows
+  (`frontend/src/transferStart.ts`, shared by the CLI and `transferRun.ts`). It still waits the
+  30 s; ending early (option B) needs the live capture described in `docs/live-testing.md`, after
+  the RC=12 entry.
 - **`Alt-C` as a Clear alias**: the user said LEAVE IT ALONE. It was never implemented; do not
   re-propose it as something to try.
 - The Electron accelerator overlap on Linux stays **unmeasurable from this repo**.

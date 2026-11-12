@@ -3,7 +3,9 @@ import {
   AckAid, AID, BIND_OFF, BIND_RU, resolve, Session, TelnetCmd as T, TelnetOpt as O, Tn3270eDataType,
   Tn3270eFunc, Tn3270eOp, type Connection, type GeometrySetting,
 } from '@tn3270/core';
-import { applicable, TRANSFER_FIELDS, type Action, type TransferFiles } from '@tn3270/frontend';
+import {
+  applicable, KEYPAD_KEYS, TERMINAL_BINDINGS, TRANSFER_FIELDS, type Action, type TransferFiles,
+} from '@tn3270/frontend';
 import { App, type HostProcess, type InputStream, type OutputStream } from '../src/app.js';
 import { measureTerminal } from '../src/render.js';
 import { overlayLines } from '../src/keypadOverlay.js';
@@ -571,6 +573,39 @@ const marked = (selected: number): string => overlayLines(selected)[selected]!;
  */
 const latest = (h: Harness): string => h.stdout.written[h.stdout.written.length - 1] ?? '';
 
+describe('the overlay\'s chord column, driven through the real input decoder', () => {
+  it('fires each key\'s own action when its shown chord is pressed', () => {
+    // THE DRIFT TEST. The overlay is a promise -- "press this to send that" -- and this keeps it by
+    // pressing. For every line with a chord, the chord's bytes go into `onInput` with the overlay
+    // CLOSED, through `pump()` and `lookup`, exactly as a keystroke would; `apply` records instead
+    // of acting so `quit` or an AID cannot end the run. A chord that names the wrong sequence, a
+    // sequence `pump()` resolves differently (a longer match, a prefix wait), or a lookup that
+    // matched on `kind` alone all redden here with the key named.
+    const chordCol = 2 + Math.max(...KEYPAD_KEYS.map((k) => k.name.length)) + 2;
+    let pressed = 0;
+    overlayLines(-1).forEach((line, i) => {
+      const chord = line.slice(chordCol).trim();
+      if (chord === '') return;
+      const key = KEYPAD_KEYS[i]!;
+      const seqs = TERMINAL_BINDINGS.filter((b) => b.chord === chord).map((b) => b.sequence);
+      expect(seqs.length, `${key.name}: no sequence is named ${chord}`).toBeGreaterThan(0);
+      for (const seq of seqs) {
+        const h = harness();
+        h.app.start();
+        const fired: Action[] = [];
+        vi.spyOn(h.app as unknown as { apply(a: Action): void }, 'apply')
+          .mockImplementation((a: Action) => { fired.push(a); });
+        h.app.onInput(Uint8Array.from([...seq].map((c) => c.charCodeAt(0))));
+        expect(fired, `${key.name} via ${chord} ${JSON.stringify(seq)}`).toEqual([key.action]);
+        pressed += 1;
+      }
+    });
+    // 46 keys have a chord; the four arrows and Home have two encodings each (CSI and SS3), and
+    // every encoding is pressed. Exact, so a sweep that silently skipped lines cannot pass.
+    expect(pressed).toBe(46 + 5);
+  });
+});
+
 describe('the special-keys overlay', () => {
   // The overlay holds a lone ESC for the same 50ms window `pump()` does, so closing it is a timed
   // event; see 'does not mistake an arrow key split across two reads for Escape' below.
@@ -849,7 +884,7 @@ describe('the special-keys overlay', () => {
   });
 
   it('scrolls to keep the selection visible instead of showing only the first screenful', () => {
-    // 47 keys and a 24-row screen: a first-N window would make every key from the 25th down
+    // 48 keys and a 24-row screen: a first-N window would make every key from the 25th down
     // UNREACHABLE, which is a real limitation and not one to ship silently.
     const h = harness();
     h.app.start();
@@ -1398,10 +1433,23 @@ describe('the transfer form: submitting', () => {
     // did not complete within 600s after 0 bytes; " with nothing about what to do. The
     // recovery now leads the message. Same shape as the help string that did not fit, one
     // layer down.
+    //
+    // 2026-11-12: nothing started here (no frame of either kind), so the message is x3270's
+    // "did not start", and the recovery leads only while the keyboard is still locked -- which
+    // `sendAID` being a spy never does, so that half is forced through the OIA.
+    const h = app({ files: fakeFiles(SOURCE) });
+    fillAndSubmit(h);
+    vi.spyOn(h.session.oia, 'isInhibited').mockReturnValue(true);
+    vi.advanceTimersByTime(700_000);
+    expect(h.stdout.all).toMatch(/Attn or Clear: transfer did not/);
+  });
+
+  it('a host back at its prompt gets no recovery advice, and the drawn line leads with the fact', () => {
     const h = app({ files: fakeFiles(SOURCE) });
     fillAndSubmit(h);
     vi.advanceTimersByTime(700_000);
-    expect(h.stdout.all).toMatch(/Attn or Clear/);
+    expect(h.stdout.all).toMatch(/transfer did not start within 30s/);
+    expect(h.stdout.all).not.toMatch(/Attn or Clear|may still be/);
   });
 });
 

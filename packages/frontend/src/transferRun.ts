@@ -40,7 +40,9 @@
  * No abort synthesised from a timeout. The CLI's comment gives the reason and it still
  * holds: an abort writes the response area and presses PF2 from a frame `CutTransfer` has
  * parsed, so inventing one here would put bytes on the wire that no captured session
- * contains. A timeout reports honestly that the host may still be mid-transfer. What IS
+ * contains. A timeout AFTER the transfer started reports honestly that the host may still be
+ * mid-transfer; one that finds it NEVER STARTED says so in x3270's words and quotes the rows the
+ * host changed (`transferStart.ts`, shared with the CLI). What IS
  * available now, and was not when the CLI was written, is `CutTransfer.cancel` for an abort
  * the OPERATOR asks for -- which is a different thing from one a deadline infers.
  */
@@ -50,6 +52,7 @@ import {
   type Session, type TransferResult,
 } from '@tn3270/core';
 import type { TransferFiles, TransferRequest } from './transfer.js';
+import { describeNonStart, screenRows } from './transferStart.js';
 
 /** The CLI's own defaults (`runner.ts:43-44`), so the two front ends wedge alike. */
 const FRAME_TIMEOUT_MS = 30_000;
@@ -253,7 +256,29 @@ export function startTransfer(opts: StartTransferOptions): TransferRun {
     });
   };
 
-  const timeout = (why: string): void => {
+  /**
+   * The screen just before Enter, so a deadline that finds the transfer NEVER STARTED can quote
+   * the rows the host changed since -- its own words -- and not a stale line. Taken after typing,
+   * so the command itself is not mistaken for host output. See `transferStart.ts`.
+   */
+  let before: string[] = [];
+
+  const timeout = (why: string, seconds: number): void => {
+    // NEVER STARTED: no CUT frame and no DFT frame of any kind. The host is not in transfer mode,
+    // so "may still be transferring" would be false; say x3270's words and quote the host's.
+    // Owner's decision 2026-11-12. Shared with the CLI, so the two cannot drift.
+    if (committed === undefined && !dft.started) {
+      finish({
+        ok: false,
+        error: describeNonStart({
+          seconds, before, after: screenRows(session.screen),
+          keyboardLocked: session.oia.isInhibited(), sawHostWrite: sawNonFrameScreen,
+          ddmAdvertised: session.ddmAdvertised,
+          rows: session.screen.rows, cols: session.screen.cols,
+        }),
+      });
+      return;
+    }
     // We deliberately do NOT abort here -- see the module comment. The operator's recovery
     // is Attn or Clear, as it would be from a real terminal, and the message says so because
     // otherwise their next keystroke goes into a host still waiting for a CUT frame.
@@ -384,7 +409,7 @@ export function startTransfer(opts: StartTransferOptions): TransferRun {
   const armFrameTimer = (): void => {
     if (frameTimer !== undefined) clearTimeout(frameTimer);
     frameTimer = setTimeout(
-      () => { timeout(`stalled: no CUT frame from the host within ${frameMs / 1000}s`); },
+      () => { timeout(`stalled: no CUT frame from the host within ${frameMs / 1000}s`, frameMs / 1000); },
       frameMs,
     );
   };
@@ -472,6 +497,7 @@ export function startTransfer(opts: StartTransferOptions): TransferRun {
   session.on('screen', onScreen);
   session.on('transferEnd', onTransferEnd);
   session.on('transferProgress', onDftProgress);
+  before = screenRows(session.screen);
   session.sendAID(AID.ENTER);
 
   // IF IT ALREADY FINISHED, `finish` has run and these are no-ops that must not be armed: a
@@ -481,7 +507,7 @@ export function startTransfer(opts: StartTransferOptions): TransferRun {
 
   armFrameTimer();
   totalTimer = setTimeout(
-    () => { timeout(`did not complete within ${totalMs / 1000}s`); },
+    () => { timeout(`did not complete within ${totalMs / 1000}s`, totalMs / 1000); },
     totalMs,
   );
 

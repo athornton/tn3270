@@ -133,7 +133,7 @@ export interface TransferFormState {
 /**
  * A fresh form.
  *
- * ## IT OPENS ON `send`, AND THE KEYWORD PARSER'S DEFAULT IS DELIBERATELY DIFFERENT
+ * ## IT OPENS ON `send`, AND SO DOES THE KEYWORD PARSER -- ON PURPOSE, AS OF 2026-10-22
  *
  * The user's reason, recorded because it will look surprising to someone one day: **until VM has a
  * TCP/IP stack, this client is mostly used to GET SOFTWARE ONTO these systems** -- few people
@@ -146,17 +146,20 @@ export interface TransferFormState {
  * Hard on a PDP-11 for address-space reasons; not hard on S/370 with up to 16 MB. **If download
  * stops being the rare direction, reconsider this default.**)
  *
- * ## `parseTransferKeywords` STILL DEFAULTS TO `receive`, AND MUST
+ * ## `parseTransferKeywords` ALSO DEFAULTS TO `send`, MATCHING THE FORM ON PURPOSE
  *
- * That default applies when a SCRIPT's `Transfer(...)` omits `Direction=`. Flipping it would
- * silently invert every such script -- a run that downloaded would UPLOAD, with `Exist=replace`
- * reachable and no form to look at -- which is the same data-destruction shape this change exists
- * to prevent, moved somewhere worse. It is also x3270's own default, which this project matches
- * absent a documented reason to differ.
+ * That default applies when a SCRIPT's `Transfer(...)` omits `Direction=`. An earlier revision kept
+ * the two apart -- form `send`, parser `receive` -- reasoning that an unattended script has no label
+ * to read. The user overruled that, 2026-10-22: a default should reflect what the tool is FOR
+ * (PEOPLE ARE FAR MORE LIKELY TO USE IND$FILE TO GET SOFTWARE INTO a historic S/370 system than to
+ * get it OUT), and a form/parser disagreement is its own trap for anyone who learns the tool
+ * through the form and then writes a script. This diverges from x3270, which initialises
+ * `receive_flag` true (`ft.c:319`); the other direction is still reachable by naming it.
  *
- * **The asymmetry is the point:** an interactive form with a visible, self-describing control
- * (`directionLabel`) is a different safety situation from an omitted keyword in an unattended
- * script. `transfer.test.ts` pins the parser's default so this cannot be "tidied" into agreement.
+ * **The risk is real and is not softened anywhere:** a script written against x3270's default, or
+ * against ours from before 2026-10-22, now means the OPPOSITE -- and under `Exist=replace` that
+ * overwrites a host dataset. `transfer.test.ts` pins the parser's default (`DEFAULTS Direction TO
+ * send, DIVERGING FROM x3270 ON PURPOSE`) so this cannot be "tidied" back into disagreement.
  *
  * ## ONE KNOCK-ON, AND IT IS VISIBLE
  *

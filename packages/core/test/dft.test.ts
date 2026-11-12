@@ -586,3 +586,15 @@ describe('DftTransfer, upload (send)', () => {
     expect([...step.reply!].slice(4, 6)).toEqual([0x46, 0x08]);
   });
 });
+
+describe('DftTransfer, started', () => {
+  it('is false until the host sends ANY frame, and true from its Open on, with no bytes moved', () => {
+    // The drivers' "did the transfer start at all" test. `transferred` cannot answer it: an Open
+    // moves no bytes, and a host that opened and then stalled IS in transfer mode.
+    const t = new DftTransfer({ direction: 'receive' });
+    expect(t.started).toBe(false);
+    t.handle(open());
+    expect(t.started).toBe(true);
+    expect(t.transferred).toBe(0);
+  });
+});

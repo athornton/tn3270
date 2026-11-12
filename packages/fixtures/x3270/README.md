@@ -1,5 +1,10 @@
 # x3270 reference captures
 
+**Licence.** `sscp-lu-data.trc` and the four `devname_*.trc` files are x3270's own test traces,
+copied verbatim from suite3270-4.5 and redistributed under x3270's BSD-3-Clause licence, whose
+notice is reproduced in full in [`LICENSE-x3270.md`](LICENSE-x3270.md) as that licence requires.
+The other files here were captured by this project and are covered by the repository's MIT licence.
+
 **Status: three ordinary reference captures, plus five files that are `playback -b`
 fixtures rather than `conformance.test.ts` ones (a different kind, see below).**
 

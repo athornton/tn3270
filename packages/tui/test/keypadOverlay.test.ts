@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { BINDING_INTENT, KEYPAD_KEYS, type Action } from '@tn3270/frontend';
+import {
+  KEYPAD_KEYS, lookup, PARTIAL, TERMINAL_BINDINGS, type Action,
+} from '@tn3270/frontend';
 import {
   moveSelection, overlayFits, overlayLines, selectedAction, OVERLAY_MIN,
 } from '../src/keypadOverlay.js';
@@ -30,7 +32,7 @@ const sameAction = (a: Action, b: Action): boolean =>
 
 /** The chord for a key, by the same rule the module uses and recomputed here, as `CHORD_COL` is. */
 const chordOf = (action: Action): string =>
-  BINDING_INTENT.find((b) => sameAction(b.action, action))?.key ?? '';
+  TERMINAL_BINDINGS.find((b) => sameAction(b.action, action))?.chord ?? '';
 
 /**
  * The width of the chord column, and of the whole line, recomputed here for `CHORD_COL`'s reason.
@@ -66,13 +68,13 @@ describe('overlayLines', () => {
   it('lists every key in the table, one line each, in table order', () => {
     // `KEYPAD_KEYS` is non-empty, which the module's `Math.max(...names)` relies on: an empty
     // table would make the name width -Infinity and `padEnd` throw. Asserted rather than guarded,
-    // because a guard for a frozen 47-entry table would be unreachable code.
+    // because a guard for a frozen 48-entry table would be unreachable code.
     expect(KEYPAD_KEYS.length).toBeGreaterThan(0);
 
     const lines = overlayLines(0);
     expect(lines).toHaveLength(KEYPAD_KEYS.length);
     // Position, not `toContain` over the joined text: `toContain('PF1')` is satisfied by the PF13
-    // line, and by a single line holding all 47 names, and by any order at all.
+    // line, and by a single line holding all 48 names, and by any order at all.
     KEYPAD_KEYS.forEach((k, i) => {
       expect(lines[i]!.slice(2, 2 + k.name.length)).toBe(k.name);
     });
@@ -96,8 +98,8 @@ describe('overlayLines', () => {
     // NEWLINE'S BLANK IS THE SAME PROPERTY WITH A DIFFERENT CAUSE, and it is the reason this
     // assertion is here rather than left to the sweep below: c3270 DOES bind Newline, to Ctrl-J
     // (`Common/fb-c3270:190`), and this project deliberately does not -- Ctrl-J is `\n`, which the
-    // terminal keymap already reads as `enter`. So a Ctrl-J row appearing in `BINDING_INTENT` would
-    // make this line claim a chord that, in the TUI, submits the screen instead. Pinned as a whole
+    // terminal keymap already reads as `enter`. So a lookup that showed the keymap's `\n` row (named
+    // Ctrl-J) here would make this line claim a chord that, in the TUI, submits the screen instead. Pinned as a whole
     // line, blanks and all, exactly as Sys Req's is.
     expect(lineFor('Newline')).toBe(row('Newline', ''));
 
@@ -107,8 +109,7 @@ describe('overlayLines', () => {
     expect(lineFor('Back Tab')).toBe(row('Back Tab', 'Shift-Tab'));
     expect(lineFor('Back Tab').trimEnd()).toHaveLength(LINE_WIDTH);
 
-    // Dup and Field Mark, blank until `Ctrl-D`/`Ctrl-F` reached `BINDING_INTENT` and filled in
-    // here with NO EDIT to `keypadOverlay.ts`. Added as GROUND TRUTH now that the rows exist:
+    // Dup and Field Mark, written out as GROUND TRUTH:
     // the sweep below recomputes the module's own lookup rule, so it would agree with a rule
     // that was wrong the same way in both places; these two lines would not.
     expect(lineFor('Dup')).toBe(row('Dup', 'Ctrl-D'));
@@ -118,14 +119,14 @@ describe('overlayLines', () => {
     // recomputes the module's own matching rule, so a rule that is wrong the same way in both
     // would pass it; these two do not. A lookup that matched on `kind` alone hands every PF key
     // the first `pf` row's chord, so PF13 would read F1 -- and PF1 alone cannot tell the two
-    // apart. Source: bindings.ts binds F1 to PF1 and Shift-F1 to PF13 (Shift+F(n) is PF(n+12)).
+    // apart. Source: keymap.ts binds F1 to PF1 and Shift-F1 to PF13 (Shift+F(n) is PF(n+12)).
     expect(lineFor('PF1')).toBe(row('PF1', 'F1'));
     expect(lineFor('PF13')).toBe(row('PF13', 'Shift-F1'));
   });
 
-  it('derives the chord column from BINDING_INTENT rather than a second list', () => {
-    // The point of reading BINDING_INTENT: on-screen help that cannot drift from the bindings.
-    // This sweeps all 47 keys, so a lookup that matched on `kind` alone -- and therefore gave
+  it('derives the chord column from the terminal keymap rather than a second list', () => {
+    // The point of reading TERMINAL_BINDINGS: on-screen help that cannot drift from the bindings.
+    // This sweeps all 48 keys, so a lookup that matched on `kind` alone -- and therefore gave
     // every PF key F1's chord -- reddens here even though the Reset line above still passes.
     const lines = overlayLines(-1);
     let withChord = 0;
@@ -133,7 +134,7 @@ describe('overlayLines', () => {
       const want = chordOf(k.action);
       // `padEnd`, because the column is a fixed width now: a key with no chord must show blanks IN
       // THE COLUMN rather than nothing at all, and asserting the trimmed chord would pass either
-      // way. All 22 chordless keys assert the padding here, not just Sys Req and Newline above.
+      // way. Every chordless key asserts the padding here, not just the two whole lines above.
       expect(lines[i]!.slice(CHORD_COL), `chord for ${k.name}`).toBe(want.padEnd(CHORD_WIDTH));
       if (want !== '') withChord += 1;
     });
@@ -161,7 +162,7 @@ describe('overlayLines', () => {
   });
 
   it('pads every line to ONE width, so the list paints an opaque rectangle', () => {
-    // THE FIX THIS TEST EXISTS FOR. The lines were `trimEnd()`ed to their natural length, so the 22
+    // THE FIX THIS TEST EXISTS FOR. The lines were `trimEnd()`ed to their natural length, so the
     // keys with no chord ended at the name and the host's own cells stayed visible to the right of
     // them -- landing in the chord column, reading as a chord the key has not got. Measured over a
     // real pty against a fake host whose screen row 1 read `HELLO TN3270`, the PF16 row rendered as
@@ -187,9 +188,44 @@ describe('overlayLines', () => {
   });
 });
 
+describe('the chord column against the TUI keymap', () => {
+  /** The chord each key's line shows, trimmed, in table order. */
+  const shown = (): string[] => overlayLines(-1).map((l) => l.slice(CHORD_COL).trim());
+
+  it('shows F2 for PF2 and Shift-F2 for PF14', () => {
+    // GROUND TRUTH, written out. Both were BLANK until the chords came from the keymap itself:
+    // `BINDING_INTENT` names only F1, F3, F12 and Shift-F1, so 20 bound PF keys read as unbound.
+    // `\x1bOQ` is `tput kf2` and `\x1b[1;2Q` is kf14 (`frontend/src/keymap.ts`, `PF_KEYS`).
+    expect(lineFor('PF2')).toBe(row('PF2', 'F2'));
+    expect(lineFor('PF14')).toBe(row('PF14', 'Shift-F2'));
+    expect(lineFor('PF24')).toBe(row('PF24', 'Shift-F12'));
+  });
+
+  it('shows a chord for every key whose action the TUI decoder produces', () => {
+    // "Bound" is asked of the DECODER: each row's bytes go through `lookup`, and the action that
+    // comes back -- not the row's own `action` field -- is what counts as reachable.
+    const reachable = TERMINAL_BINDINGS.map((b) =>
+      lookup(Uint8Array.from([...b.sequence].map((c) => c.charCodeAt(0)))))
+      .filter((a): a is Action => a !== null && a !== PARTIAL);
+    let bound = 0;
+    KEYPAD_KEYS.forEach((k, i) => {
+      if (!reachable.some((a) => sameAction(a, k.action))) return;
+      bound += 1;
+      expect(shown()[i], `${k.name} is bound and shows no chord`).not.toBe('');
+    });
+    expect(bound).toBe(46);
+  });
+
+  it('leaves EXACTLY Sys Req and Newline blank', () => {
+    // Named, not counted: a count of 2 would pass with the wrong two keys blank.
+    const blank = KEYPAD_KEYS.filter((_, i) => shown()[i] === '').map((k) => k.name);
+    expect(blank.sort()).toEqual(['Newline', 'System Request']);
+  });
+});
+
 describe('moveSelection', () => {
   it('moves by one and CLAMPS rather than wrapping', () => {
-    // Clamped, not wrapped: a wrap at 47 entries means holding an arrow silently cycles past the
+    // Clamped, not wrapped: a wrap at 48 entries means holding an arrow silently cycles past the
     // key you were aiming at, which is worse than stopping.
     expect(moveSelection(0, -1)).toBe(0);
     expect(moveSelection(0, 1)).toBe(1);

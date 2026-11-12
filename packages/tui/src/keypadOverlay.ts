@@ -16,27 +16,33 @@
  * display in order to show itself. A list overlays a corner instead, and can refuse to open at
  * all.
  *
- * ## THE CHORDS COME FROM `BINDING_INTENT`, NOT FROM A SECOND LIST
+ * ## THE CHORDS COME FROM THE TERMINAL KEYMAP ITSELF, NOT FROM A SECOND LIST
  *
- * That table already records key-to-action with a note, and `keymap.test.ts` already pins the
- * terminal keymap against it. Reading it here means the on-screen help cannot drift from the
- * bindings -- which is exactly the kind of documentation that otherwise rots. A key with no entry
- * shows a blank, and 22 of the 47 do: PF2, PF4-PF11, PF14-PF24, Sys Req and Newline.
+ * `TERMINAL_BINDINGS` (`frontend/src/keymap.ts`) is the table `lookup` is built from -- the
+ * decoder `app.ts`'s `pump()` runs every keystroke through -- and every row carries the name of the
+ * key that sends it. Reading it here means the on-screen help cannot claim a chord the decoder does
+ * not honour, nor omit one it does. `app.test.ts` keeps that promise by pressing: it feeds each
+ * shown chord's bytes through `onInput` and demands the line's own action.
+ *
+ * THIS USED TO READ `BINDING_INTENT`, AND THAT WAS THE BUG. That table states cross-front-end
+ * INTENT with prose notes and names representative keys only -- F1, F3, F12 and Shift-F1 -- so 22
+ * of the 48 lines were blank, and 20 of those (PF2, PF4-PF11, PF14-PF24) were keys the TUI binds.
+ * Now 2 are blank: Sys Req and Newline, which no sequence reaches. `bindings.test.ts` holds the two
+ * tables' spellings together, so `End` here is `End` in a canvas tooltip too.
+ *
+ * Several sequences can share an action (CSI and SS3 arrows; `\r` and `\n` for Enter). The FIRST
+ * row in table order is the one shown, which the keymap documents as the canonical chord.
  *
  * Sys Req's blank is the whole reason this module exists. c3270 defines no chord for it in either
  * of its keymaps, so the overlay is its only keyboard route; a blank there is correct rather than
  * missing. NEWLINE'S BLANK IS THE SAME AND FOR A DIFFERENT REASON: c3270 does bind it, to Ctrl-J
  * (`Common/fb-c3270:190`), but Ctrl-J is `\n` and the terminal keymap already reads that as `enter`
  * -- one byte cannot be both, and Enter is the AID that submits. See the note on the union member
- * in `frontend/src/keymap.ts`.
- *
- * Dup and Field Mark were blank too until `Ctrl-D`/`Ctrl-F` reached `BINDING_INTENT`, and they
- * filled in here WITH NO EDIT TO THIS FILE -- which is the property the indirection buys, and it
- * was measured rather than assumed. Newline arriving in `KEYPAD_KEYS` is the other half of the same
- * property: it appears as a row here, with a blank chord, also with no edit to this file.
+ * in `frontend/src/keymap.ts`. (The keymap's `\n` row is NAMED Ctrl-J; it is never shown, because
+ * it is Enter's second row and Newline's action is not `enter`.)
  */
 
-import { BINDING_INTENT, KEYPAD_KEYS, type Action } from '@tn3270/frontend';
+import { KEYPAD_KEYS, TERMINAL_BINDINGS, type Action } from '@tn3270/frontend';
 import type { Geometry } from './render.js';
 
 /**
@@ -52,7 +58,7 @@ import type { Geometry } from './render.js';
  * `keypadOverlay.test.ts` recomputes it, which is also what pins `LINE_WIDTH` from above.
  *
  * `rows` is a judgement, not a derivation: 12 terminal rows leave 10 lines of list inside a frame,
- * and below that a window onto 47 entries shows so little that scrolling is worse than nothing.
+ * and below that a window onto 48 entries shows so little that scrolling is worse than nothing.
  *
  * NO FRAME IS ACTUALLY DRAWN as of Task 12 -- the list is written straight over the screen's
  * top-left corner -- so the frame cells both figures allow for are slack in a floor that is already
@@ -85,14 +91,15 @@ const sameAction = (a: Action, b: Action): boolean =>
 
 /** How a user would describe the key that fires `action`, or `''` if nothing is bound to it. */
 const chordFor = (action: Action): string =>
-  BINDING_INTENT.find((b) => sameAction(b.action, action))?.key ?? '';
+  TERMINAL_BINDINGS.find((b) => sameAction(b.action, action))?.chord ?? '';
 
 /**
  * Widest chord any key in the table has, so the chord column has a width of its own.
  *
- * Over the chords of `KEYPAD_KEYS` and not over all of `BINDING_INTENT`: a chord bound to an action
- * no key in the table names would widen every line for nothing. (Both give 9 today -- `Shift-Tab`
- * and `Backspace` -- so no test can tell them apart; recorded as intent, not as measured.)
+ * Over the chords of `KEYPAD_KEYS` and not over all of `TERMINAL_BINDINGS`: a chord bound to an
+ * action no key in the table names would widen every line for nothing. (Both give 9 today --
+ * `Shift-Tab`, `Backspace` and `Shift-F10`-`Shift-F12` -- so no test can tell them apart; recorded
+ * as intent, not as measured.)
  */
 const CHORD_WIDTH = Math.max(...KEYPAD_KEYS.map((k) => chordFor(k.action).length));
 
@@ -100,15 +107,15 @@ const CHORD_WIDTH = Math.max(...KEYPAD_KEYS.map((k) => chordFor(k.action).length
  * The width of EVERY line, which is what makes the list OPAQUE.
  *
  * Mark and space (2), the name column, the two-space gap, and the chord column. Lines used to be
- * `trimEnd()`ed to their natural length, and the 22 keys with no chord therefore ended at the name
+ * `trimEnd()`ed to their natural length, and the keys with no chord therefore ended at the name
  * -- so the host's own cells stayed visible to the right of them, LANDING IN THE CHORD COLUMN and
  * reading as a chord the key has not got. Measured over a real pty against a host whose screen row 1
  * read `HELLO TN3270`: the PF16 row rendered as `  PF16 TN3270`.
  *
  * PADDED HERE AND NOT IN `render.ts`, although opacity is a drawing concern: the renderer is handed
  * a WINDOW of these lines (`app.ts`'s `overlayWindow`), so the widest line it can see is not the
- * widest line in the list -- a screenful of chordless PF keys would pad to a narrower rectangle and
- * bleed again. This module is the only place that knows all 47.
+ * widest line in the list -- a screenful of short lines would pad to a narrower rectangle and
+ * bleed again. This module is the only place that knows all 48.
  *
  * Never truncates: `padEnd` alone, so a chord longer than `CHORD_WIDTH` could not silently lose its
  * tail. It cannot happen -- the width is derived from the same chords -- and if the derivation broke,
@@ -120,7 +127,7 @@ const LINE_WIDTH = 2 + NAME_WIDTH + 2 + CHORD_WIDTH;
 /**
  * One line per key, in table order: a selection mark, the name, then the chord.
  *
- * Returns all 47, which is taller than `OVERLAY_MIN.rows`. SCROLLING IS THE CALLER'S JOB -- the
+ * Returns all 48, which is taller than `OVERLAY_MIN.rows`. SCROLLING IS THE CALLER'S JOB -- the
  * caller takes a window of these. Keeping the window out of here is what lets the whole list be
  * asserted without a terminal.
  *

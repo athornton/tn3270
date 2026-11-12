@@ -51,11 +51,13 @@ export { defaultSession } from './session.js';
 // the byte-sequence table itself is terminal-specific, and the GUI will have its own
 // KeyboardEvent mapper beside it rather than a shared abstraction over both. See
 // keymap.ts on why the table is MOVED here rather than generalised.
-export { lookup, printableRun, isValidPf, PARTIAL, MAX_SEQUENCE_LENGTH } from './keymap.js';
-export type { Action } from './keymap.js';
+export {
+  lookup, printableRun, isValidPf, PARTIAL, MAX_SEQUENCE_LENGTH, TERMINAL_BINDINGS,
+} from './keymap.js';
+export type { Action, TerminalBinding } from './keymap.js';
 
 // The virtual keypad's key set, as data. Here rather than in `canvas` because the TUI's
-// overlay offers the same keys and `tui` cannot import `canvas` -- two lists of 47 keys
+// overlay offers the same keys and `tui` cannot import `canvas` -- two lists of 48 keys
 // would drift silently. Pure data: no pixels, no cells-to-pixels arithmetic.
 export { KEYPAD_KEYS } from './keypad.js';
 export type { KeypadKey } from './keypad.js';
@@ -125,6 +127,9 @@ export type {
 // collapsing the two would change the s3270 line protocol's behavior.
 export { startTransfer } from './transferRun.js';
 export type { TransferRun, StartTransferOptions } from './transferRun.js';
+// The text for a transfer that never started, shared with the CLI's own loop so the two cannot drift.
+export { describeNonStart, screenRows, NON_START_ROWS_SHOWN } from './transferStart.js';
+export type { NonStart } from './transferStart.js';
 
 // The transfer form's model. Pure data and pure functions, so the TUI and (stage 3) the
 // GUI render the same form without a second field table to drift.

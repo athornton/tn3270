@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
-  AckAid, AID, encodeAddress, O_SF, Order, resolve, Session, SnaCmd,
+  AckAid, AID, cp037, encodeAddress, FrameType, O_CC_FRAME_SEQ, O_CC_STATUS_CODE, O_FRAME_TYPE,
+  O_SF, Order, resolve, Session, SnaCmd, StatusCode, to6,
   TelnetCmd as T, TelnetOpt as O, TelnetSubopt as S, Qcode,
   type Connection, type SessionOptions,
 } from '@tn3270/core';
@@ -211,10 +212,11 @@ describe('startTransfer', () => {
       });
       await vi.advanceTimersByTimeAsync(1200);
       expect(done?.ok).toBe(false);
-      expect(done?.error).toMatch(/within/);
-      // The host may STILL be in transfer mode, and the message must say so -- otherwise
-      // the user's next keystroke goes into a host waiting for a CUT frame.
-      expect(done?.error).toMatch(/Attn or Clear/);
+      // NOTHING STARTED, so the host is NOT in transfer mode and must not be said to be
+      // (owner's decision 2026-11-12). `sendAID` is a spy here, so the keyboard never locked:
+      // there is nothing to interrupt and no Attn/Clear advice. The locked case is below.
+      expect(done?.error).toMatch(/^transfer did not start within 1s/);
+      expect(done?.error).not.toMatch(/may still|transfer mode|Attn or Clear/);
     } finally {
       vi.useRealTimers();
     }
@@ -232,15 +234,19 @@ describe('startTransfer', () => {
     // Clear)" at character 113 of a 54-column line, so the one actionable phrase -- on the
     // one failure where the host may still be mid-transfer -- was the part cut off. Every
     // other test here reads `done.error` directly, which is precisely why none of them saw it.
+    //
+    // 2026-11-12: the advice now appears only where it is true -- a keyboard still locked since
+    // Enter -- so this drives a REAL session, whose `sendAID` locks it, and a host that says nothing.
     vi.useFakeTimers();
     try {
-      const { session } = withSpy(withField(in3270(makeSession(24, 80))));
+      const { session } = await connected();
       let done: { ok: boolean; error?: string } | undefined;
       startTransfer({
         session, files: fakeFiles(), request: aReceive(), command: 'x',
         onProgress: () => {}, onDone: (d) => { done = d; }, frameMs: 1000, totalMs: 5000,
       });
       await vi.advanceTimersByTimeAsync(1200);
+      expect(session.oia.isInhibited()).toBe(true);
 
       const lines = transferLines({ ...newTransferForm(), error: done?.error }, 'idle', undefined);
       const status = lines[lines.length - 1] ?? '';
@@ -1134,3 +1140,140 @@ describe('the timeout message reports what was OBSERVED', () => {
   });
 });
 
+
+/**
+ * The host writes these 1-based rows of text, over real wire bytes. WCC 0xc3 restores the
+ * keyboard, which is what a host returning to its prompt does; 0x00 leaves it locked.
+ */
+function hostWritesRows(
+  conn: FakeConnection, session: Session, rowsText: Record<number, string>, wcc = 0xc3,
+): void {
+  const body: number[] = [];
+  for (const [row, text] of Object.entries(rowsText)) {
+    const [hi, lo] = encodeAddress(session.screen.fromRowCol(Number(row), 1), session.screen.size);
+    body.push(Order.SBA, hi!, lo!, ...[...text].map((c) => cp037.fromUnicode(c)));
+  }
+  conn.host(SnaCmd.W, wcc, ...body, T.IAC, T.EOR);
+}
+
+describe('a transfer that NEVER STARTED says so, in x3270\'s words and the host\'s', () => {
+  // Owner's decision 2026-11-12 (option A). Before it, every one of these said "press Attn or
+  // Clear: host may still be transferring" -- false when no frame of either protocol ever came.
+
+  it("quotes MECAFF's refusal and does not claim the host is transferring", async () => {
+    // PROVENANCE: docs/live-testing.md:757-759, VM/370 CMS 2026-09-25 -- MECAFF answered
+    // "Error: IND$FILE requires a MECAFF connected 3270 terminal", "... aborting", then
+    // "Ready(00032)", with zero CUT and zero 0xd0 frames. The row positions are ours.
+    vi.useFakeTimers();
+    try {
+      const { session, conn } = await connected();
+      let done: { ok: boolean; error?: string } | undefined;
+      startTransfer({
+        session, files: fakeFiles(), request: aReceive(), command: 'IND$FILE PUT FORM TEST A',
+        onProgress: () => {}, onDone: (d) => { done = d; }, frameMs: 1000, totalMs: 5000,
+      });
+      hostWritesRows(conn, session, {
+        2: 'Error: IND$FILE requires a MECAFF connected 3270 terminal',
+        3: '... aborting',
+        4: 'Ready(00032)',
+      });
+      expect(session.oia.isInhibited()).toBe(false);   // back at its prompt
+      await vi.advanceTimersByTimeAsync(1200);
+      expect(done?.ok).toBe(false);
+      expect(done?.error).toBe(
+        'transfer did not start within 1s (we offered CUT or DFT); the host wrote: '
+          + '"Error: IND$FILE requires a MECAFF connected 3270 terminal" / "... aborting" / "Ready(00032)"',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a host that answered only READY is quoted, and no Attn/Clear advice is given', async () => {
+    // TSO's prompt (live-testing.md:4228). The typed command on row 1 is in the BEFORE snapshot,
+    // so it is not mistaken for host output.
+    vi.useFakeTimers();
+    try {
+      const { session, conn } = await connected();
+      let done: { ok: boolean; error?: string } | undefined;
+      startTransfer({
+        session, files: fakeFiles(), request: aReceive(), command: "IND$FILE GET 'HERC01.A.BIN'",
+        onProgress: () => {}, onDone: (d) => { done = d; }, frameMs: 1000, totalMs: 5000,
+      });
+      hostWritesRows(conn, session, { 2: 'READY' });
+      await vi.advanceTimersByTimeAsync(1200);
+      expect(done?.error).toBe('transfer did not start within 1s (we offered CUT or DFT); the host wrote: "READY"');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a silent host still times out, says it wrote nothing, and keeps Attn/Clear (keyboard locked)', async () => {
+    vi.useFakeTimers();
+    try {
+      const { session } = await connected();
+      let done: { ok: boolean; error?: string } | undefined;
+      startTransfer({
+        session, files: fakeFiles(), request: aReceive(), command: 'IND$FILE GET A.BIN',
+        onProgress: () => {}, onDone: (d) => { done = d; }, frameMs: 1000, totalMs: 5000,
+      });
+      await vi.advanceTimersByTimeAsync(900);
+      expect(done, 'not before the deadline').toBeUndefined();
+      await vi.advanceTimersByTimeAsync(300);
+      expect(session.oia.isInhibited()).toBe(true);
+      expect(done?.error).toBe(
+        'press Attn or Clear: transfer did not start within 1s (we offered CUT or DFT); the host wrote nothing',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a DFT transfer that OPENED and then stalled keeps the may-still-be-transferring wording', async () => {
+    // It DID start: the host is in transfer mode, so the old message is the true one.
+    vi.useFakeTimers();
+    try {
+      const { session, conn } = await connected();
+      let done: { ok: boolean; error?: string } | undefined;
+      startTransfer({
+        session, files: fakeFiles(), request: aReceive(), command: 'IND$FILE GET A.BIN',
+        onProgress: () => {}, onDone: (d) => { done = d; }, frameMs: 1000, totalMs: 5000,
+      });
+      conn.host(...wholeDftDownload()[0]!);   // the Open, and then nothing
+      await vi.advanceTimersByTimeAsync(1200);
+      expect(done?.error).toMatch(/^press Attn or Clear: host may still be transferring\. stalled/);
+      expect(done?.error).not.toMatch(/did not start/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a CUT transfer that committed and then stalled keeps the may-still-be-transferring wording', async () => {
+    vi.useFakeTimers();
+    try {
+      const { session, conn } = await connected();
+      let done: { ok: boolean; error?: string } | undefined;
+      startTransfer({
+        session, files: fakeFiles(), request: aReceive(), command: 'IND$FILE GET A.BIN',
+        onProgress: () => {}, onDone: (d) => { done = d; }, frameMs: 1000, totalMs: 5000,
+      });
+      // FT_CONTROL_CODE / HOST_ACK, the host's "ready" frame, built the way the CLI's
+      // `controlCode` helper builds it: a real CUT frame that starts a transfer and ends nothing.
+      const [shi, slo] = encodeAddress(O_SF, 1920);
+      const cell = (addr: number, v: number): number[] => [Order.SBA, ...encodeAddress(addr, 1920), v];
+      conn.host(
+        SnaCmd.EW, 0x02,
+        ...cell(O_FRAME_TYPE, FrameType.CONTROL_CODE), ...cell(O_CC_FRAME_SEQ, to6(0)),
+        ...cell(O_CC_STATUS_CODE, (StatusCode.HOST_ACK >> 8) & 0xff),
+        ...cell(O_CC_STATUS_CODE + 1, StatusCode.HOST_ACK & 0xff),
+        Order.SBA, shi!, slo!, Order.SF, CUT_FRAME_ATTR, T.IAC, T.EOR,
+      );
+      expect(done, 'HOST_ACK starts the transfer and ends nothing').toBeUndefined();
+      await vi.advanceTimersByTimeAsync(1200);
+      expect(done?.error).toMatch(/^press Attn or Clear: host may still be transferring\. stalled/);
+      expect(done?.error).not.toMatch(/did not start/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
