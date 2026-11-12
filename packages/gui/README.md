@@ -7,9 +7,9 @@ out of x3270's own 3270 bitmap font, at integer scale with antialiasing off.
 npm install -g @tn3270/gui
 ```
 
-**This needs Electron's binary, roughly 100 MB.** Electron 44 fetches it the first time
-it is used rather than during `npm install`, so your first `tn3270-gui` prints "Downloading
-Electron binary..." and takes a while: that is the download, not a hang. If it fails (no
+**This needs Electron's binary, a ~120 MB download (~280 MB unpacked).** Electron 44 fetches
+it the first time it is used rather than during `npm install`, so your first `tn3270-gui` prints
+"Downloading Electron binary..." and takes a while: that is the download, not a hang. If it fails (no
 network, a proxy, a wrong `ELECTRON_MIRROR`), `tn3270-gui` says so; fix the network and run
 it again. There is no slimmer, native-only build yet; that is planned as a follow-up.
 
@@ -17,9 +17,10 @@ it again. There is no slimmer, native-only build yet; that is planned as a follo
 tn3270-gui -insecure -model 3278-4-E HOST:PORT
 ```
 
-It takes the TUI's flags unchanged (`-model`, `--terminal-type`, `-oversize`, `-tn3270e
-on|off`, the TLS set) because all three interactive front ends parse them with the same
-code. See the root README's *Using the GUI* section
+It takes the TUI's flags (`-model`, `--terminal-type`, `-oversize`, `-tn3270e on|off`,
+`-bind-image`, `-bind-limit`, `-ddm`, `-devname`, `-scheme`, the TLS set and the full
+`[prefix:][LU,LU@]host[:port]` shape), except `--colors`, since a canvas draws 24-bit RGB
+straight from the scheme. The front ends parse them with the same code in `@tn3270/frontend`. See the root README's *Using the GUI* section
 (https://github.com/athornton/tn3270#readme) for keys, the keypad, the keyboard window
 and copy/paste.
 

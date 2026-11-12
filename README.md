@@ -39,8 +39,8 @@ directory with `npx` (`npx tn3270 host`, `npx tn3270-gui`) or as `./node_modules
 plain `npm install` does not touch `PATH`. Without root the GUI on Linux may also need
 `--no-sandbox` (see the sandbox note below).
 
-Each package declares `"engines": {"node": ">=20.19"}` (Node 20.19 is what Debian 13 packages).
-CI tests Node 22 on the five packaging runners and Node 20.19 on one more Linux job.
+Each published package declares `"engines": {"node": ">=20.19"}` (Node 20.19 is what Debian 13
+packages). CI tests Node 22 on the five packaging runners and Node 20.19 on one more Linux job.
 `@tn3270/gui` also needs Electron's own binary, a ~120 MB download (~280 MB unpacked), which
 Electron 44 fetches on first use rather than during `npm install`: the first `tn3270-gui` prints
 `Downloading Electron binary...` and takes a while. That is the download, not a hang. See
@@ -57,8 +57,9 @@ still supports.
 
 **Signing.** From the release after 0.1.4, the macOS `TN3270.app` (in the `.dmg` and the `.zip`)
 is Developer ID signed, notarized and stapled; the `.dmg` file itself is not signed, by design.
-Releases up to 0.1.4 are unsigned. The Windows `.exe` is unsigned, and so are the Linux packages.
-CI artifacts are unsigned too, except from a tag run or a `sign`-ticked dispatch.
+Releases up to 0.1.4 are unsigned. The Windows `.exe` is unsigned and is to stay so (the Store's
+MSIX, below, is signed by Microsoft), and the Linux packages are unsigned. CI artifacts are
+unsigned too, except from a tag run or a `sign`-ticked dispatch.
 `scripts/verify-signatures.mjs` checks the mac and Windows signature state on every run. To open
 an unsigned build (Gatekeeper's *Open Anyway*, SmartScreen's *Run anyway*), see
 `docs/releasing.md`, *Unsigned-app notes*.
@@ -119,9 +120,11 @@ two of them (turquoise, neutral-white) from the host's SA/SFE extended attribute
 base-attribute map alone cannot produce. The SA orders we parse are **byte-for-byte identical to
 s3270's** on the same panel, checked as a color-capable 3279.
 
-**`IND$FILE` works from every front end, on both hosts, in both directions and both protocols**,
-with a binary round-tripping byte-identically. The CLI has `Transfer()`; `Ctrl-T` opens a form in
-the TUI, a window in the GUI and an overlay in the browser. **The host chooses the protocol**: DDM
+**`IND$FILE` works from every front end, in both directions and both protocols**, with a binary
+round-tripping byte-identically. The CLI has `Transfer()`; `Ctrl-T` opens a form in the TUI, a
+window in the GUI and an overlay in the browser. Live witnesses: the CLI, the TUI's form and the
+GUI's window on both hosts (the GUI over CUT on VM and DFT on TSO), and the browser on VM over CUT
+only; DFT from a browser is still owed. **The host chooses the protocol**: DDM
 is advertised by default, so a DFT-capable host (TSO) picks DFT, and `-ddm off` forces CUT (see
 *Using the CLI*). CUT needs a 24x80 screen; DFT works at any size, so a `-model 3278-4-E` session
 can transfer only over DFT. One host quirk: **CMS ignores `Lrecl` for `Recfm=V`**, while TSO
@@ -1259,8 +1262,8 @@ Done (numbers are the ones the rest of the docs cite):
   2026-11-06 (`5669a3a`). *Installing*.
 - **14. Close out packaging**: npm trusted publishing with provenance (proven by 0.1.3), GitHub
   releases with seven installers and `SHA256SUMS` (proven by 0.1.4, the latest release), macOS
-  signing and notarization (merged `db5a93d`; releases after 0.1.4 are signed), and the CI store
-  probe (merged `559ea78`). The Windows `.exe` is unsigned and stays so. `docs/releasing.md`.
+  signing and notarization (merged `db5a93d`; what is signed is under *Installing*), and the CI
+  store probe (merged `559ea78`). `docs/releasing.md`.
 
 Item 10, Programmed Symbols, is now item 19.
 
@@ -1436,7 +1439,8 @@ worse than one that says which quarter is missing.
   TN3270E instead of DONT TN3270E"* (`Common/telnet.c:1879-1889`) — and until `e789b4f` we
   answered that form with **nothing at all**, because option 40 is something *we* do and the
   handler only reacted to options the *host* does. Both now route through one teardown, and
-  the second has a recorded-host witness in `wont-tn3270e.trc`.
+  the second has a recorded-host witness in `wont-tn3270e.trc` (in suite3270's `s3270/Test/`,
+  read from your build by `drive-playback.py`; not copied here).
 - **On the CANVAS the mouse does TEXT SELECTION and nothing else.** A press on the screen starts a
   rectangular selection for copy, in the GUI and in the web gateway alike (the gateway used to
   refuse `copy`, because it would have extracted onto its own machine rather than yours; since
@@ -1468,7 +1472,8 @@ worse than one that says which quarter is missing.
   opens a form in the TUI, a transfer window in the GUI and an overlay in the browser; the
   browser's bytes travel over the WebSocket, so its local file is on the operator's machine, not
   the gateway's. Closing a form mid-transfer aborts, so the host leaves transfer mode. CUT needs
-  24x80; DFT (`-ddm on`) works at any size. The gap: when TSO's `IND$FILE` exits `RC=12` the host
+  24x80; DFT works at any size, and a DFT-capable host picks it because DDM is advertised by
+  default (`-ddm off` forces CUT). The gap: when TSO's `IND$FILE` exits `RC=12` the host
   has already left transfer mode, but we wait out the 30 s frame timeout and then say the host
   "may still be transferring" (`frontend/src/transferRun.ts`, and its copy in
   `cli/src/runner.ts`). Live witnesses for every front end: *Verification*.
@@ -1476,13 +1481,13 @@ worse than one that says which quarter is missing.
   screens from both Hercules systems and takes typed input (see *Verification*). It has a menu
   bar and a Connect dialog for a launch with no host, but still **no preferences store** and no
   `File` → `Connect…` for a session already running — a launch given a host still takes it, and
-  every flag, from the command line, exactly as the TUI does. Packaging exists (see *Installing*):
-  on npm since 0.1.0, the macOS app signed from the next release (unsigned up to 0.1.4; Windows
-  and Linux installers unsigned).
+  every flag, from the command line, exactly as the TUI does. Packaging exists: npm and native
+  installers, with signing status under *Installing*.
 - **The web gateway is a first slice too, and shares fewer flags.** It renders live screens
-  from both Hercules systems and takes typed input (see *Verification*), but like the GUI it has
-  **no connect dialog, no menus and no preferences**. It also does **not**
-  accept `--terminal-type` or `-tn3270e`, and of the host argument it honors only `host:port` —
+  from both Hercules systems and takes typed input (see *Verification*), but it has **no connect
+  dialog, no menu bar of its own and no preferences**: its controls are overlays (the keypad, the
+  keyboard, the transfer form and the `Alt-M` model picker), plus the browser's own Edit menu for
+  copy. It also does **not** accept `--terminal-type` or `-tn3270e`, and of the host argument it honors only `host:port` —
   an LU list and `N:` are refused by name rather than ignored. A screen taller than the browser
   viewport **scrolls**; it does not reflow, and it will not scale fractionally, because integer
   scaling is a design rule. There is no session list or admin view: sessions are addressed only

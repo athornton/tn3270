@@ -1,9 +1,12 @@
 # README history
 
-README passages moved out during the 2026-11-12 accuracy audit, kept verbatim for the record. Each
-passage was either superseded (a gap since closed, a count since changed, a code path since
-deleted) or condensed to a line because a *Verification* row holds the detail. The README is
-current; this file is not, and its claims are true only as of the dates they carry.
+**A verbatim archive, NOT current documentation.** These are README passages moved out during the
+2026-11-12 accuracy audit, kept word for word for the record. Each passage was either superseded (a
+gap since closed, a count since changed, a code path since deleted) or condensed to a line because a
+*Verification* row holds the detail. The README is current; this file is not, and its claims are
+true only as of the dates they carry — do not cite it as the state of the code. File paths are as
+originally written, relative to the repository root, and some name files that no longer exist;
+`*Section*` references name README (or `docs/live-testing.md`) sections, some since renamed.
 
 ## From README § What is not implemented (moved 2026-11-12)
 
