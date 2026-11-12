@@ -879,9 +879,10 @@ export async function main(argv, io) {
  * `connect: dialog shown`, or was still running STAY_MS after the probe line), then kills it by
  * PID with package-checks' `stop` and reports any survivor. An app that cannot start THROWS.
  */
-export async function launchForProbe(route, args, { work, whileRunning, stayMs = STAY_MS }) {
+export async function launchForProbe(route, args, { work, whileRunning, stayMs = STAY_MS, display }) {
   const dir = mkdtempSync(posixOrHost(work, 'confine-'));
-  const p = await start(route, args, {}, dir);
+  // `display` (tests only): replaces smoke-lib's displayEnv; production passes none.
+  const p = await start(route, args, {}, dir, display === undefined ? {} : { display });
   p.child.stdin.end();
   let during = null;
   let held = false;

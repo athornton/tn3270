@@ -43,9 +43,16 @@ export function ensureDisplay() {
     //
     // Tested by SOCKET and never by `pgrep -f "Xvfb :99"`, which matches the shell command
     // containing the pattern and so reports a server that was never started.
-    spawn(join(GUI_ENV, 'bin', 'Xvfb'), [':99', '-screen', '0', '1280x1024x24'],
-      { detached: true, stdio: 'ignore', env: { ...process.env, LD_LIBRARY_PATH: join(GUI_ENV, 'lib') } })
-      .unref();
+    // A missing binary is a clean throw NOW. spawn() reports ENOENT only as an asynchronous
+    // 'error' event, which nothing would hear while the poll below blocks, and which then crashes
+    // the process as an unhandled error (CI run 43142211500, a runner with no micromamba env).
+    const xvfb = join(GUI_ENV, 'bin', 'Xvfb');
+    if (!existsSync(xvfb)) throw new Error(`no display: DISPLAY is unset and there is no Xvfb at ${xvfb} to start`);
+    const child = spawn(xvfb, [':99', '-screen', '0', '1280x1024x24'],
+      { detached: true, stdio: 'ignore', env: { ...process.env, LD_LIBRARY_PATH: join(GUI_ENV, 'lib') } });
+    // Any other spawn failure: heard, never an unhandled error; the socket check below decides.
+    child.on('error', (e) => { console.error(`xvfb: ${xvfb}: ${e.message}`); });
+    child.unref();
     // Forks a process per poll (up to ~75 over the deadline) because node has no synchronous
     // sleep; a fork every 0.2s is the price of not returning before Xvfb is actually up.
     const deadline = Date.now() + 15000;

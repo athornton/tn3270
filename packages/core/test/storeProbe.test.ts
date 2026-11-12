@@ -15,6 +15,13 @@ import {
   THUMB, WIN_DIR, WIN_LINE, WIN_WORK, fakeChecks, fx, macWorld, ok, psKind, psScript, ran, winWorld,
 } from './helpers/storeProbeWorld.js';
 
+/**
+ * The display step for fake, display-less apps: the environment unchanged. Without it, on Linux
+ * with no DISPLAY, package-checks' displayEnv starts Xvfb, and a runner without one fails the
+ * test for a reason that has nothing to do with it (CI run 43142211500).
+ */
+const NO_DISPLAY = async (env: Record<string, string | undefined>) => env;
+
 const ENTITLEMENTS = () => fx('codesign-d-entitlements-mas.txt');
 /** Round 4's variant D golden launch (run 43115293433): the probe line of a sandboxed copy. */
 const SANDBOXED = () => parseProbeLine(fx('probe-mac-sandboxed.txt'));
@@ -560,8 +567,6 @@ if (process.env.TN3270_GUI_PROBE === '1') process.stdout.write('probe: sandbox=f
 setInterval(() => {}, 1000); // stays up, as the app does with its Connect dialog, until killed
 `;
   it('waits for the probe line, calls whileRunning with the LIVE pid, then kills it by PID: no survivor', async () => {
-    const saved = process.env.DISPLAY;
-    process.env.DISPLAY = saved ?? ':fake'; // displayEnv passes a set DISPLAY through; unset, it would start Xvfb
     const tmp = realpathSync.native(mkdtempSync(join(tmpdir(), 'storeprobe-')));
     try {
       const app = join(tmp, 'fake-app.cjs');
@@ -570,6 +575,7 @@ setInterval(() => {}, 1000); // stays up, as the app does with its Connect dialo
       let seen = -1;
       let aliveThen = false;
       const l = await launchForProbe(route, [], {
+        display: NO_DISPLAY,
         work: tmp,
         whileRunning: (pid) => { seen = pid; try { process.kill(pid, 0); aliveThen = true; } catch { aliveThen = false; } return 'measured'; },
       });
@@ -579,14 +585,13 @@ setInterval(() => {}, 1000); // stays up, as the app does with its Connect dialo
       expect(l.survivors).toEqual([]);
       expect(() => process.kill(seen, 0)).toThrow();
     } finally {
-      if (saved === undefined) delete process.env.DISPLAY; else process.env.DISPLAY = saved;
       rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     }
   }, 60_000);
   it('an app that cannot start THROWS (exit 2), it is never a result', async () => {
     const tmp = mkdtempSync(join(tmpdir(), 'storeprobe-'));
     try {
-      await expect(launchForProbe({ exe: join(tmp, 'no-such-app'), prefix: [], env: {}, installDir: tmp }, [], { work: tmp }))
+      await expect(launchForProbe({ exe: join(tmp, 'no-such-app'), prefix: [], env: {}, installDir: tmp }, [], { display: NO_DISPLAY, work: tmp }))
         .rejects.toThrow(/cannot start .*no-such-app/);
     } finally { rmSync(tmp, { recursive: true, force: true }); }
   }, 60_000);
@@ -918,21 +923,18 @@ describe('the failure branches', () => {
 
 describe('launchForProbe holds, and whileRunning only sees a live process', () => {
   const withApp = async (src: string, fn: (route: { exe: string; prefix: string[]; env: Record<string, string>; installDir: string; probe: boolean }, tmp: string) => Promise<void>) => {
-    const saved = process.env.DISPLAY;
-    process.env.DISPLAY = saved ?? ':fake';
     const tmp = realpathSync.native(mkdtempSync(join(tmpdir(), 'storeprobe-')));
     try {
       const app = join(tmp, 'fake-app.cjs');
       writeFileSync(app, src);
       await fn({ exe: process.execPath, prefix: [app], env: {}, installDir: tmp, probe: true }, tmp);
     } finally {
-      if (saved === undefined) delete process.env.DISPLAY; else process.env.DISPLAY = saved;
       rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     }
   };
   it('a probe line and then an exit (variant C\'s shape) is held=false', async () => {
     await withApp("process.stdout.write('probe: sandbox=fake.id windowsStore=false\\n'); setTimeout(() => process.exit(133), 300);", async (route, tmp) => {
-      const l = await launchForProbe(route, [], { work: tmp, stayMs: 3_000 });
+      const l = await launchForProbe(route, [], { display: NO_DISPLAY, work: tmp, stayMs: 3_000 });
       expect(l.stdout).toContain('probe: sandbox=fake.id');
       expect(l.held).toBe(false);
     });
@@ -940,19 +942,19 @@ describe('launchForProbe holds, and whileRunning only sees a live process', () =
   it('the Connect dialog line holds at once; staying up past stayMs holds too', async () => {
     await withApp("process.stdout.write('probe: sandbox=fake.id windowsStore=false\\nconnect: dialog shown\\n'); setInterval(() => {}, 1000);", async (route, tmp) => {
       const t0 = Date.now();
-      const l = await launchForProbe(route, [], { work: tmp, stayMs: 30_000 });
+      const l = await launchForProbe(route, [], { display: NO_DISPLAY, work: tmp, stayMs: 30_000 });
       expect(l.held).toBe(true);
       expect(Date.now() - t0).toBeLessThan(20_000);
       expect(typeof l.pid).toBe('number');
     });
     await withApp("process.stdout.write('probe: sandbox=fake.id windowsStore=false\\n'); setInterval(() => {}, 1000);", async (route, tmp) => {
-      expect((await launchForProbe(route, [], { work: tmp, stayMs: 500 })).held).toBe(true);
+      expect((await launchForProbe(route, [], { display: NO_DISPLAY, work: tmp, stayMs: 500 })).held).toBe(true);
     });
   }, 60_000);
   it('an app that exits without a probe line: whileRunning is never called on the dead pid', async () => {
     await withApp('process.exit(0);', async (route, tmp) => {
       let called = false;
-      const l = await launchForProbe(route, [], { work: tmp, whileRunning: () => { called = true; return 'x'; } });
+      const l = await launchForProbe(route, [], { display: NO_DISPLAY, work: tmp, whileRunning: () => { called = true; return 'x'; } });
       expect(called).toBe(false);
       expect(l.during).toBeNull();
       expect(l.held).toBe(false);

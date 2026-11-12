@@ -60,7 +60,11 @@ export function removeContainer(io: { home: string; fs: Pick<Fs, 'rm' | 'exists'
 /** One confinement launch: its output, what `whileRunning(pid)` said, and any survivor of the kill. */
 /** `held`: after its probe line the app showed the Connect dialog, or still ran STAY_MS later. */
 export interface Launched { stdout: string; stderr?: string; during: string | null; held: boolean; pid?: number; survivors: string[] }
-export type Launch = (route: Route, args: string[], opts: { work: string; whileRunning?: (pid: number) => string | null; stayMs?: number }) => Promise<Launched>;
+export type Launch = (route: Route, args: string[], opts: {
+  work: string; whileRunning?: (pid: number) => string | null; stayMs?: number;
+  /** Tests only: replaces package-checks' displayEnv (which may start Xvfb). */
+  display?: (env: Record<string, string | undefined>) => Promise<Record<string, string | undefined>>;
+}) => Promise<Launched>;
 export const STAY_MS: number;
 export const launchForProbe: Launch;
 

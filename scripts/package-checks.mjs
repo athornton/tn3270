@@ -101,10 +101,12 @@ export const switches = (userData) => ['--disable-gpu', ...CAPTURE_SWITCHES, ...
 /**
  * Starts the route's app with `args` and `extraEnv`; see `launch` in smoke-lib.mjs. A probe
  * route also gets `TN3270_GUI_PROBE=1`, after NO_SEAMS so the clearing does not undo it.
+ * `display`: smoke-lib's displayEnv (on Linux with no DISPLAY it starts Xvfb); injectable so a
+ * test launching a fake, display-less app does not depend on the host having an X server.
  */
-export async function start(r, args, extraEnv, cwd) {
+export async function start(r, args, extraEnv, cwd, { display = displayEnv } = {}) {
   const probe = routeDefaults(r).probe ? { TN3270_GUI_PROBE: '1' } : {};
-  const env = await displayEnv({ ...process.env, ...r.env, ...NO_SEAMS, ...probe, ...extraEnv });
+  const env = await display({ ...process.env, ...r.env, ...NO_SEAMS, ...probe, ...extraEnv });
   delete env.TN3270_GUI_MAIN;
   // macOS sets APP_SANDBOX_CONTAINER_ID itself in a sandboxed process (probe.ts reports it): an
   // inherited one would let an UNSANDBOXED launch print `sandbox=<id>` and pass the probe.

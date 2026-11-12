@@ -32,7 +32,8 @@ export interface Started {
   closed: Promise<{ code: number | null; signal: string | null }>;
 }
 /** Starts the route's app (NO_SEAMS, the probe seam, TN3270_GUI_MAIN and APP_SANDBOX_CONTAINER_ID removed). */
-export function start(route: Route, args: string[], extraEnv: Record<string, string>, cwd: string): Promise<Started>;
+export function start(route: Route, args: string[], extraEnv: Record<string, string>, cwd: string,
+  opts?: { display?: (env: Record<string, string | undefined>) => Promise<Record<string, string | undefined>> }): Promise<Started>;
 export function probeSeen(stdout: string): string | null;
 export function winProcessesUnder(dir: string): string[];
 export const drawsGolden: Check;
