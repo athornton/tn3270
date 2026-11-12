@@ -23,9 +23,17 @@ import { contextBridge, ipcRenderer } from 'electron';
  * sits in front of a logged-on host session, so it is the last place to grant Node access.
  */
 contextBridge.exposeInMainWorld('tn3270transfer', {
-  /** Open a native file dialog. Resolves to a path, or undefined if the user canceled. */
-  browse: (direction: string): Promise<string | undefined> =>
-    ipcRenderer.invoke('transfer:browse', direction) as Promise<string | undefined>,
+  /**
+   * Open a native file dialog. Resolves to a path, or undefined if the user canceled.
+   *
+   * `suggestedName`, on a receive with a non-blank host file, is `transferUi.ts`'s derived local
+   * name; main folds it into the save dialog's `defaultPath` (`transferWindow.ts`'s
+   * `saveDialogOptions`). Forwarded as a second `invoke` argument rather than packed into
+   * `direction`, the same one-purpose-per-argument shape `submit`'s single `keywords` array
+   * already keeps.
+   */
+  browse: (direction: string, suggestedName?: string): Promise<string | undefined> =>
+    ipcRenderer.invoke('transfer:browse', direction, suggestedName) as Promise<string | undefined>,
   /**
    * Hand the form's keywords to main.
    *

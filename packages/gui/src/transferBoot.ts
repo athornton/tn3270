@@ -22,7 +22,7 @@ import type { TransferFieldId } from '@tn3270/frontend';
 declare global {
   interface Window {
     tn3270transfer: {
-      browse(direction: string): Promise<string | undefined>;
+      browse(direction: string, suggestedName?: string): Promise<string | undefined>;
       submit(keywords: readonly string[]): Promise<{ ok: boolean; error?: string }>;
       cancel(): void;
       onProgress(fn: (text: string) => void): void;
@@ -252,7 +252,7 @@ const ui = createTransferUi({
       (el as HTMLInputElement).disabled = isRunning;
     }
   },
-  browse: (direction: string) => bridge.browse(direction),
+  browse: (direction: string, suggestedName?: string) => bridge.browse(direction, suggestedName),
   submit: (keywords: readonly string[]) => bridge.submit(keywords),
   cancel: () => { bridge.cancel(); },
 });

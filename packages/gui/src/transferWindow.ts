@@ -52,8 +52,13 @@ export interface TransferDeps {
   focusWindow(): void;
   /** Native Open dialog: resolves to a path, or undefined if canceled. */
   openDialog(): Promise<string | undefined>;
-  /** Native Save dialog: resolves to a path, or undefined if canceled. */
-  saveDialog(): Promise<string | undefined>;
+  /**
+   * Native Save dialog: resolves to a path, or undefined if canceled.
+   *
+   * `suggestedName`, when given, becomes the dialog's `defaultPath` -- see `saveDialogOptions`,
+   * which is where that decision is actually made and tested.
+   */
+  saveDialog(suggestedName?: string): Promise<string | undefined>;
   /**
    * `startTransfer` from `@tn3270/frontend`, ALREADY BOUND to this process's session and files.
    *
@@ -89,7 +94,12 @@ export interface TransferController {
    * that.
    */
   running(): boolean;
-  browse(direction: string): Promise<string | undefined>;
+  /**
+   * `suggestedName` is the receive suggestion `transferUi.ts`'s `browseLocal` computes
+   * (`defaultLocalName` of the host file, or undefined); a send never has one. It is passed
+   * straight through to `deps.saveDialog` -- see that dep's docstring for where it lands.
+   */
+  browse(direction: string, suggestedName?: string): Promise<string | undefined>;
   submit(keywords: readonly string[]): Promise<{ ok: boolean; error?: string }>;
   requestCancel(): void;
   /** True while a close must be refused. */
@@ -296,7 +306,7 @@ export function createTransferController(deps: TransferDeps): TransferController
   return {
     running: () => run !== undefined,
 
-    async browse(direction) {
+    async browse(direction, suggestedName) {
       // A SEND must choose a file that exists; a RECEIVE names a destination that need not.
       // The dialog returns a PATH ONLY and never sets `Exist`: that is a three-way choice
       // (`keep`/`replace`/`append`) whose `append` has no dialog equivalent at all, so letting
@@ -306,7 +316,12 @@ export function createTransferController(deps: TransferDeps): TransferController
       // its own `await`, and the second of those checks is the measured fix for a non-modal
       // dialog resolving mid-transfer. Refusing here as well would hide that guard from its own
       // tests without covering anything the form does not already cover.
-      return direction === 'send' ? deps.openDialog() : deps.saveDialog();
+      //
+      // `suggestedName` IS IGNORED ON A SEND. `openDialog` takes no such argument at all, which is
+      // the honest shape: a send never has a suggestion (`transferUi.ts`'s `browseLocal` passes
+      // one only for a receive), so threading it to `openDialog` would be a parameter with no
+      // caller that ever sets it.
+      return direction === 'send' ? deps.openDialog() : deps.saveDialog(suggestedName);
     },
 
     async submit(keywords) {
@@ -453,4 +468,38 @@ export function createTransferController(deps: TransferDeps): TransferController
       });
     },
   };
+}
+
+/**
+ * The suggestion as it may arrive over `transfer:browse`'s second IPC argument: a `string`, or
+ * not supplied, and nothing else.
+ *
+ * `value` IS `unknown` ON PURPOSE. `ipcRenderer.invoke`'s arguments cross a process boundary where
+ * nothing enforces the `string | undefined` the preload's own type claims -- `connectDialog.ts`'s
+ * `isConnectForm` makes the identical argument for the connect form, for the identical reason.
+ * Anything that is not a string collapses to `undefined`, the same answer an absent suggestion
+ * gets, so a malformed payload reaches `saveDialogOptions` exactly as though nothing had been
+ * suggested -- never as some other type threaded into a dialog option Electron is not contracted
+ * to accept.
+ */
+export function suggestedNameFrom(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}
+
+/**
+ * The options `main.ts` hands to `dialog.showSaveDialog`, with `suggestedName` folded in as
+ * `defaultPath`.
+ *
+ * PULLED OUT OF `main.ts` BECAUSE IT CANNOT BE LOADED UNDER VITEST (it imports `electron`), so
+ * this is where the one decision in that call -- whether a suggestion becomes `defaultPath` --
+ * can be tested at all. See `transferWindow.test.ts`.
+ *
+ * NO `defaultPath` KEY AT ALL when there is no suggestion, not `defaultPath: undefined`.
+ * `SaveDialogOptions` (electron.d.ts) declares the field optional, and a caller that merely checks
+ * `'defaultPath' in options` -- or logs the object, or adds a future field whose bare presence
+ * means something -- would see a key that was never meant to be there.
+ */
+export function saveDialogOptions(suggestedName?: string): { title: string; defaultPath?: string } {
+  const title = 'Receive into which file?';
+  return suggestedName === undefined ? { title } : { title, defaultPath: suggestedName };
 }

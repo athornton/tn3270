@@ -22,7 +22,7 @@ import { makeConnector, type DialogConnector } from './connectAttempt.js';
 import { measureAuto, windowScale } from './measure.js';
 import { parseKeySpec, type KeySpec } from './keyspec.js';
 import { buildMenuTemplate, modelMenuStates, applyChoiceStates, type GeometryMenu } from './menu.js';
-import { createTransferController } from './transferWindow.js';
+import { createTransferController, saveDialogOptions, suggestedNameFrom } from './transferWindow.js';
 import { layoutFor } from './appRoot.js';
 import { stripElectronSwitches } from './electronSwitches.js';
 import { probeLine } from './probe.js';
@@ -1162,10 +1162,10 @@ async function startSession(
         });
         return r.canceled ? undefined : r.filePaths[0];
       },
-      saveDialog: async () => {
+      saveDialog: async (suggestedName) => {
         // Same stub, same reason as `openDialog` above.
         if (SEAM.transferPath !== '') return SEAM.transferPath;
-        const r = await dialog.showSaveDialog(tw, { title: 'Receive into which file?' });
+        const r = await dialog.showSaveDialog(tw, saveDialogOptions(suggestedName));
         // `filePath`, SINGULAR, and a STRING rather than an optional one: `SaveDialogReturnValue`
         // (electron.d.ts:23629-23637) gives '' when the dialog was canceled, where
         // `OpenDialogReturnValue` gives a `filePaths` array. So the `canceled` check is what
@@ -1267,8 +1267,10 @@ async function startSession(
    * nothing can call them while it is closed, but a handler that threw on the way to finding out
    * would reject the renderer's `invoke` with a stack trace instead of an answer.
    */
-  ipcMain.handle('transfer:browse', async (_e, direction: string) =>
-    transfer === undefined ? undefined : transfer.browse(direction));
+  ipcMain.handle('transfer:browse', async (_e, direction: string, suggestedName: unknown) =>
+    transfer === undefined
+      ? undefined
+      : transfer.browse(direction, suggestedNameFrom(suggestedName)));
   ipcMain.handle('transfer:submit', async (_e, keywords: readonly string[]) =>
     transfer === undefined
       ? { ok: false, error: 'the transfer window is not open' }
