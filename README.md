@@ -1765,7 +1765,7 @@ worse than one that says which quarter is missing.
   a divergence from a *later* x3270 and not from our reference — worth knowing if the pinned
   version ever moves, and a reminder that a citation without a version is not a measurement.
   **The asymmetry inside our own code is the strongest hint this is an oversight:**
-  `Session.sysreq()` (`core/src/session.ts:1601`) *does* branch on `inTn3270e()` and check the
+  `Session.sysreq()` (`core/src/session.ts:1886`) *does* branch on `inTn3270e()` and check the
   negotiated function, and `sendAttn()` immediately below it does neither. **Nothing tests Attn in
   E mode**, and neither Hercules host here offers TN3270E, so there is no witness either way —
   which is also why it has not been "fixed" on a guess. Whoever takes it needs a TN3270E host.
@@ -1778,8 +1778,8 @@ worse than one that says which quarter is missing.
   complete the exchange if a host took us up on it. See *Naming a session with `-devname`*.
   Nothing reachable from here implements ELF, so this is an untested gap rather than a
   measured failure.
-- **NEW-ENVIRON carries a device name and nothing else.** Option 39 is implemented (see
-  *Naming a session with `-devname`*), but only for the variables a host has actually been
+- **NEW-ENVIRON sends five variables; `CHARSET` and `KBDTYPE` are not among them.** Option 39
+  is implemented (see *Naming a session with `-devname`*), but only for the variables a host has actually been
   recorded asking for: `USER`, `DEVNAME`, `IBMELF`, `IBMAPPLID` and `CODEPAGE`.
   **`CHARSET` and `KBDTYPE` are deliberately absent** — x3270 derives both from a `cgcsgid`
   this client does not model, and inventing values for them would put guesses on the wire.
@@ -1805,13 +1805,13 @@ worse than one that says which quarter is missing.
   **That EXONERATES our client on that one exchange; it does NOT verify our TN3270E** — the
   host abandons before FUNCTIONS for s3270 too, so FUNCTIONS, BIND and LU assignment remain
   unwitnessed by any *reachable* host. **No reachable host completes a TN3270E negotiation
-  at all**, so the witness for FUNCTIONS, BIND-IMAGE and BIND is a *recorded* host instead:
-  x3270's `playback -b` replaying `packages/fixtures/x3270/sscp-lu-data.trc`, a real host
-  that grants BIND-IMAGE and sends a real BIND (PLU name `IBM0SMAA`, MaxSec-RU 1024,
-  MaxPri-RU 3840, default 24x80, alternate 43x80). Bytes and next steps:
-  `docs/live-testing.md`, *TN3270E against a real host*. What is still missing: a **printer
-  session**, whose harness now exists, and a live UNBIND with `BIND_FORTHCOMING`, which no
-  trace or reachable host has produced.
+  at all**, so the witness for FUNCTIONS, BIND-IMAGE and BIND is a *recording* instead:
+  x3270's `playback -b` replaying `packages/fixtures/x3270/sscp-lu-data.trc`, one of x3270's
+  own test traces, recorded against x3270's test target (`Common/Test/target/target.py`)
+  rather than a production host. That target grants BIND-IMAGE and sends a BIND (PLU name
+  `IBM0SMAA`, MaxSec-RU 1024, MaxPri-RU 3840, default 24x80, alternate 43x80). Bytes and next
+  steps: `docs/live-testing.md`, *TN3270E against a real host*. Still missing: a live UNBIND
+  with `BIND_FORTHCOMING`, which no trace or reachable host has produced.
 
   **A HOST WITHDRAWING TN3270E IS HANDLED BOTH WAYS ROUND, and that took two fixes.** The
   correct byte is `IAC DONT TN3270E`, which a real z/VM 4.4 sends and which tears the
@@ -1842,72 +1842,20 @@ worse than one that says which quarter is missing.
   machine-dependent, which is the one thing that stops a golden reproducing, and is why this
   project blits its own atlas for the screen instead of calling `fillText`. If the keypad looks
   wrong, no automated check here will say so.
-- **SYS REQ'S CLASSIC PATH IS LIVE-VERIFIED (2026-09-21); ITS TN3270E PATH STILL HAS NO WITNESS.**
-  The keypad's `SysRq` button, the TUI overlay's entry and the CLI's `SysReq()` all put bytes on the
-  wire against VM/370 and MVS 3.8j, and the key has now been driven at both and the reply read.
-  **Both predicted forms appeared, one per host**: VM's unformatted screen sent the heading plus
-  modified buffer data (`01 6c 61 02 / 11 5b 60`), TK5's formatted panel the heading alone. No `f0`
-  in either record, so `case AID_SYSREQ` ran and not the ordinary-AID path.
-  **VM/370 ACTS on a test request** — `RUNNING` → `CP READ`, a second Read Partition and a repaint —
-  where MVS ignores it, so a host ignoring the key is legal but not universal. The `IAC AO` path
-  needs a host that grants the TN3270E SYSREQ function, which neither Hercules system will ever be.
-  Measurements in `docs/live-testing.md`, *Sys Req and Dup against VM/370 and TK5*.
-  **It is not the AID you would expect.** Neither Hercules system offers TN3270E — both answer
-  `IAC WILL TN3270E` with `ff fe 28` = DONT, measured three times — so both take the classic path,
-  and x3270's classic branch does **not** send AID `0xf0`. `ctlr_read_modified` has a dedicated
-  `case AID_SYSREQ /* test request */` (`Common/ctlr.c:770-777`) that emits a **four-byte TEST
-  REQUEST READ heading** — `EBC_soh`, `EBC_percent`, `EBC_slash`, `EBC_stx`, i.e. `01 6c 61 02` —
-  in place of the AID byte and cursor address. `AID.SYSREQ = 0xf0` exists in our `constants.ts`
-  and is never what goes on the wire for this key. The modified field data **does** still follow
-  the heading, which the phrase "four-byte record" invites you to get wrong: GA23-0059-07 says the
-  stream is "the same as described previously for read-modified operations, excluding the 3-byte
-  read heading (AID and cursor address)", and x3270's `break` leaves the switch rather than the
-  function. There is no ETX; that is BSC framing, and a telnet record ends at `IAC EOR`.
-  On an inhibited keyboard the key is **refused**, where x3270 would queue it — we have no action
-  queue and did not invent one for a single key.
-- **NO KEYPAD BUTTON HAS BEEN CLICKED AT A HOST, and Dup's TAB is still unwitnessed.** (This bullet
-  used to lead with "Field Mark and Newline have no live witness"; both got one on 2026-09-24.)
-  All four keys are implemented, and **all four are now witnessed on both hosts** — Sys Req and Dup
-  2026-09-21, **Field Mark and Newline 2026-09-24**, each against a matched control (above, and
-  `docs/live-testing.md`). **Two narrower gaps the runs did not
-  close, recorded so the witness is not read as wider than it is:** they drove the **CLI**, which
-  shares `applyAction` with the button but not `mousedown` → `hitTestAt` → IPC, so the click path is
-  still offline-only (`clicks.mjs`); and **Dup's TAB is unwitnessed** even though its `0x1c` is not,
-  because TK5's logon panel has one unprotected field, where plain `Tab` does not move either. That
-  check needs a multi-field panel, which needs a logon. The keypad as a whole needs no live
-  verification, because a button press produces the same wire bytes as the equivalent keystroke and
-  those *are* live-verified.
-- **`IND$FILE` IS INTERACTIVE IN THE TUI AND THE GUI — THE BROWSER IS THE ONE THAT STILL CANNOT
-  TRANSFER A FILE.** (This bullet used to say "the TUI only"; the GUI half landed 2026-10-01.)
-  `Ctrl-T` opens a form in the TUI: ten fields, `Tab` and the arrows to move and change,
-  `Enter` to start, `Esc` to close, and closing mid-transfer **aborts** rather than abandoning, so
-  the host leaves transfer mode. **Three things it did not do yet; two are now done.** ~~(1) CUT
-  mode only, so it needs a 24x80 screen.~~ **DONE 2026-09-29 — BOTH PROTOCOLS WORK AND THE HOST
-  CHOOSES.** With
-  `-ddm on` a DFT host transfers at any geometry, live-verified at 43x80 on TK5; `-ddm on` really
-  does get you DFT now, where it used to be a measurement instrument that broke transfers. The
-  24x80 requirement survives only for CUT, and is raised when CUT is chosen rather than up front.
-  ~~(2) The GUI has the form's model and no renderer for it.~~ **DONE 2026-10-01 — `Ctrl-T` and the
-  `Xfer` button open a transfer window**: a separate `BrowserWindow` with real HTML controls and a
-  native file dialog, **not a canvas view**, because the canvas preload must
-  stay at four functions for `renderer.ts` to keep being shared with the browser, and teaching a
-  canvas text editing and focus buys nothing. See *Using the GUI*, *File transfer*. **Its live gap is now
-  mostly closed and was never the protocol's:** VM/CMS has driven this window for real and the macOS
-  dialog is verified by hand in ASCII mode; **TSO/DFT remains unrun** —
-  `docs/live-testing.md`, *The GUI transfer window*.
-  (3) **The web gateway STILL REFUSES the action outright, in
-  `web/src/protocol.ts`**, and that is deliberate — **and as of 2026-10-01 the refusal gives the
-  right reason.** It used to say "the gateway has no transfer UI", which stopped being the reason
-  the moment the GUI had one; the reason is that a browser-initiated transfer moves bytes between
-  the host and the *gateway's* filesystem, not the operator's machine. **The answer decided on
-  2026-09-30 is real browser file I/O** — the bytes travelling over the WebSocket so that "local
-  file" means the operator's machine — which needs a new protocol message pair, chunking and a
-  `TransferFiles` over the socket, and is its own spec rather than part of the GUI's. The refusal is
-  a rejection at **decode** rather than an interception, which is safe because
-  `web/src/main.ts:151-154` answers every decode failure with a per-socket `error` frame and a
-  `return`; the hazard that needs an interception is one line lower, at the untried `applyAction`.
-  **The transfer protocol itself is live-verified on BOTH hosts in both directions** — see
-  *Verification*.
+- **Sys Req over TN3270E (`IAC AO`) has no witness**: neither Hercules system offers TN3270E.
+  The classic path (a TEST REQUEST READ heading, not AID `0xf0`) is live-verified on both hosts;
+  see *Verification*. On an inhibited keyboard the key is refused, where x3270 would queue it.
+- **No keypad button has been clicked at a host, and Dup's TAB is unwitnessed.** All four special
+  keys are live-verified from the CLI, which shares `applyAction` with the button but not the HTML
+  button's click handler and its IPC hop; Dup's TAB needs a multi-field panel, which needs a logon.
+- **`IND$FILE` works in every front end, but nothing reads the host's `RC=` line.** `Ctrl-T`
+  opens a form in the TUI, a transfer window in the GUI and an overlay in the browser; the
+  browser's bytes travel over the WebSocket, so its local file is on the operator's machine, not
+  the gateway's. Closing a form mid-transfer aborts, so the host leaves transfer mode. CUT needs
+  24x80; DFT (`-ddm on`) works at any size. The gap: when TSO's `IND$FILE` exits `RC=12` the host
+  has already left transfer mode, but we wait out the 30 s frame timeout and then say the host
+  "may still be transferring" (`frontend/src/transferRun.ts`, and its copy in
+  `cli/src/runner.ts`). Live witnesses for every front end: *Verification*.
 - **The GUI is a first slice, not a finished app.** `packages/gui` renders live 3270
   screens from both Hercules systems and takes typed input (see *Verification*). It has a menu
   bar and a Connect dialog for a launch with no host, but still **no preferences store** and no
@@ -1923,9 +1871,13 @@ worse than one that says which quarter is missing.
   viewport **scrolls**; it does not reflow, and it will not scale fractionally, because integer
   scaling is a design rule. There is no session list or admin view: sessions are addressed only
   by the id the browser keeps in `sessionStorage`.
-- **No Programmable Symbol Sets and no graphics.** `XA.CHARSET` (`0x43`) is parsed and
-  deliberately dropped. `Cell` is already a tagged variant so that a renderer dispatches
-  on `kind` rather than assuming a font lookup — that variant exists for nothing but PS.
+- **No Programmed Symbols and no graphics.** `XA.CHARSET` (`0x43`) is parsed and dropped. The
+  plan is Programmed Symbols first, tested with our own `gif2ps`, then GOCA, tested against a
+  GDDM-licensed host the author has found (*Staging*, items 19-21). `Cell` is already a tagged
+  variant so that a renderer dispatches on `kind` rather than assuming a font lookup; that
+  variant exists for nothing but PS.
+- **No printer sessions.** There is no printer-LU session and no SCS decoder, and the TN3270E
+  printer functions (SCS-CTL-CODES, DATA-STREAM-CTL) are never requested. *Staging*, item 18.
 - **MF orders are parsed, counted and not applied.** Modify Field would alter an
   existing field's attributes in place. TK5's ISPF sends **zero** of them, measured, so
   deferring it has cost nothing so far; `modifyFieldIgnored` in the parse result is how
@@ -1933,8 +1885,9 @@ worse than one that says which quarter is missing.
 - **A model or oversize change applies at the next connect, never to the live screen.** The GUI's
   Model menu, the browser's `Alt-M` picker and the CLI's `Set()` all refuse while connected or
   connecting (see *Oversize*). The menus offer only fixed choices: a new size is a new `-oversize`
-  (or `Set(oversize,...)` in the CLI). The TUI has no chooser at all; it changes size by being
-  resized and reconnected, and its model only by `-model`. VM/370 honours an oversize live; TSO, a
+  (or `Set(oversize,...)` in the CLI). The TUI has no chooser for a running session; it changes
+  size by being resized and reconnected, and its model by `-model` or, when started with no host,
+  the connect prompt's `Model` question. VM/370 honours an oversize live; TSO, a
   modern host, and a menu or picker choice renegotiating against a live host are still owed
   (`docs/live-testing.md`).
 - **No mouse support** in the TUI. `Ctrl-K`'s special-keys list is the keyboard substitute for
@@ -1961,19 +1914,33 @@ The TUI has three limits worth knowing before you run it:
 ones against real systems, because most of the defects this project has found were only
 visible there.
 
+CI (`.github/workflows/package.yml`) runs on pushes to `main`, release tags and pull requests.
+Every leg runs `npm run build`, `npm run typecheck`, vitest and `install-smoke.mjs`.
+`ubuntu-latest` and the Node 20.19 leg run `pty-smoke.py` in all three modes. `ubuntu-latest` runs
+the GUI harnesses `shot keys clicks select transfer connect seam-errors`, each on `dist/` and on
+the bundled app (`TN3270_GUI_MAIN=app`). Every leg that builds installers runs `package-smoke.mjs`
+on them. `verify-signatures.mjs` runs on macOS (`signed` on a release, `unsigned` otherwise) and on
+Windows (always `unsigned`). `store-probe.mjs` runs on macOS and Windows (`docs/releasing.md`,
+*Store probe*). The `browser-*.mjs` harnesses, `drive-e.py`, `drive-playback.py` and every
+live-host row below are run by hand, not in CI.
+
 | check | result |
 |---|---|
-| `npm test` | **pass** — 2959 tests, 119 files (measured 2026-11-05 on branch `oversize`, with the picker's Disconnect) |
+| `npm test` | **pass** — run it for the current count; the figure is not kept here because it went stale within days |
 | `npm run typecheck`, `npm run build` | **pass** — silent |
 | conformance vs a real x3270 capture | **pass** — 5 of 6 inbound records byte-identical, the sixth differing by design |
 | `pty-smoke.py` (no host needed) | **pass** — 12/12, including that ECHO is restored after exit |
 | `pty-smoke.py --oversize-auto` | **pass** — 7/7 (2026-11-04): in a 41x100 pty the host is told `IBM-DYNAMIC`, an Erase/Write Alternate puts the OIA on row 41, so 40 rows by 100 columns was measured, and a resize to 51x132 says `applies at the next reconnect` naming 50 rows by 132 columns. Mutation-checked (measuring 2 rows or 0 rows short fails it). The Query Reply is NOT read here (its fake host sends no Read Partition), and no reconnect is driven |
+| `pty-smoke.py --prompt` | **runs in CI** — the TUI started with no arguments at a real pty: a TLS answer against a plaintext host fails in the prompt's own words and the retry without TLS connects; `Ctrl-C` at the first question and during a connect both exit 1; ECHO is restored after every sub-run |
 | oversize Query Reply vs real s3270 4.5 | **pass, NOT a live host** — with `-oversize 160x62` both ask for `IBM-DYNAMIC`, and the Usable Area and Implicit Partition bytes are identical (`e-server.py --query`) |
 | `browser-shot.mjs` — served page vs the GUI's own goldens | **pass** — **1 of 1 case** pixel-identical against the GUI's own golden, which is what says the renderer is shared and not merely similar. (It was 2 cases until 2026-10-06: the keypad case went when the keypad became HTML, since a window of system-font controls is not a pixel the canvas owns) |
 | `browser-keys.mjs` — real chords through a real browser | **pass** — 14 chords, 10 actions in order over a WebSocket, **4** asserted absences (`Ctrl+K`, `Alt+M`, `Ctrl+Z`, `F13`) — `Ctrl+K` and `Alt+M` because the keypad toggle and the model picker are intercepted client-side and never reach the gateway (measured 2026-11-05) |
-| `keys.mjs` — real Chromium key events in Electron | **pass** — 25 chords, 23 actions in order, 2 asserted absences (`Ctrl+Z`, `F13`), and **2 Model menu popups**, one per `Alt+M` (measured 2026-11-05). One `Alt+M` is on the canvas and one in the keyboard window with its own liveness probe, since `forwardKeys` forwards `geometryMenu` unfiltered and `applyAction` throws on it. **Two of those chords go to a CHILD window** (`kbd:` steps, 2026-10-27): before them no harness here could deliver a keystroke to the keypad or keyboard window at all, which is exactly why a `Ctrl-Shift-C` pressed there froze the main process with the whole suite green — `forwardKeys` forwards any action unfiltered and those windows load their own boot files, not `renderer.js`. The pair is a chord plus an `attn` LIVENESS PROBE, because a frozen client and a correctly dropped chord both produce no action line. It carries `Ctrl+T`, which **this list exists to have caught and did not**: the chord was dead until 2026-10-01 while the `Xfer` keypad button worked. `Ctrl+B` joined 2026-10-23 for the same reason — it is the GUI's only witness for the keyboard chord, the web's being `browser-clicks.mjs` |
+| `keys.mjs` — real Chromium key events in Electron | **pass** — 25 chords, 23 actions in order, 2 asserted absences (`Ctrl+Z`, `F13`), and **2 Model menu popups**, one per `Alt+M` (measured 2026-11-05). One `Alt+M` is on the canvas and one in the keyboard window with its own liveness probe, since `forwardKeys` forwards `geometryMenu` unfiltered and `applyAction` throws on it. **Four of those steps go to a CHILD window** (`kbd:` steps, 2026-10-27): before them no harness here could deliver a keystroke to the keypad or keyboard window at all, which is exactly why a `Ctrl-Shift-C` pressed there froze the main process with the whole suite green — `forwardKeys` forwards any action unfiltered and those windows load their own boot files, not `renderer.js`. Each pair is a chord plus an `attn` LIVENESS PROBE, because a frozen client and a correctly dropped chord both produce no action line. It carries `Ctrl+T`, which **this list exists to have caught and did not**: the chord was dead until 2026-10-01 while the `Xfer` keypad button worked. `Ctrl+B` joined 2026-10-23 for the same reason — it is the GUI's only witness for the keyboard chord, the web's being `browser-clicks.mjs` |
 | `transfer.mjs` — the GUI's transfer window under Xvfb | **pass** — **10 of 10 checks**: the window opens, the form draws its 7 applicable rows, a local path and a host file reach the model, submit is refused with `not in 3270 mode`, **the form still takes an edit after that refusal** — the 10th, added 2026-10-01 because a form frozen by a mis-ordered IPC completion passed all nine others — every step was understood, no load failure, no renderer throw, and the client exits on its own. Replay mode with the **native dialog stubbed** — a real modal under Xvfb has nobody to click it and would stall rather than fail. **This is not a live-host check and must not be read as one** |
-| `clicks.mjs` — real mouse events at real keypad buttons | **pass** — 9 buttons clicked by label, 10 actions in order (the `Ctrl-K` toggle plus one per button). A bare `return` in the `mousedown` listener leaves the whole fast gate green while every button is dead; only this reddens |
+| `clicks.mjs` — real mouse events at real keypad buttons | **pass** — 9 buttons clicked by label in the GUI's keypad window, 10 actions in order (the `Ctrl-K` toggle plus one per button). No unit test reaches the HTML button's click handler and its IPC hop. The mutation once recorded for this row (a dead canvas `mousedown` listener, 2026-09-16) was measured on the canvas keypad deleted on 2026-10-06 and has not been re-measured on the HTML one |
+| `select.mjs` — a real drag on the GUI canvas | **runs in CI** — a real `mouseDown`/`mouseMove`/`mouseUp` through Chromium, the renderer's `cellAt`, the IPC hop and `clipboard.writeText`, then the OS clipboard read back and compared with the exact expected text of a replayed screen. Making the `mousedown` selection branch return early leaves build, typecheck and vitest clean and fails only here |
+| `connect.mjs` — the GUI's startup Connect dialog | **runs in CI** — the form is filled through the DOM and submitted with the page's own button; each case gets its own throwaway server, and a plaintext case passes only on `IAC WILL TERMINAL-TYPE` coming back, which a TLS client cannot send. Every Electron PID it started is asserted gone afterwards |
+| `seam-errors.mjs` — a test seam whose file cannot be read or written | **runs in CI** (added 2026-11-12) — each case must exit non-zero, within a time bound, with one stderr line naming the path and the error code. It guards the CI failure where an unreadable `TN3270_GUI_REPLAY` trace left the sandboxed client hanging until the job killed it |
 | `browser-clicks.mjs` — the served page's clicks, keyboard layout and transfer form | **pass** — 9 keypad buttons in one ordered sequence read back off the gateway's own action log, plus **20 of 20** phase-two checks (measured 2026-11-05): **two on the `Alt-M` model picker** (`picker`: it opens with the current model checked and closes the keypad, `Alt+M` shuts it, a click sends `setGeometry` and the gateway's reply checks the new model, an arrow key moves focus and sends nothing, `Enter` applies, `Alt+M` closes it with a radio focused, and its Disconnect button sits first, disabled on a never-connected replay session; `pickerClosed`, last: the gateway closes the socket under the open picker, which then says so and disables everything), seven on the transfer form, **four on the keyboard**, and **seven on copy and paste**. The copy one drives the REAL `Ctrl-Shift-C` through Chromium's input pipeline rather than calling the page's copy global, so it covers the BINDING as well as the path behind it, and it asserts the real OS clipboard over a sentinel — then presses the chord a SECOND time over a fresh sentinel to prove the selection SURVIVED, which is the only end-to-end witness that a copy does not destroy the rectangle it just sent. Since 2026-11-03 it and `webNativeCopy` (the browser's own copy command) witness the text prefetched at drag end, with no copy frame sent, and `webCopyFallback` holds the prefetch back to witness the older asynchronous path, which a correct run otherwise never reaches; `webCopyRetry` makes that path's write fail, then proves a second press on the same selection copies once the prefetch answers. `webSingleCell` drags inside ONE cell and copies that one character, and `webClickNoCopy` proves a click that moved under 4 px copies nothing. Mutation-measured (2026-10-27): an arm that copies and then clears passed every one of the then 2614 unit tests and the built-artifact ordering pin, and fails only here. One of those four is the keyboard's **ten measured layout properties** over a resized real browser: 118 caps drawn, side-by-side at 1400px and reflowed below at 520px, the special bar left of the main block, the arrow cluster's diamond (up and down sharing a column), the centred PF strip, numpad column alignment, the main block a true rectangle (five equal row right edges) with `Z` centred between `A` and `S`, the Return a plain two-row rectangle with an oversized gap and nothing painted into it, and **no cap clipped**. Every one of those exists because the user found the defect on a screenshot and vitest, having no layout engine, could not see it. **The other three are FUNCTIONAL, added 2026-10-23, and the ten above measured NOT ONE ACTION before them** — proved by mutation, since making every cap dead left all ten green at 8/8. `keyboardCaps` clicks one cap from EVERY region (PF3, Enter, Cursor up, `7`, Attention) and compares the **full action object**, not just its kind — an off-by-one `n` on the PF row keeps every label right and would pass a kind-only check; `keyboardInert` asserts an inert cap (`Caps Lock`) sends nothing at all; `keyboardShift` arms the one-shot, gets `@`, and gets a plain `2` on the next click, because a latch bug in exactly that logic reached the user with every unit test green. **Each cap is asserted on TWO independent witnesses** — what the page sent over the socket and the gateway's own `--log-actions` output after decoding — because a mutation renaming the IPC frame kind in `bridgecore.ts` satisfied the browser-side probe for all five caps and was caught **only** by the gateway's log |
 | `browser-lan-copy.mjs` — copy at a plain-`http` LAN address | **pass** — **2 of 2** (measured 2026-11-03): the page is loaded at the machine's own LAN address, where `isSecureContext` is false and there is no `navigator.clipboard`, and a drag then `Ctrl+Shift+C`, and a drag then Meta+C with the `copy` command, each put the text on the OS clipboard, read back from a separate Electron. Chromium only; Firefox and Safari there are a live-pass item. With no LAN IPv4 it exits 77, **SKIPPED, which is not a pass** |
 | web gateway vs VM/370, live | **pass** — 42 of 43 rows agree with the CLI; the 43rd is the cursor, at exactly 9x3 ink pixels |
@@ -1984,6 +1951,8 @@ visible there.
 | `IND$FILE` both hosts, both directions | **pass** — binary round-trips byte-identically. **From the CLI**; the TUI's form drives the same `CutTransfer` and the same command builder, and has its own live row below |
 | the TUI's `Ctrl-T` transfer form vs VM/CMS, live | **pass — 2026-09-23** — 29 of 29 steps, both directions, a 249-byte binary **round-tripping byte-identically**, and CMS's own `LISTFILE` confirming the file the form wrote (`V 80`, 4 records). The form renders opaquely over a live screen and `Recfm` correctly appears on the send and not the receive. **The run found a real defect no unit test could: the 24x80 refusal was 109 characters against a 54-column status line and lost every word of its remedy** |
 | the same form vs MVS/TSO, live | **pass — 2026-09-24** — 26 of 26 steps, both directions, the same binary **round-tripping byte-identically**, and TSO's own `LISTDS` reporting `VB 1024 BLKSIZE 1028 PS`. Exercises the other dialect (`RECFM(V) LRECL(1024)` parenthesised) and **both TSO quoting conventions in one session** — unquoted on the send, so TSO prepends the userid, quoted on the receive. `Blksize` is drawn here and was absent on VM, which is the applicability rule checked against two real hosts rather than a fixture. Both TSO quoting conventions in one session |
+| the GUI transfer window vs VM/CMS and MVS/TSO, live | **pass — 2026-10-02** — `packages/gui/scripts/live-transfer.py`, both directions, 249 bytes byte-identical on each host: CUT on VM (8 of 8 checks), DFT on TSO (9 of 9). Driven by hand against TSO again on 2026-10-27. `docs/live-testing.md`, *The GUI transfer window* |
+| the browser transfer overlay vs VM/CMS, live | **pass — 2026-10-22, by hand** — Firefox on a different machine from the gateway, through a reverse proxy, both directions, 249 bytes byte-identical. CUT only: TSO/DFT has not been driven from a browser. No harness can do this one, because a `DrawCell` carries a glyph index and no character |
 | `Lrecl` with `Recfm=V` on CMS | **pass — 2026-09-24** — three cases in one session: `RECFM V LRECL 80` and `RECFM V` alone both store `V 80`, while `RECFM F LRECL 80` stores `F 80`. **The third case is what makes the first two evidence**, since without it "the two V cases match" cannot distinguish a host ignoring the keyword from a client never sending it. The 1000-byte payload was deliberately not a multiple of 80 |
 | mid-flight cancellation vs VM/CMS, live | **pass — 2026-09-24** — canceling a 200KB upload at **17641 of 204800 bytes** made MECAFF's `IND$FILE` answer `>> TRANS99 - Protocol error` and return CMS to `Ready;`: **the host left transfer mode**, which is the whole purpose of aborting rather than abandoning. The final count was 24261, not 204800, which is what proves it was mid-flight rather than before the first frame or after the last. **An aborted upload leaves a PARTIAL file on the host** — correct, since the host wrote what it received |
 | the same, vs MVS/TSO, live | **pass — 2026-09-24** — canceled at **15430 of 204800**, final count 23162, and TSO returned to `READY`. **The observable differs and the difference is instructive**: MECAFF announces `>> TRANS99 - Protocol error`, while Rayborn's FFTP says **nothing at all** and simply ends. So *"the host printed an error"* is not the test — *"the next command is obeyed"* is, which both `ERASE`/`DELETE` show. A partial file is left on both |
@@ -1993,23 +1962,28 @@ visible there.
 | GUI screenshot goldens under Xvfb | **pass** — **2 of 2 cases** from a replayed synthetic trace, reproducible across consecutive runs; raw-bitmap hash, not the PNG. The cases are the default scheme and the `green` scheme. (This row has twice been out of date in both directions: it said "1 case" while there were three, then "3 of 3" after the keypad case was **deleted** on 2026-10-06 — the keypad became HTML controls, and a capture of system fonts is not a pixel the canvas owns) |
 | Sys Req vs both hosts, live | **pass, classic path — 2026-09-21** — both predicted forms appeared, one per host: VM's unformatted screen sent the heading plus modified buffer data (`01 6c 61 02 / 11 5b 60`), TK5's formatted panel the heading alone, **no `f0` in either** and no ETX. **VM/370 acts on it** (`RUNNING` → `CP READ`, a second Read Partition, a repaint) where MVS ignores it. The TN3270E `IAC AO` path is still unwitnessed and unobtainable here. **The control run matters: a first attempt ended at 0.003s against the real run's 0.457s and would have credited Sys Req with a transition it could not have caused** |
 | Dup vs MVS 3.8j TK5, live | **partial — 2026-09-21** — `0x1c` reached the host with the MDT set (an unmodified field is not transmitted at all) and TSO answered `INPUT NOT RECOGNIZED`, i.e. it read the field and rejected it. **The TAB half is NOT witnessed**: that panel has one unprotected field, where plain `Tab` does not move either — measured in the same session, not assumed |
-| Field Mark, Newline vs a live host | **NOT DONE** — neither has been pressed at a host. On `docs/live-testing.md`'s next-run list |
-| any keypad **button** vs a live host | **NOT DONE** — the 2026-09-21 runs drove the CLI, which shares `applyAction` with the button but not `mousedown` → `hitTestAt` → IPC. The click path remains offline-only (`clicks.mjs`) |
+| Field Mark, Newline vs both hosts, live | **pass — 2026-09-24** — each against a matched control. `docs/live-testing.md`, *Field Mark and Newline against VM/370 and TK5* |
+| any keypad **button** vs a live host | **NOT DONE** — the live runs drove the CLI, which shares `applyAction` with the button but not the HTML button's click handler and its IPC hop. The click path is offline-only (`clicks.mjs`, `browser-clicks.mjs`) |
 | TN3270E vs real s3270 + in-repo server | **pass, but NOT against a live host** — 10 configurations via `drive-e.py` (7 pre-existing plus 3 for BIND-IMAGE: a granted BIND-IMAGE followed by a size-code BIND, a granted BIND-IMAGE with no BIND — the only end-to-end exercise of the 5s timeout — and `-bind-image off` omitting the function from FUNCTIONS REQUEST). Our `DEVICE-TYPE REQUEST` is byte-identical to s3270's; `FUNCTIONS REQUEST` is now byte-identical too, BIND-IMAGE included |
-| TN3270E vs **recorded real hosts**, via x3270's `playback -b` | **pass — 10 of 10 traces**, host-free, by `drive-playback.py`. Replays ten different real hosts (two commercial VTAM systems among them) and asserts our replies byte for byte: `WILL TN3270E`, `DEVICE-TYPE REQUEST` with the right model, `FUNCTIONS REQUEST` including BIND-IMAGE, and the full backoff where the host answers `WONT`. Mutation-verified — corrupting the device type or reversing the DEVICE-TYPE operand order reddens all six, and **that operand-order bug is one real s3270 accepts silently**. **Four of the six stop at FUNCTIONS** (a scripted keystroke this harness's short script never drives, or a BID reply we do not implement — see `docs/live-testing.md` for which reason applies to which trace), matching 3 blocks each. **Two get further, and both are new.** `sscp-lu-data.trc` reaches a **real BIND** — 4 blocks (3, 19, 11, 8 bytes), PLU name `IBM0SMAA` — giving BIND parsing its first real-host witness. `wont-tn3270e.trc` reaches **5 blocks** (3, 19, 11, 3, 3): its host withdraws TN3270E with `WONT` rather than `DONT`, and since `e789b4f` we answer `WONT` and fall back to classic TN3270 as real s3270 does, so that trace is the witness for **that** fix. It stops on a `wrongTerminalName` color-digit divergence that is not our defect. **And since NEW-ENVIRON landed, FOUR MORE traces are drivable and each matches NINE blocks** — `devname_success.trc`, `devname_failure.trc`, `devname_change1.trc`, `devname_change2.trc` — further than every other case here, because option 39's per-request `DEVNAME` exchanges interleave with TN3270E's own steps. `devname_success.trc` was the trace this project originally wanted as its BIND witness and could not drive at all; it now reaches a real BIND with PLU `IBM0SMAJ`. **Mutation-verified to cover the iteration mechanism, not merely the negotiation:** disabling the device-name counter's increment reddens all four with values like `bar0` for `bar1` |
+| TN3270E vs **recorded sessions**, via x3270's `playback -b` | **pass — 10 of 10 traces**, host-free, by `drive-playback.py`. Replays ten recordings: five against other hosts (two commercial VTAM systems among them) and five against x3270's own test target (`Common/Test/target/target.py`) and asserts our replies byte for byte: `WILL TN3270E`, `DEVICE-TYPE REQUEST` with the right model, `FUNCTIONS REQUEST` including BIND-IMAGE, and the full backoff where the host answers `WONT`. Mutation-verified — corrupting the device type or reversing the DEVICE-TYPE operand order reddened all six original traces, and **that operand-order bug is one real s3270 accepts silently**. **Four of those six stop at FUNCTIONS** (a scripted keystroke this harness's short script never drives, or a BID reply we do not implement — see `docs/live-testing.md` for which reason applies to which trace), matching 3 blocks each. **Two get further, and both are new.** `sscp-lu-data.trc` reaches a **real BIND** — 4 blocks (3, 19, 11, 8 bytes), PLU name `IBM0SMAA` — giving BIND parsing its first witness from a recording rather than our own server (the recording is of x3270's test target). `wont-tn3270e.trc` reaches **5 blocks** (3, 19, 11, 3, 3): its host withdraws TN3270E with `WONT` rather than `DONT`, and since `e789b4f` we answer `WONT` and fall back to classic TN3270 as real s3270 does, so that trace is the witness for **that** fix. It stops on a `wrongTerminalName` color-digit divergence that is not our defect. **And since NEW-ENVIRON landed, FOUR MORE traces are drivable and each matches NINE blocks** — `devname_success.trc`, `devname_failure.trc`, `devname_change1.trc`, `devname_change2.trc` — further than every other case here, because option 39's per-request `DEVNAME` exchanges interleave with TN3270E's own steps. `devname_success.trc` was the trace this project originally wanted as its BIND witness and could not drive at all; it now reaches a real BIND with PLU `IBM0SMAJ`. **Mutation-verified to cover the iteration mechanism, not merely the negotiation:** disabling the device-name counter's increment reddens all four with values like `bar0` for `bar1` |
 | TN3270E vs a real host (z/VM 4.4, `evievm.pubvm.org:23`), live | **PARTIAL, 2026-09-17 — and the refusal is the HOST's fault** — the host offers option 40 unprompted and sends `SEND DEVICE-TYPE` itself, then answers our request with `IAC DONT TN3270E`; **our backoff reached its logon screen, which is the first live witness for that path.** ~~With no s3270 available for comparison we cannot say which side is wrong.~~ **s3270 4.5ga6 was built here and refused identically in all four recorded device-type variants after a byte-identical request; the host sends no TN3270E subnegotiation at all where RFC 2355 §7.1.5 requires a `DEVICE-TYPE REJECT`. So our client is EXONERATED — and NOT verified:** the negotiation does not complete, so FUNCTIONS, responses and BIND remain untried against any host, and this host cannot try them |
 
 Both Hercules systems are IPLed by hand by the author; `docs/live-testing.md` is both
 the runbook and the log of what was found doing it, including the failures. That last
-part is deliberate — the write-ups record six self-inflicted diagnostic mistakes, and
-they are the most reusable thing in the file.
+part is deliberate — the write-ups record the author's own diagnostic mistakes,
+and they are the most reusable thing in the file.
 
 ## License
 
 MIT. See [LICENSE](LICENSE).
 
-Note the reference material this project was built against is **not** covered by
-that licence and is not redistributed here: IBM's GA23-0059 3270 Data Stream
-Programmer's Reference, x3270 (Paul Mattes, BSD-3-Clause), tnz/zti, and the host-side
-`IND$FILE` implementations. The `packages/fixtures/` captures are our own recordings
-of traffic between this client and hosts the author runs locally.
+**Five fixture files are not ours and are redistributed under x3270's BSD-3-Clause licence**:
+`sscp-lu-data.trc` and the four `devname_*.trc` in `packages/fixtures/x3270/` are x3270's own test
+traces, copied verbatim from suite3270-4.5, and its notice is reproduced in full in
+[`packages/fixtures/x3270/LICENSE-x3270.md`](packages/fixtures/x3270/LICENSE-x3270.md). Everything
+else in `packages/fixtures/` was made by this project (recordings by this client or by s3270 against
+hosts the author runs, and synthetic traces) and is covered by the MIT licence.
+
+The rest of the reference material this project was built against is **not** redistributed here:
+IBM's GA23-0059 3270 Data Stream Programmer's Reference, x3270's source (Paul Mattes,
+BSD-3-Clause), tnz/zti, and the host-side `IND$FILE` implementations.
