@@ -6,8 +6,8 @@ import { dirname, join } from 'node:path';
 /**
  * The transfer window loads `transferForm.js` DIRECTLY in a browser context, by relative path
  * from `transfer.html`. That is only possible because the compiled module has no runtime
- * imports -- exactly the justification `packages/canvas/src/hittest.ts` carries for being its
- * own module.
+ * imports -- exactly the justification `packages/canvas/src/hittest.ts` used to carry for being
+ * its own module, before that module was deleted with the canvas keypad on 2026-10-06.
  *
  * MEASURED 2026-10-01: 9139 bytes, zero `import` statements, zero `require` calls. (The spec
  * recorded 9141 on 2026-09-30; the ellipsis-ligature fix moved it by two bytes, which is why

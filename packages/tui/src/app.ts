@@ -784,8 +784,10 @@ export class App {
     if (action.kind === 'toggleKeypad') { this.toggleOverlay(); return; }
     // Intercepted here for the same reason and with the same consequence: `applyAction` THROWS on
     // `transferForm`, so a front end that forgot this arm dies on the keystroke rather than
-    // offering a chord that does nothing. (The web gateway REJECTS the kind instead -- see
-    // `web/src/protocol.ts` -- because a browser transfer's filesystem is a stage-4 question.)
+    // offering a chord that does nothing. (The web gateway ACCEPTS the kind instead, since
+    // 2026-10-06 -- see `web/src/protocol.ts` and `web/src/transferGateway.ts` -- because a
+    // browser transfer moves bytes over the socket to the OPERATOR's filesystem, not the
+    // gateway's.)
     if (action.kind === 'transferForm') { this.toggleTransfer(); return; }
     if (action.kind === 'quit') {
       this.quitting = true;

@@ -265,10 +265,11 @@ bridge.onDone((r) => { ui.finished(r); });
 /**
  * TWO HOOKS FOR THE HARNESS, and nothing else on `window`.
  *
- * `executeJavaScript` is how main drives this window without a mouse, the same way
- * `__tn3270ButtonCenter` lets `clicks.mjs` click a keypad button by label (`canvas/src/renderer.ts`).
- * They go through the SAME `ui` object a real click does, so a scenario cannot pass while the wiring
- * is broken -- which is exactly what a hook that manipulated the DOM directly would allow.
+ * `executeJavaScript` is how main drives this window without a mouse, the same way `clicks.mjs`
+ * finds a keypad button by its `data-label` and calls its real `.click()` (`main.ts`'s
+ * `maybeSendClicks`). They go through the SAME `ui` object a real click does, so a scenario cannot
+ * pass while the wiring is broken -- which is exactly what a hook that manipulated the DOM
+ * directly would allow.
  *
  * ## THEY ADD NO DECISION TO THIS FILE, WHICH WAS THE CONSTRAINT
  *

@@ -10,7 +10,7 @@ import { dirname, join } from 'node:path';
  * gate is exempt from every change until somebody remembers it, and `pty-smoke.py` sat at 1 of 12 for
  * two days proving it. This reads `clicks.mjs` as TEXT and pins the things whose absence would
  * disable it SILENTLY -- and silence is the specific hazard, because `clicks.mjs` is the only cover
- * anywhere for the keypad's click path and for the label/action pairing of 9 of its 47 keys.
+ * anywhere for the keypad's click path and for the label/action pairing of 9 of its 48 keys.
  */
 const guiDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const clicks = readFileSync(join(guiDir, 'scripts', 'clicks.mjs'), 'utf8');
@@ -165,8 +165,9 @@ describe('the click harness', () => {
 
   it('fails the run when the renderer throws', () => {
     // A renderer exception produces a window that receives clicks and does nothing with them. It is
-    // sharper here than in the chord harness: the button-center probe is a `window` global installed
-    // by the renderer's module body, so a renderer that threw before installing it has no probe.
+    // sharper here than in the chord harness: `Ctrl+K` reaches the keypad window only by way of the
+    // terminal renderer's own keydown forwarding, so a renderer that threw before that wiring ran
+    // leaves the keypad window never created at all.
     expect(clicks).toMatch(/renderer\[3\]/);
   });
 
@@ -177,8 +178,9 @@ describe('the click harness', () => {
     // with `keys.mjs` and `transfer.mjs` so the three copies (which had already begun to drift in
     // their package lists) cannot drift further -- `xvfbStaleness.test.ts` pins the shared
     // mechanics; this test pins only that THIS harness calls through with the right package list.
-    // `canvas` is the more important of the two for this harness -- `renderer.ts`, the probe and
-    // `hittest.ts` all live there.
+    // `canvas` is the more important of the two for this harness -- `keypadUi.ts`'s
+    // `createKeypadUi`, which `gui`'s `keypadBoot.ts` imports to build the keypad window's buttons
+    // and wire their actions, lives there.
     expect(clicks).toMatch(/const main = guiMain\(\)/);
     expect(clicks).toContain("staleness(main, ['gui', 'canvas'])");
   });

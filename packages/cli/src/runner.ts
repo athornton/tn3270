@@ -818,9 +818,10 @@ export class Runner {
             extra = ` (host may want 24x80; this session is `
               + `${this.session.screen.rows}x${this.session.screen.cols})`;
           } else if (!sawNonFrameScreen && !this.session.ddmAdvertised) {
-            // Earns its place: forgetting `-ddm on` will be the commonest failure
-            // once DFT works, because a host that speaks only DFT cannot choose DFT
-            // unless we advertised QCODE 0x95.
+            // Earns its place: DDM has defaulted ON since 2026-09-29, so this fires only
+            // when the operator passed `-ddm off` explicitly -- and a host that speaks
+            // only DFT cannot choose DFT unless we advertised QCODE 0x95, so that operator
+            // is exactly who needs telling.
             extra = ' (DDM was not advertised; a host that speaks only DFT needs -ddm on)';
           }
           return {

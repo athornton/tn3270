@@ -1,49 +1,42 @@
 /**
- * Click guard for the GUI keypad, under Xvfb: does a real mouse press at a real button work?
+ * Click guard for the GUI keypad, under Xvfb: does a real button press in the keypad window work?
  *
  * ## WHAT THIS COVERS THAT NOTHING ELSE CAN
  *
- * The click path is `mousedown` -> the primary-button guard -> `hitTestAt` -> `sendAction` -> IPC ->
- * `applyAction`, and every unit test in this repo stops before the first arrow: `renderer.ts` is a
- * browser entry point that throws at module load outside a browser, so the barrel deliberately does
- * not export it (`canvas/src/index.ts`) and no vitest file can execute a line of it.
+ * The click path is a DOM `click` on a button in the keypad's own `BrowserWindow`
+ * (`gui/keypad.html`) -> the listener `createKeypadUi` attaches (`canvas/src/keypadUi.ts`) ->
+ * `tn3270keypad.sendAction` through the keypad preload's `contextBridge`
+ * (`gui/src/keypadPreload.cts`) -> main's existing `ipcMain.on('action')` -> `applyAction`.
+ * `createKeypadUi`'s label-to-action wiring is unit-tested against an injected fake DOM
+ * (`canvas/test/keypadUi.test.ts`), but `keypadBoot.ts` -- the adapter that hands it the REAL
+ * `document` -- is not: it reads `document` in its module body, `vitest.config.ts` runs with
+ * `environment: 'node'`, and no vitest file can execute a line of it. Neither is the preload, nor
+ * the IPC hop into `main.ts`. This harness is the only thing that drives all three together.
  *
- * PROVED AS A MUTATION, 2026-09-16: make the `mousedown` listener return before it does anything --
- * `if (Date.now() > 0) return;` as its first line -- and `npm run build`, `npm run typecheck` and
- * `npm test` are ALL clean, 1637 tests in 70 files, while this harness fails all 8 click positions.
- * Every keypad button is dead and the fast gate has nothing to say about it.
- *
- * A BARE `return;` there, which is the obvious spelling of that mutation, does NOT typecheck: the
- * code below it becomes unreachable, unreachable code gets no control-flow narrowing, and `list` and
- * `list.keypad` go back to being possibly-undefined -- five errors. tsc emits anyway (nothing sets
- * `noEmitOnError`), so `npm test` still runs green over the mutated `dist` and the finding survives;
- * but the honest mutation is the one the build cannot see, and that is the one recorded above.
- *
- * ## WHAT IT DOES NOT COVER, DELIBERATELY -- THE ARITHMETIC
- *
- * `hitTestAt` is unit-tested directly, at scale 3 with a non-zero centring offset
- * (`canvas/test/keypad.test.ts`), because both fatal mutations -- multiplying instead of dividing,
- * and dropping the offset -- are invisible at scale 1 with no centring, and that is the ONLY
- * configuration this harness can run in: `main.ts`'s `fit` sets the content size to exactly
- * `list.width * scale` by `list.height * scale`, so `center` returns (0,0) for every model in native
- * Electron mode, and an 80-column screen with the keypad is 720x476, which at scale 2 is 1440x952
- * and does not fit Xvfb's 1280x1024. So this run is the PLUMBING, which is scale-independent, and
- * the offset arithmetic lives where a unit test can mutate it.
+ * UNTIL 2026-10-06 THE KEYPAD WAS DRAWN INTO THE CANVAS, and this file proved a different path:
+ * `mousedown` on the terminal window -> the primary-button guard -> `hitTestAt` -> `sendAction` ->
+ * the same IPC hop, with a real press caught dead by a mutated `mousedown` listener that left
+ * `npm run build`, `npm run typecheck` and `npm test` all clean. `hitTestAt`'s own arithmetic went
+ * with that mechanism when the keypad became real HTML controls (`main.ts`'s history note on the
+ * keypad window has the reasoning). What survives from that era is the harness's shape -- show the
+ * keypad with a real chord, click real buttons by label, assert the actions arrive in order -- not
+ * the mechanism underneath it.
  *
  * ## CLICKS BY LABEL, WHICH IS ALSO AN ASSERTION ABOUT THE TABLE
  *
- * `TN3270_GUI_CLICKS` takes LABELS, and `main.ts` asks the renderer where that label is. So each
- * case says "the button drawn `FldMk` sends `fieldMark`", and a label/action transposition in
- * `frontend/src/keypad.ts` fails here: MEASURED by swapping `Dup`'s and `FldMk`'s actions, which
- * failed positions 5 and 6 with each other's action.
+ * `TN3270_GUI_CLICKS` takes LABELS, and `main.ts` finds that label's button in the keypad window's
+ * DOM and calls its real `.click()`. So each case says "the button drawn `FldMk` sends
+ * `fieldMark`", and a label/action transposition in `frontend/src/keypad.ts` fails here: MEASURED
+ * by swapping `Dup`'s and `FldMk`'s actions, which failed positions 5 and 6 with each other's
+ * action.
  *
  * IT IS NOT THE ONLY COVER FOR THAT PAIRING, and the plan for this task said it was. The SAME swap
  * also reddens `frontend/test/keypad.test.ts`'s independently-written label-to-action map and
- * `tui/test/keypadOverlay.test.ts` -- two unit failures, in the fast gate, for all 47 keys rather
- * than these 8. What is true is the narrower claim: the pixel goldens cannot see it (the glyphs are
- * identical either way), and this is the only place the pairing is checked THROUGH the drawn button
- * -- the rectangle `keypadRegion` built, the frame the renderer hit-tested, the IPC hop -- rather
- * than in the table.
+ * `tui/test/keypadOverlay.test.ts` -- two unit failures, in the fast gate, for all 48 keys rather
+ * than these 9. What is true is the narrower claim: the pixel goldens cannot see it (the glyphs are
+ * identical either way), and this is the only place the pairing is checked THROUGH a real button --
+ * the DOM element `createKeypadUi` built, the `.click()` the browser dispatched, the IPC hop --
+ * rather than in the table.
  *
  *     node packages/gui/scripts/clicks.mjs
  */
@@ -69,14 +62,15 @@ const trace = join(repo, 'packages', 'fixtures', 'traces', 'synthetic-ispf-like.
 const ARGV = ['--no-sandbox', '--disable-gpu', '-insecure', '-model', '3278-2-E'];
 
 /**
- * The chord that SHOWS the keypad, which must happen before a click can land on one.
+ * The chord that OPENS the keypad window, which must happen before a click can land on one.
  *
- * The keypad is off by default -- it is toggled, not permanent (`main.ts`'s `showKeypad`) -- and
- * with it hidden the draw list has no `keypad` region at all, so the renderer's probe returns
- * `null`, `main.ts` prints `clicks: NO BUTTON` for every label and the bail below reports it.
- * `TN3270_GUI_CLICKS` deliberately does not turn the keypad on itself: two on-switches would toggle
- * it back off, and doing it with a real chord means this run also proves that Ctrl+K reaches
- * `main.ts` and resizes the window, which is what puts the buttons inside the content area.
+ * The keypad window does not exist until `Ctrl+K` creates it -- it is opened on first request and
+ * is a separate, non-modal `BrowserWindow` beside the terminal, not a region drawn into it
+ * (`main.ts`'s history note on the keypad window). With no keypad window a click by label finds
+ * nothing to query, and `main.ts` reports `clicks: NO KEYPAD WINDOW`. `TN3270_GUI_CLICKS`
+ * deliberately does not open the keypad itself: two on-switches would toggle it back closed, and
+ * doing it with a real chord means this run also proves that Ctrl+K reaches `main.ts` and creates
+ * the window the buttons live in.
  *
  * So `toggleKeypad` is the FIRST expected action, ahead of every case.
  */
@@ -103,12 +97,12 @@ const SHOW_KEYPAD = 'Ctrl+K';
  * is the NEWEST button, the only one on its row past `BkSp`, and the only one whose column was
  * asserted EMPTY until it arrived.
  *
- * THE OTHER 38 KEYS ARE NOT CLICKED, and that is a deliberate limit rather than an oversight. What
- * this run costs is real -- 1.2s of settle plus 120ms a click -- and what a 39th click would add is
+ * THE OTHER 39 KEYS ARE NOT CLICKED, and that is a deliberate limit rather than an oversight. What
+ * this run costs is real -- 1.2s of settle plus 120ms a click -- and what a 10th click would add is
  * one more instance of a path the first nine already exercised end to end. Their label-to-action
- * pairing is checked as DATA, for all 47, by `frontend/test/keypad.test.ts`; their rectangles by
- * `canvas/test/keypad.test.ts`; their pixels by the goldens. If a whole block ever falls out of that
- * list above, add a case for it here rather than trusting the neighbor.
+ * pairing is checked as DATA, for all 48, by `frontend/test/keypad.test.ts` and again by
+ * `canvas/test/keypadUi.test.ts` against a fake DOM; their pixels by the goldens. If a whole block
+ * ever falls out of that list above, add a case for it here rather than trusting the neighbor.
  */
 const CASES = [
   { label: 'PF1', action: { kind: 'pf', n: 1 } },
@@ -159,10 +153,10 @@ if (CASES.length === 0) {
  * output file DELETED, since `--build` trusts its `.tsbuildinfo` rather than looking at the outputs.
  *
  * BOTH PACKAGES, SEPARATELY, and for this harness `canvas` is the more important of the two:
- * `renderer.ts` and its new `__tn3270ButtonCenter` probe live there, and so does `hittest.js`. One
- * `max` across both would let a fresh `gui` build MASK a stale `canvas` one, since gui's newer
- * output would win the max over canvas's newer source -- and a stale `canvas` is precisely a run
- * that clicks yesterday's layout and reports `ok`.
+ * `keypadUi.ts`'s `createKeypadUi` lives there, and it is what builds the keypad window's buttons
+ * and wires their actions. One `max` across both would let a fresh `gui` build MASK a stale
+ * `canvas` one, since gui's newer output would win the max over canvas's newer source -- and a
+ * stale `canvas` is precisely a run that clicks yesterday's layout and reports `ok`.
  *
  * `.cts`/`.cjs` are named explicitly on BOTH sides because `'preload.cts'.endsWith('.ts')` is FALSE,
  * which once exempted the preload -- the IPC hop this harness claims to cover -- from the check
@@ -237,11 +231,12 @@ if (!stdout.includes('clicks: sent ')) bail('the clicks seam never reported send
 /**
  * A LABEL THAT IS NOT IN THE LAYOUT IS NOT A PLUMBING FAILURE.
  *
- * `main.ts` prints this when the renderer's probe returns `null`, which means either a typo or a
- * renamed key in `CASES` above, or the keypad was never shown. Reported HERE, ahead of the position
- * diff, because without it that diff shows a missing action for every remaining case and reads as
- * "the buttons are dead" -- the one diagnosis this harness must not hand out wrongly. The client
- * deliberately continues past it so a single typo reports itself rather than truncating the run.
+ * `main.ts` prints this when the keypad window's DOM has no visible button with that `data-label`,
+ * which means either a typo or a renamed key in `CASES` above, or the keypad was never shown.
+ * Reported HERE, ahead of the position diff, because without it that diff shows a missing action
+ * for every remaining case and reads as "the buttons are dead" -- the one diagnosis this harness
+ * must not hand out wrongly. The client deliberately continues past it so a single typo reports
+ * itself rather than truncating the run.
  */
 const missing = stdout.split('\n').filter((l) => l.startsWith('clicks: NO BUTTON'));
 if (missing.length > 0) {
@@ -258,10 +253,11 @@ if (missing.length > 0) {
  * (Electron's own CSP warning) and would fail every run. `keys.mjs` and `shot.mjs` filter on the
  * same literal; the duplication is KNOWN, and if the level moves those are the other places.
  *
- * This one matters more here than in `keys.mjs`: the probe is a `window` global installed by
- * `renderer.js`'s module body, so a renderer that threw before installing it has no probe at all.
- * `main.ts` catches that rejection and exits 2 rather than hanging, so the status bail above fires
- * first and dumps the stdout these lines are in.
+ * This one matters more here than in `keys.mjs`: `Ctrl+K` reaches `openKeypadWindow` only by way
+ * of the terminal renderer's own keydown forwarding, the same wiring every other chord uses, so a
+ * terminal renderer that threw before that wiring ran leaves the keypad window never created at
+ * all -- every click below then reports `NO KEYPAD WINDOW`, indistinguishable from dead buttons
+ * unless this check catches the renderer throw first.
  */
 const rendererErrors = stdout.split('\n').filter((l) => l.startsWith('renderer[3]'));
 if (rendererErrors.length > 0) bail(`the renderer threw:\n${rendererErrors.join('\n')}`);

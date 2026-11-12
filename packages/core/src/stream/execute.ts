@@ -115,8 +115,9 @@ function saHandler(type: number): SaHandler | undefined {
  * Does the SA order apply this attribute type, or drop it?
  *
  * Derived from `SA_HANDLERS` so it cannot disagree with what is actually applied.
- * `XA.CHARSET` (Programmable Symbol Sets, out of scope) and anything unrecognized
- * are false, and stay counted by `setAttributeIgnored`.
+ * `XA.CHARSET` (Programmed Symbol Sets; not yet implemented, planned -- README
+ * *Staging*) and anything unrecognized are false, and stay counted by
+ * `setAttributeIgnored`.
  *
  * Presence of a handler, not `Object.hasOwn`, now that the lookup is centralised:
  * one accessor, so "is it implemented" and "what does it do" cannot answer from
@@ -502,7 +503,7 @@ function applyToken(
 
     case 'ge':
       // Stage 1 has no loadable character sets, so a graphic-escaped character
-      // is stored as an ordinary byte. When Programmable Symbol Sets land, this
+      // is stored as an ordinary byte. When Programmed Symbol Sets land, this
       // is where the cell becomes {kind:'ps',...} instead.
       screen.setChar(addr, token.ebcdic);
       // A GE character carries the running attributes like any other character;
@@ -516,8 +517,8 @@ function applyToken(
       // do-while: stop === addr fills the whole buffer, matching x3270.
       // token.ge is deliberately carried and not acted on here: stage 1 has no
       // loadable character sets, so a graphic-escaped fill is stored as the
-      // ordinary byte it is. Programmable Symbol Sets (a committed stage 4
-      // deliverable) is where the cell would become {kind:'ps',...} instead,
+      // ordinary byte it is. Programmed Symbol Sets (planned -- README
+      // *Staging*) is where the cell would become {kind:'ps',...} instead,
       // and the flag exists so that change stays local to this case.
       let a = addr;
       do {
@@ -592,7 +593,8 @@ function applyToken(
       // color and highlighting pairs become the field's EXTENDED FIELD ATTRIBUTE,
       // stored on the attribute cell, and also seed the running SA state — see the
       // two uses at the bottom of this case. 0x43 character set is still dropped —
-      // Programmable Symbol Sets are out of scope — as is anything else.
+      // Programmed Symbol Sets are not yet implemented, planned (README *Staging*)
+      // — other unrecognized character sets are simply out of scope.
       //
       // A missing 0xC0 pair does NOT mean "no field": p. 4-5 says unspecified
       // attribute types take their defaults, so the field exists with attribute

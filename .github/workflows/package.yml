@@ -5,7 +5,7 @@
 #   xvfb        the display wrapper for anything that starts Electron (Linux: xvfb-run at the
 #               1280x1024x24 screen the synthetic-ispf golden was recorded on; elsewhere empty)
 #   apt         Linux packages to install (empty: none)
-#   parity      run the six GUI harnesses on dist/ AND on the bundle (TN3270_GUI_MAIN=app)
+#   parity      run the seven GUI harnesses on dist/ AND on the bundle (TN3270_GUI_MAIN=app)
 #   x64witness  TN3270_PACKAGE_SMOKE_X64 for package-smoke.mjs (see its "macOS" notes)
 #   npm         upload the npm tarballs (one job, so they are not uploaded five times)
 #   gui         upload this job's native artifacts

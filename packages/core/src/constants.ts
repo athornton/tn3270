@@ -524,8 +524,9 @@ export const XA_3270 = 0xc0;
  * "device default color"). Both appear in the committed TK5 fixture (101
  * FOREGROUND, 12 RESET), so a conflation is not hypothetical.
  *
- * CHARSET is named but deliberately NOT implemented — it selects Programmable
- * Symbol Sets, which are out of scope. It stays counted by setAttributeIgnored.
+ * CHARSET is named but not yet implemented — it selects Programmed Symbol Sets
+ * (IBM's term); planned, after x3270 parity (README *Staging*, item 19), then
+ * GOCA. It stays counted by setAttributeIgnored.
  * Table 4-6 also has VALIDATION (0xC1), OUTLINING (0xC2), and TRANSPARENCY
  * (0x46) (3270ds.h:231, 235, 251); those are out of scope too and, unlike
  * CHARSET, not even named here.

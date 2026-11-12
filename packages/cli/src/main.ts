@@ -31,8 +31,9 @@ export interface CliArgs {
   bindImage?: boolean;
   /**
    * Advertise Query Reply (DDM), which lets a host choose DFT file transfer
-   * instead of CUT. Absent means the default, which is OFF -- unlike the other
-   * capability flags here. See `SessionOptions.ddm`.
+   * instead of CUT. Absent means the default, which is ON as of 2026-09-29,
+   * same as the other capability flags here; `-ddm off` clears it. See
+   * `SessionOptions.ddm`.
    */
   ddm?: boolean;
   /** Range-check a BIND's geometry. Absent means the default, which is on. */

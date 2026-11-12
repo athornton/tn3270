@@ -667,11 +667,12 @@ export class Session {
    * has no other route to the flag. A host that speaks only DFT cannot CHOOSE DFT unless the
    * Query Reply carried QCODE 0x95 (`queryreply.ts`, appended at `:1410` only when this is
    * on), so "the transfer timed out and DDM was never advertised" is a different failure from
-   * "the transfer timed out", and forgetting `-ddm on` will be the commonest one.
+   * "the transfer timed out", and an operator who passed `-ddm off` and then wonders why DFT
+   * never happens is exactly who needs telling.
    *
    * REPORTS WHAT WE OFFERED, NOT WHAT THE HOST DID WITH IT. The host may ignore the unit
    * entirely -- VM/370's MECAFF does, and stays on CUT -- so this must not be read as "DFT is
-   * available". Defaults to false, like the flag.
+   * available". Defaults to true, like the flag, as of 2026-09-29.
    */
   get ddmAdvertised(): boolean { return this.opts.ddm !== false; }
 
@@ -1776,8 +1777,10 @@ export class Session {
     // the reserved value is screened out in stream/sf.ts queryListRequest before
     // it ever becomes an sfReply. The throw is an unreachable assertion, and
     // there are tests at both levels pinning that.
-    // DDM is appended rather than living in DEFAULT_CAPABILITIES because it is
-    // opt-in: see SessionOptions.ddm. Appending keeps the list in ascending QCODE
+    // DDM is appended rather than living in DEFAULT_CAPABILITIES because it is a flag
+    // the caller can turn OFF (`-ddm off`; see SessionOptions.ddm), not because it
+    // defaults off -- it has defaulted on since 2026-09-29, below. Appending keeps the
+    // list in ascending QCODE
     // order for every subset (0x95 < 0xa6 only by luck of where it lands, so
     // insert before Implicit Partition rather than at the end) -- wire order is
     // list order, and matching x3270's ascending order is what makes captures

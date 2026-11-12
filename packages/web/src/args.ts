@@ -84,7 +84,8 @@ export interface WebArgs {
   readonly bindImage?: boolean;
   /**
    * Advertise Query Reply (DDM), enabling DFT file transfer. Absent means the
-   * default, which is OFF -- see SessionOptions.ddm for why this one is opt-in.
+   * default, which is ON as of 2026-09-29 -- see SessionOptions.ddm; `-ddm off`
+   * clears it.
    */
   readonly ddm?: boolean;
   /** Range-check a BIND's geometry. Absent means the default, which is on. */
