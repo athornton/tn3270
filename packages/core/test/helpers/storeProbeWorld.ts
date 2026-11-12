@@ -53,6 +53,7 @@ export const psScript = (call: string[]) => {
 /** Which spike step a PowerShell script is, by what it runs. */
 export function psKind(script: string): string {
   if (script.includes('New-SelfSignedCertificate')) return 'certificate';
+  if (script.includes('"installed=$(')) return 'installed';
   if (script.includes('Add-AppxPackage -Path')) return 'Add-AppxPackage';
   if (script.includes('ConvertTo-Json')) return 'Get-AppxPackage';
   if (script.includes('Get-Command tn3270-gui.exe')) return 'alias';
@@ -72,6 +73,8 @@ export interface World {
   calls: string[][];
   routes: Route[];
   launchArgs: string[][];
+  /** The `parent` each mkdtemp was given (undefined: the OS temp dir). */
+  parents: (string | undefined)[];
 }
 
 /** Two checks named as package-checks' are, answering `probe` (a function of the check index). */
@@ -90,10 +93,12 @@ export function fakeChecks(events: string[], probe: (i: number) => string | null
 
 export function macWorld(over: {
   answers?: Record<string, Answer>; launched?: Partial<Launched>; makesContainer?: boolean; io?: Partial<Io>;
-  launch?: Io['launch'];
+  launch?: Io['launch']; containerBefore?: boolean; listings?: Record<string, string[]>;
 } = {}): World {
   const events: string[] = []; const out: string[] = []; const calls: string[][] = []; const routes: Route[] = []; const launchArgs: string[][] = [];
-  const paths = new Set<string>([MAC_SRC, MAC_APP, LOGIN_ITEMS, LOGIN_HELPER]);
+  const parents: (string | undefined)[] = [];
+  const paths = new Set<string>([MAC_SRC, MAC_APP, LOGIN_ITEMS, LOGIN_HELPER, ...(over.containerBefore ? [`${CONTAINER}/Data/old`] : [])]);
+  let killed = false;
   const exists = (p: string) => [...paths].some((x) => x === p || x.startsWith(`${p}/`));
   const key = (cmd: string, args: string[]) => {
     if (cmd === 'find') return args.includes('*.dylib') ? 'find dylibs' : args.includes('*.framework') ? 'find frameworks' : args.includes('*.app') ? 'find helpers' : 'find login';
@@ -111,7 +116,10 @@ export function macWorld(over: {
     'codesign sign': (a) => ok(`${a.at(-1)}: replacing existing signature`),
     'PlistBuddy Print': ok('H68TN685J4\n'),
     plutil: (a) => ok(`${a.at(-1)}: OK`),
-    ps: ok(`  101 ${MAC_APP}/Contents/MacOS/TN3270\n  102 /usr/sbin/cfprefsd\n  103 /private${MAC_APP}/Contents/Frameworks/TN3270 Helper.app/Contents/MacOS/TN3270 Helper\n`),
+    // Ours (101, 103) until `kill` has run; a stranger (102) always.
+    ps: () => ok(killed ? '  102 /usr/sbin/cfprefsd\n'
+      : `  101 ${MAC_APP}/Contents/MacOS/TN3270\n  102 /usr/sbin/cfprefsd\n  103 /private${MAC_APP}/Contents/Frameworks/TN3270 Helper.app/Contents/MacOS/TN3270 Helper\n`),
+    kill: () => { killed = true; return ok(); },
     ...over.answers,
   };
   const io: Io = {
@@ -125,32 +133,36 @@ export function macWorld(over: {
       return typeof a === 'function' ? a(args) : a;
     },
     fs: {
-      exists, list: (d) => (d === LOGIN_ITEMS ? ['TN3270 Login Helper.app'] : []),
+      exists, list: (d) => over.listings?.[d] ?? (d === LOGIN_ITEMS ? ['TN3270 Login Helper.app'] : []),
       copy: (a, b) => { events.push(`copy ${a} ${b}`); paths.add(b); },
       rm: (p) => { events.push(`rm ${p}`); for (const x of [...paths]) if (x === p || x.startsWith(`${p}/`)) paths.delete(x); },
       mkdir: (d) => { paths.add(d); },
-      mkdtemp: (prefix) => { events.push(`mkdtemp ${prefix}`); paths.add(MAC_WORK); return MAC_WORK; },
+      mkdtemp: (prefix, parent) => { events.push(`mkdtemp ${prefix}`); parents.push(parent); paths.add(MAC_WORK); return MAC_WORK; },
       read: () => '', write: () => {},
     },
     launch: over.launch ?? (async (route, args) => {
       events.push('launch');
       routes.push(route); launchArgs.push(args);
       if (over.makesContainer !== false) paths.add(`${CONTAINER}/Data`);
-      return { stdout: `${SANDBOXED_LINE}\nconnect: dialog shown\n`, during: null, survivors: [], ...over.launched };
+      return { stdout: `${SANDBOXED_LINE}\nconnect: dialog shown\n`, during: null, held: true, pid: 4242, survivors: [], ...over.launched };
     }),
     checks: fakeChecks(events),
     now: (() => { let t = 0; return () => (t += 500); })(),
     ...over.io,
   };
-  return { io, events, out, calls, routes, launchArgs };
+  return { io, events, out, calls, routes, launchArgs, parents };
 }
 
 export function winWorld(over: {
   ps?: Record<string, Answer>; signtool?: Answer; launched?: Partial<Launched>; sdk?: string[]; files?: string[]; io?: Partial<Io>;
+  /** Paths fs.rm leaves in place. */
+  keeps?: string[];
 } = {}): World {
   const events: string[] = []; const out: string[] = []; const calls: string[][] = []; const routes: Route[] = []; const launchArgs: string[][] = [];
+  const parents: (string | undefined)[] = [];
   const paths = new Set<string>([SIGNTOOL, `${SDK}\\10.0.17763.0\\x64\\signtool.exe`]);
   const ps: Record<string, Answer> = {
+    installed: ok(''),
     certificate: ok(`thumbprint=${THUMB}\n`),
     'Add-AppxPackage': ok('Add-AppxPackage: OK\n'),
     'Get-AppxPackage': ok(fx('get-appxpackage.json')),
@@ -179,20 +191,20 @@ export function winWorld(over: {
         throw new Error(`ENOENT ${d}`);
       },
       copy: (a, b) => { events.push(`copy ${a} ${b}`); paths.add(b); },
-      rm: (p) => { events.push(`rm ${p}`); paths.delete(p); },
+      rm: (p) => { events.push(`rm ${p}`); if (!over.keeps?.includes(p)) paths.delete(p); },
       mkdir: (d) => { paths.add(d); },
-      mkdtemp: (prefix) => { events.push(`mkdtemp ${prefix}`); return WIN_WORK; },
+      mkdtemp: (prefix, parent) => { events.push(`mkdtemp ${prefix}`); parents.push(parent); for (const f of ['probe.pfx', 'probe.cer']) paths.add(`${WIN_WORK}\\${f}`); return WIN_WORK; },
       read: () => '', write: () => {},
     },
     launch: async (route, args, opts) => {
       events.push('launch');
       routes.push(route); launchArgs.push(args);
       const during = opts.whileRunning ? opts.whileRunning(828) : null;
-      return { stdout: `\n${WIN_LINE}\n`, during, survivors: [], ...over.launched };
+      return { stdout: `\n${WIN_LINE}\n`, during, held: true, pid: 828, survivors: [], ...over.launched };
     },
     checks: fakeChecks(events, () => WIN_LINE),
     now: (() => { let t = 0; return () => (t += 500); })(),
     ...over.io,
   };
-  return { io, events, out, calls, routes, launchArgs };
+  return { io, events, out, calls, routes, launchArgs, parents };
 }

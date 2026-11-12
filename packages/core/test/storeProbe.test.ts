@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
@@ -7,6 +7,8 @@ import { fileURLToPath } from 'node:url';
 import {
   BUNDLE_ID, CheckFailed, IDENTITY_NAME, PUBLISHER, TEAM_ID, containerPath, judgeMacConfinement, judgeSignatureVerify, judgeWinConfinement,
   launchForProbe, macRoute, main, newestSdkTool, parseAppxPackage, parseProbeLine, removeContainer, winRoute,
+  PS_PREAMBLE, STAY_MS, parseInstalled, pidsUnder, psAlias, psCertificate, psInstall, psInstalled, psListPackage, psPackageOfPid, psQuote,
+  psReap, psRemoveCert, psUninstall, setTeamId, signInsideOut, nodeFs, type Ran,
 } from '../../../scripts/store-probe.mjs';
 import {
   ALIAS, CONTAINER, HOME, INSTALL, LOGIN_HELPER, MAC_APP, MAC_DIR, MAC_FIND, MAC_SRC, MAC_WORK, PW, SANDBOXED_LINE, SDK, SIGNTOOL,
@@ -239,6 +241,7 @@ describe('main on macOS (a port of mac-sandbox.sh variant D)', () => {
       ['codesign', '--verify', '--deep', '--strict', '--verbose=2', MAC_APP],
       ['ps', '-ww', '-axo', 'pid=,comm='],
       ['kill', '-9', '101', '103'],
+      ['ps', '-ww', '-axo', 'pid=,comm='], // re-listed: none of ours is left
     ]);
     expect(w.calls.filter((c) => c[0] === 'find')).toEqual([
       ['find', `${MAC_APP}/Contents/Frameworks`, '-name', '*.dylib'],
@@ -338,7 +341,7 @@ describe('main on macOS (a port of mac-sandbox.sh variant D)', () => {
     const w = macWorld({ launch: async () => { throw new Error('cannot start /scratch/x: spawn EACCES'); } });
     expect(await main([MAC_DIR], w.io)).toBe(2);
     expect(w.out.join('\n')).toMatch(/store-probe: error: cannot start/);
-    expect(w.events.slice(-4)).toEqual(['run ps', 'run kill', `rm ${CONTAINER}`, `rm ${MAC_WORK}`]);
+    expect(w.events.slice(-5)).toEqual(['run ps', 'run kill', 'run ps', `rm ${CONTAINER}`, `rm ${MAC_WORK}`]);
   });
   it('a tool that cannot start (run throws) is exit 2, never a result; cleanup still runs', async () => {
     const w = macWorld({ answers: { 'codesign --verify': () => { throw new Error('cannot run codesign: spawn codesign ENOENT'); } } });
@@ -405,7 +408,7 @@ describe('main on Windows (a port of win-appx.ps1)', () => {
     const w = winWorld();
     expect(await main([WIN_DIR], w.io)).toBe(0);
     expect(w.events.filter((e) => e.startsWith('run ') || e === 'launch' || e.startsWith('check ') || e.startsWith('rm ')).map((e) => e.replace(/ C:\\.*$/, ''))).toEqual([
-      'run certificate', 'run signtool', 'run Add-AppxPackage', 'run Get-AppxPackage', 'run alias',
+      'run installed', 'run certificate', 'run signtool', 'run Add-AppxPackage', 'run Get-AppxPackage', 'run alias',
       'launch', 'run GetPackageFullName', 'check drawsGolden', 'check dialogConnects',
       'run reap', 'run Remove-AppxPackage', 'run cert-remove My', 'run cert-remove TrustedPeople',
       'rm', 'rm', 'rm',
@@ -422,9 +425,17 @@ describe('main on Windows (a port of win-appx.ps1)', () => {
     expect(ps('Add-AppxPackage')).toContain(`Add-AppxPackage -Path '${appx}' -ErrorAction Stop`);
     expect(ps('Get-AppxPackage')).toContain("Get-AppxPackage -Name 'TN3270.Probe' | ConvertTo-Json -Compress");
     expect(ps('GetPackageFullName')).toMatch(/\[StoreProbePkg\]::Of\(828\)$/);
-    expect(ps('reap')).toContain(`$d = '${INSTALL}'`);
-    expect(ps('cert-remove My')).toContain(`Cert:\\CurrentUser\\My\\${THUMB}`);
-    expect(ps('cert-remove TrustedPeople')).toContain(`Cert:\\LocalMachine\\TrustedPeople\\${THUMB}`);
+    // The cleanup runs the builders' exact scripts: our processes (install dir, started pid), the
+    // EXACT installed full name, our thumbprint in both stores.
+    expect(ps('reap')).toBe(`${PS_PREAMBLE}\n${psReap(INSTALL, [828])}`);
+    expect(ps('Remove-AppxPackage')).toBe(`${PS_PREAMBLE}\n${psUninstall('TN3270.Probe_0.1.4.0_x64__5j71tdef09jdy')}`);
+    expect(ps('cert-remove My')).toBe(`${PS_PREAMBLE}\n${psRemoveCert('Cert:\\CurrentUser\\My', THUMB)}`);
+    expect(ps('cert-remove TrustedPeople')).toBe(`${PS_PREAMBLE}\n${psRemoveCert('Cert:\\LocalMachine\\TrustedPeople', THUMB)}`);
+    expect(ps('installed')).toBe(`${PS_PREAMBLE}\n${psInstalled()}`);
+    expect(ps('certificate')).toBe(`${PS_PREAMBLE}\n${psCertificate({ pfx: `${WIN_WORK}\\probe.pfx`, cer: `${WIN_WORK}\\probe.cer`, password: PW })}`);
+    expect(ps('alias')).toBe(`${PS_PREAMBLE}\n${psAlias()}`);
+    expect(ps('Get-AppxPackage')).toBe(`${PS_PREAMBLE}\n${psListPackage()}`);
+    expect(ps('GetPackageFullName')).toBe(`${PS_PREAMBLE}\n${psPackageOfPid(828)}`);
     expect(w.routes[0]).toMatchObject({ exe: ALIAS, probe: true, processDir: INSTALL });
     expect(w.launchArgs[0]!.at(-1)).toBe(`--user-data-dir=${WIN_WORK}\\confine-user-data`);
     expect(fails(w.out)).toEqual([]);
@@ -444,7 +455,7 @@ describe('main on Windows (a port of win-appx.ps1)', () => {
     const w = winWorld({ sdk: [] });
     expect(await main([WIN_DIR], w.io)).toBe(2);
     expect(w.out.join('\n')).toMatch(/no Windows SDK signtool/);
-    expect(w.calls).toEqual([]);
+    expect(w.events.filter((e) => e.startsWith('run '))).toEqual(['run installed']);
   });
   it('the alias not found after the install: exit 2, and the cleanup still removes everything', async () => {
     const w = winWorld({ ps: { alias: ok('alias=\n') } });
@@ -453,31 +464,39 @@ describe('main on Windows (a port of win-appx.ps1)', () => {
     expect(w.events).not.toContain('launch');
     for (const e of ['run reap', 'run Remove-AppxPackage', 'run cert-remove My', 'run cert-remove TrustedPeople', `rm ${WIN_WORK}\\probe.pfx`]) at(w.events, e);
   });
-  it('Add-AppxPackage failing: exit 1, and Remove-AppxPackage, both certificate removals and the pfx all still run', async () => {
-    const w = winWorld({ ps: { 'Add-AppxPackage': ran(1, 'Add-AppxPackage: FAILED Deployment failed with HRESULT: 0x800B0100') } });
+  it('Add-AppxPackage failing: exit 1, and Remove-AppxPackage (of what it left, by full name), both certificate removals and the pfx all still run', async () => {
+    let adds = 0;
+    const w = winWorld({ ps: {
+      'Add-AppxPackage': () => { adds++; return ran(1, 'Add-AppxPackage: FAILED Deployment failed with HRESULT: 0x800B0100'); },
+      // Nothing before the install; a half-installed package after it.
+      installed: () => ok(adds === 0 ? '' : 'installed=TN3270.Probe_0.1.4.0_x64__5j71tdef09jdy\n'),
+    } });
     expect(await main([WIN_DIR], w.io)).toBe(1);
     expect(fails(w.out)).toEqual(['FAIL win-msix: Add-AppxPackage failed (exit 1): Add-AppxPackage: FAILED Deployment failed with HRESULT: 0x800B0100']);
     const after = w.events.slice(at(w.events, 'run Add-AppxPackage') + 1);
     expect(after.filter((e) => e.startsWith('run ') || e.startsWith('rm '))).toEqual([
-      'run Remove-AppxPackage', 'run cert-remove My', 'run cert-remove TrustedPeople', `rm ${WIN_WORK}\\probe.pfx`, `rm ${WIN_WORK}\\probe.cer`, `rm ${WIN_WORK}`,
+      'run installed', 'run Remove-AppxPackage', 'run cert-remove My', 'run cert-remove TrustedPeople', `rm ${WIN_WORK}\\probe.pfx`, `rm ${WIN_WORK}\\probe.cer`, `rm ${WIN_WORK}`,
     ]);
+    const uninstall = w.calls.filter((c) => c[0] === 'powershell' && psKind(psScript(c)) === 'Remove-AppxPackage').map(psScript);
+    expect(uninstall).toEqual([`${PS_PREAMBLE}\n${psUninstall('TN3270.Probe_0.1.4.0_x64__5j71tdef09jdy')}`]);
   });
   it('each cleanup step runs even when the one before it failed, each failure logged', async () => {
     const w = winWorld({ ps: { 'Remove-AppxPackage': ran(1, 'still installed'), 'cert-remove My': () => { throw new Error('cannot run powershell: spawn powershell ENOENT'); } } });
     expect(await main([WIN_DIR], w.io)).toBe(1);
     expect(fails(w.out)).toEqual([
-      'FAIL win-msix: cleanup Remove-AppxPackage: exit 1: still installed',
+      'FAIL win-msix: cleanup Remove-AppxPackage: TN3270.Probe_0.1.4.0_x64__5j71tdef09jdy: exit 1: still installed',
       'FAIL win-msix: cleanup certificate Cert:\\CurrentUser\\My: cannot run powershell: spawn powershell ENOENT',
     ]);
     for (const e of ['run cert-remove TrustedPeople', `rm ${WIN_WORK}\\probe.pfx`, `rm ${WIN_WORK}\\probe.cer`, `rm ${WIN_WORK}`]) at(w.events, e);
   });
-  it('the certificate not made: exit 2; without a thumbprint the cleanup removes ours by subject and name', async () => {
+  it('the certificate not made: exit 2; without a thumbprint the cleanup removes ours by SUBJECT (not FriendlyName) from both stores', async () => {
     const w = winWorld({ ps: { certificate: ran(1, 'New-SelfSignedCertificate : Access denied') } });
     expect(await main([WIN_DIR], w.io)).toBe(2);
     expect(w.out.join('\n')).toMatch(/throwaway certificate was not made and trusted \(exit 1\): New-SelfSignedCertificate : Access denied/);
     const rms = w.calls.filter((c) => c[0] === 'powershell' && psKind(psScript(c)).startsWith('cert-remove')).map(psScript);
     expect(rms).toHaveLength(2);
-    for (const s of rms) expect(s).toContain("$_.Subject -eq 'CN=TN3270 Store Probe' -and $_.FriendlyName -eq 'TN3270 store probe'");
+    expect(rms).toEqual([`${PS_PREAMBLE}\n${psRemoveCert('Cert:\\CurrentUser\\My', null)}`, `${PS_PREAMBLE}\n${psRemoveCert('Cert:\\LocalMachine\\TrustedPeople', null)}`]);
+    for (const x of rms) expect(x).not.toContain('FriendlyName');
   });
   it('FAIL-CLOSED: windowsStore=false from the confinement launch is exit 1, checks not run', async () => {
     const w = winWorld({ launched: { stdout: 'probe: sandbox=none windowsStore=false\n' } });
@@ -559,4 +578,337 @@ setInterval(() => {}, 1000); // stays up, as the app does with its Connect dialo
         .rejects.toThrow(/cannot start .*no-such-app/);
     } finally { rmSync(tmp, { recursive: true, force: true }); }
   }, 60_000);
+});
+
+// ---------------------------------------------------------------------------------------------
+// Review fixes (2026-11-12): the pure builders' EXACT text, the safety refusals, and the branches.
+
+const lines = (...ls: string[]) => ls.join('\n');
+const FULL = 'TN3270.Probe_0.1.4.0_x64__5j71tdef09jdy';
+
+describe('PowerShell builders: the exact scripts', () => {
+  it('psReap: ours is under EXACTLY the install dir (trailing \\), or a started pid that is still TN3270.exe; re-listed; a leftover throws', () => {
+    expect(psReap(INSTALL, [828])).toBe(lines(
+      String.raw`$dir = 'C:\Program Files\WindowsApps\TN3270.Probe_0.1.4.0_x64__5j71tdef09jdy\'`,
+      '$ids = @(828)',
+      String.raw`$ours = { param($p) $p.ExecutablePath -and (($dir -and $p.ExecutablePath.StartsWith($dir, [StringComparison]::OrdinalIgnoreCase)) -or (($ids -contains [int]$p.ProcessId) -and $p.ExecutablePath.EndsWith('\TN3270.exe', [StringComparison]::OrdinalIgnoreCase))) }`,
+      '$found = @(Get-CimInstance Win32_Process | Where-Object { & $ours $_ })',
+      'foreach ($p in $found) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue; "killed $($p.ProcessId) $($p.ExecutablePath)" }',
+      'if ($found.Count -gt 0) { Start-Sleep -Seconds 2 }',
+      '$left = @(Get-CimInstance Win32_Process | Where-Object { & $ours $_ })',
+      `if ($left.Count -gt 0) { throw "still running after Stop-Process: $(($left | ForEach-Object { $_.ProcessId }) -join ' ')" }`,
+    ));
+    // No install location: only the started pids (still TN3270.exe); no pids and no dir match nothing.
+    expect(psReap(null, [828]).split('\n')[0]).toBe('$dir = $null');
+    expect(psReap(`${INSTALL}\\`, []).split('\n').slice(0, 2)).toEqual([String.raw`$dir = 'C:\Program Files\WindowsApps\TN3270.Probe_0.1.4.0_x64__5j71tdef09jdy\'`, '$ids = @()']);
+  });
+  it('psUninstall: exactly the full name, then checks that full name is gone', () => {
+    expect(psUninstall(FULL)).toBe(lines(
+      `Remove-AppxPackage -Package '${FULL}'`,
+      `if (@(Get-AppxPackage -Name 'TN3270.Probe' | Where-Object { $_.PackageFullName -eq '${FULL}' }).Count -gt 0) { throw 'still installed: ${FULL}' }`,
+      `'removed ${FULL}'`,
+    ));
+  });
+  it('psRemoveCert by thumbprint: -DeleteKey in CurrentUser\\My only, and a Test-Path re-check that throws', () => {
+    expect(psRemoveCert('Cert:\\CurrentUser\\My', THUMB)).toBe(lines(
+      String.raw`$p = 'Cert:\CurrentUser\My\4E7733D6F453C85023DF5488E7B8A9964885E700'`,
+      'if (Test-Path -LiteralPath $p) { Remove-Item -Path $p -DeleteKey }',
+      String.raw`if (Test-Path -LiteralPath $p) { throw 'still there: Cert:\CurrentUser\My\4E7733D6F453C85023DF5488E7B8A9964885E700' }`,
+      String.raw`'removed Cert:\CurrentUser\My\4E7733D6F453C85023DF5488E7B8A9964885E700'`,
+    ));
+    expect(psRemoveCert('Cert:\\LocalMachine\\TrustedPeople', THUMB)).toBe(lines(
+      String.raw`$p = 'Cert:\LocalMachine\TrustedPeople\4E7733D6F453C85023DF5488E7B8A9964885E700'`,
+      'if (Test-Path -LiteralPath $p) { Remove-Item -Path $p }',
+      String.raw`if (Test-Path -LiteralPath $p) { throw 'still there: Cert:\LocalMachine\TrustedPeople\4E7733D6F453C85023DF5488E7B8A9964885E700' }`,
+      String.raw`'removed Cert:\LocalMachine\TrustedPeople\4E7733D6F453C85023DF5488E7B8A9964885E700'`,
+    ));
+  });
+  it('psRemoveCert without a thumbprint: by our exact SUBJECT (FriendlyName does not survive Export/Import); none found throws', () => {
+    expect(psRemoveCert('Cert:\\LocalMachine\\TrustedPeople', null)).toBe(lines(
+      String.raw`$c = @(Get-ChildItem -Path 'Cert:\LocalMachine\TrustedPeople' | Where-Object { $_.Subject -eq 'CN=TN3270 Store Probe' })`,
+      String.raw`if ($c.Count -eq 0) { throw 'no certificate with subject CN=TN3270 Store Probe in Cert:\LocalMachine\TrustedPeople, and one was expected' }`,
+      'foreach ($x in $c) { Remove-Item -Path $x.PSPath }',
+      String.raw`if (@(Get-ChildItem -Path 'Cert:\LocalMachine\TrustedPeople' | Where-Object { $_.Subject -eq 'CN=TN3270 Store Probe' }).Count -gt 0) { throw 'still there: subject CN=TN3270 Store Probe in Cert:\LocalMachine\TrustedPeople' }`,
+      '"removed $($c.Count) by subject"',
+    ));
+    expect(psRemoveCert('Cert:\\CurrentUser\\My', null)).toContain('foreach ($x in $c) { Remove-Item -Path $x.PSPath -DeleteKey }');
+  });
+  it('psCertificate: the spike\'s flags, the thumbprint first, the TrustedPeople check', () => {
+    expect(psCertificate({ pfx: 'C:\\w\\probe.pfx', cer: 'C:\\w\\probe.cer', password: 'pw' })).toBe(lines(
+      String.raw`$c = New-SelfSignedCertificate -Type Custom -Subject 'CN=TN3270 Store Probe' -KeyUsage DigitalSignature -CertStoreLocation Cert:\CurrentUser\My -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.3', '2.5.29.19={text}') -FriendlyName 'TN3270 store probe'`,
+      'Write-Output "thumbprint=$($c.Thumbprint)"',
+      String.raw`Export-PfxCertificate -Cert "Cert:\CurrentUser\My\$($c.Thumbprint)" -FilePath 'C:\w\probe.pfx' -Password (ConvertTo-SecureString -String 'pw' -Force -AsPlainText) | Out-Null`,
+      String.raw`Export-Certificate -Cert "Cert:\CurrentUser\My\$($c.Thumbprint)" -FilePath 'C:\w\probe.cer' | Out-Null`,
+      String.raw`Import-Certificate -FilePath 'C:\w\probe.cer' -CertStoreLocation Cert:\LocalMachine\TrustedPeople | Out-Null`,
+      String.raw`if (-not (Test-Path "Cert:\LocalMachine\TrustedPeople\$($c.Thumbprint)")) { throw "the certificate is not in LocalMachine\TrustedPeople" }`,
+    ));
+  });
+  it('psInstall, psAlias, psInstalled, psListPackage', () => {
+    expect(psInstall('C:\\w\\a.appx').split('\n')[0]).toBe(String.raw`try { Add-AppxPackage -Path 'C:\w\a.appx' -ErrorAction Stop; 'Add-AppxPackage: OK' }`);
+    expect(psInstall('C:\\w\\a.appx')).toContain('Get-AppPackageLog -ActivityID $aid');
+    expect(psInstall('C:\\w\\a.appx').split('\n').at(-2)).toBe('  exit 1');
+    expect(psAlias()).toBe(lines(
+      '$c = Get-Command tn3270-gui.exe -ErrorAction SilentlyContinue',
+      'if ($c) { "alias=$($c.Source)" } else {',
+      String.raw`  $f = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\tn3270-gui.exe'`,
+      '  if (Test-Path $f) { "alias=$f" } else { "alias=" }',
+      '}',
+    ));
+    expect(psInstalled()).toBe(`@(Get-AppxPackage -Name 'TN3270.Probe') | ForEach-Object { "installed=$($_.PackageFullName)" }`);
+    expect(parseInstalled(`installed=${FULL}\r\ninstalled=TN3270.Probe_0.1.3.0_x64__5j71tdef09jdy\nnoise\n`)).toEqual([FULL, 'TN3270.Probe_0.1.3.0_x64__5j71tdef09jdy']);
+    expect(parseInstalled('')).toEqual([]);
+    expect(psListPackage()).toBe("Get-AppxPackage -Name 'TN3270.Probe' | ConvertTo-Json -Compress");
+    expect(psPackageOfPid(828).split('\n').at(-1)).toBe('[StoreProbePkg]::Of(828)');
+  });
+  it('psQuote doubles \' and U+2018-U+201B (PowerShell quotes them all)', () => {
+    expect(psQuote("a'b")).toBe("'a''b'");
+    expect(psQuote('a\u2018b\u2019c\u201Ad\u201Be')).toBe("'a\u2018\u2018b\u2019\u2019c\u201A\u201Ad\u201B\u201Be'");
+    expect(psInstall('C:\\it\u2019s.appx')).toContain("-Path 'C:\\it\u2019\u2019s.appx'");
+  });
+});
+
+describe('mac builders: signInsideOut, setTeamId, pidsUnder', () => {
+  const recorder = (answer: (cmd: string, args: string[]) => Ran | undefined = () => undefined) => {
+    const calls: string[][] = [];
+    const finds: Record<string, string[]> = { '*.dylib': MAC_FIND.dylibs, '*.framework': MAC_FIND.frameworks, '*.app': MAC_FIND.helpers, '-u+x': MAC_FIND.login };
+    const run = (cmd: string, args: string[]): Ran => {
+      calls.push([cmd, ...args]);
+      const a = answer(cmd, args);
+      if (a) return a;
+      if (cmd === 'find') return ok(`${finds[args.at(-1)!]!.join('\n')}\n`);
+      return ok();
+    };
+    return { calls, run };
+  };
+  const ENT = { main: '/r/main.plist', inherit: '/r/inherit.plist', login: '/r/login.plist' };
+  const fs = { exists: (p: string) => p === `${MAC_APP}/Contents/Library/LoginItems`, list: () => ['TN3270 Login Helper.app', 'README'] };
+  it('signs inside out with the right entitlements, the app last', () => {
+    const r = recorder();
+    expect(signInsideOut(MAC_APP, ENT, { run: r.run, fs })).toEqual([]);
+    expect(r.calls.filter((c) => c[0] === 'codesign')).toEqual([
+      ...MAC_FIND.dylibs.map((f) => ['codesign', '--force', '-s', '-', f]),
+      ...MAC_FIND.frameworks.map((f) => ['codesign', '--force', '--deep', '-s', '-', f]),
+      ...MAC_FIND.helpers.map((f) => ['codesign', '--force', '-s', '-', '--entitlements', '/r/inherit.plist', f]),
+      ...MAC_FIND.login.map((f) => ['codesign', '--force', '-s', '-', '--entitlements', '/r/login.plist', f]),
+      ['codesign', '--force', '-s', '-', '--entitlements', '/r/login.plist', LOGIN_HELPER],
+      ['codesign', '--force', '-s', '-', '--entitlements', '/r/main.plist', MAC_APP],
+    ]);
+  });
+  it('every failure is collected and every step still runs; no login items is fine', () => {
+    const r = recorder((cmd, args) => (cmd === 'find' && args.includes('*.framework') ? ran(1, 'find: permission denied') : cmd === 'codesign' && args.at(-1) === MAC_APP ? ran(1, 'boom') : undefined));
+    const p = signInsideOut(MAC_APP, ENT, { run: r.run, fs: { exists: () => false, list: () => [] } });
+    expect(p).toEqual([`find frameworks failed (exit 1): find: permission denied`, `signing ${MAC_APP} failed (exit 1): boom`]);
+    expect(r.calls.at(-1)).toEqual(['codesign', '--force', '-s', '-', '--entitlements', '/r/main.plist', MAC_APP]);
+  });
+  it('setTeamId: Add, else Set, and the read-back must be the team id', () => {
+    expect(setTeamId(MAC_APP, recorder((cmd, a) => (a[1]!.startsWith('Print') ? ok('H68TN685J4\n') : undefined)).run)).toEqual([]);
+    expect(setTeamId(MAC_APP, recorder((cmd, a) => (a[1]!.startsWith('Print') ? ok('ZZZZZ99999\n') : undefined)).run)).toEqual(['ElectronTeamID reads back as ZZZZZ99999, not H68TN685J4']);
+    expect(setTeamId(MAC_APP, recorder((cmd, a) => (a[1]!.startsWith('Print') ? ran(1, 'Print: Entry, ":ElectronTeamID", Does Not Exist') : ran(1, 'nope'))).run))
+      .toEqual(['PlistBuddy could not add or set ElectronTeamID (exit 1): nope', 'ElectronTeamID reads back as Print: Entry, ":ElectronTeamID", Does Not Exist, not H68TN685J4']);
+  });
+  it('pidsUnder: only executables inside the scratch (as given, or under /private)', () => {
+    expect(pidsUnder(`  1 ${MAC_WORK}/TN3270.app/x\n  2 ${MAC_WORK}-other/TN3270.app/x\n  3 /private${MAC_WORK}/y\n  4 /usr/bin/z\n`, MAC_WORK)).toEqual(['1', '3']);
+  });
+});
+
+describe('safety: never touch a real user\'s app (CI=true or STORE_PROBE_FORCE=1 allow it)', () => {
+  it('mac: an existing container is refused, exit 2, nothing run and nothing removed', async () => {
+    const w = macWorld({ containerBefore: true });
+    expect(await main([MAC_DIR], w.io)).toBe(2);
+    expect(w.out.join('\n')).toMatch(/refusing to run: \/Users\/runner\/Library\/Containers\/io\.github\.athornton\.tn3270 already exists/);
+    expect(w.calls).toEqual([]);
+    expect(w.events.filter((e) => e.startsWith('rm ') || e.startsWith('mkdtemp'))).toEqual([]);
+  });
+  it.each([[{ CI: 'true' }], [{ STORE_PROBE_FORCE: '1' }]])('mac: %o lets the existing container be removed and the probe run', async (env) => {
+    const w = macWorld({ containerBefore: true, io: { env } });
+    expect(await main([MAC_DIR], w.io)).toBe(0);
+    expect(at(w.events, `rm ${CONTAINER}`)).toBeLessThan(at(w.events, 'run ditto'));
+  });
+  it('mac: CI other than "true", or FORCE other than "1", still refuses', async () => {
+    for (const env of [{ CI: '1' }, { STORE_PROBE_FORCE: 'yes' }]) expect(await main([MAC_DIR], macWorld({ containerBefore: true, io: { env } }).io)).toBe(2);
+  });
+  it('win: an installed TN3270.Probe is refused, exit 2, nothing installed or removed', async () => {
+    const w = winWorld({ ps: { installed: ok(`installed=${FULL}\n`) } });
+    expect(await main([WIN_DIR], w.io)).toBe(2);
+    expect(w.out.join('\n')).toMatch(new RegExp(`refusing to run: ${FULL.replace(/\./g, '\\.')} is already installed`));
+    expect(w.events.filter((e) => e.startsWith('run '))).toEqual(['run installed']);
+  });
+  it.each([[{ CI: 'true' }], [{ STORE_PROBE_FORCE: '1' }]])('win: %o removes the stale package by its exact full name first, then runs', async (env) => {
+    let n = 0;
+    const w = winWorld({ ps: { installed: () => ok(n++ === 0 ? 'installed=TN3270.Probe_0.1.3.0_x64__5j71tdef09jdy\n' : '') }, io: { env } });
+    expect(await main([WIN_DIR], w.io)).toBe(0);
+    const uninstalls = w.calls.filter((c) => c[0] === 'powershell' && psKind(psScript(c)) === 'Remove-AppxPackage').map(psScript);
+    expect(uninstalls).toEqual([`${PS_PREAMBLE}\n${psUninstall('TN3270.Probe_0.1.3.0_x64__5j71tdef09jdy')}`, `${PS_PREAMBLE}\n${psUninstall(FULL)}`]);
+    expect(at(w.events, 'run Remove-AppxPackage')).toBeLessThan(at(w.events, 'run certificate'));
+  });
+  it('win: the installed-package query failing is exit 2 (it cannot tell)', async () => {
+    const w = winWorld({ ps: { installed: ran(1, 'Get-AppxPackage : The service cannot be started') } });
+    expect(await main([WIN_DIR], w.io)).toBe(2);
+    expect(w.out.join('\n')).toMatch(/cannot tell whether TN3270\.Probe is already installed/);
+  });
+});
+
+describe('scratch under RUNNER_TEMP when set (AppData is the MSIX virtualization tree)', () => {
+  it.each(['darwin', 'win32'] as const)('%s: RUNNER_TEMP is the parent; unset, the OS temp dir', async (platform) => {
+    const world = platform === 'darwin' ? macWorld : winWorld;
+    const set = world({ io: { env: { RUNNER_TEMP: platform === 'darwin' ? '/Users/runner/work/_temp' : 'D:\\a\\_temp' } } });
+    expect(await main([platform === 'darwin' ? MAC_DIR : WIN_DIR], set.io)).toBe(0);
+    expect(set.parents).toEqual([platform === 'darwin' ? '/Users/runner/work/_temp' : 'D:\\a\\_temp']);
+    const unset = world();
+    expect(await main([platform === 'darwin' ? MAC_DIR : WIN_DIR], unset.io)).toBe(0);
+    expect(unset.parents).toEqual([undefined]);
+  });
+  it('nodeFs.mkdtemp makes the directory under the given parent', () => {
+    const parent = mkdtempSync(join(tmpdir(), 'storeprobe-parent-'));
+    try {
+      const d = nodeFs.mkdtemp('tn3270-store-probe-', parent);
+      expect(d.startsWith(join(parent, 'tn3270-store-probe-'))).toBe(true);
+      expect(existsSync(d)).toBe(true);
+    } finally { rmSync(parent, { recursive: true, force: true }); }
+  });
+});
+
+describe('the confinement must HOLD, the reaps must be re-listed, the success must be counted', () => {
+  it('mac: a launch that printed sandbox=<id> and then crashed (variant C, run 43115293433) FAILs', async () => {
+    const w = macWorld({ launched: { stdout: fx('probe-mac-crashed-variant-c.txt'), held: false } });
+    expect(await main([MAC_DIR], w.io)).toBe(1);
+    expect(fails(w.out)).toEqual([expect.stringMatching(/^FAIL mac-sandbox: the app did not hold after its probe line: it exited within 5 s without showing the Connect dialog/)]);
+    expect(w.events.some((e) => e.startsWith('check '))).toBe(false);
+  });
+  it('win: a launch that did not hold FAILs', async () => {
+    const w = winWorld({ launched: { held: false } });
+    expect(await main([WIN_DIR], w.io)).toBe(1);
+    expect(fails(w.out).join('\n')).toMatch(/did not hold/);
+  });
+  it('mac: a process of ours still listed after kill -9 is a cleanup FAIL', async () => {
+    const w = macWorld({ answers: { kill: ran(1, 'kill: 101: Operation not permitted') } });
+    expect(await main([MAC_DIR], w.io)).toBe(1);
+    expect(fails(w.out)).toEqual(['FAIL mac-sandbox: cleanup processes: still running after kill -9: 101 103']);
+  }, 10_000);
+  it('win: the reap script failing (its re-list threw) is a cleanup FAIL, and the uninstall still runs', async () => {
+    const w = winWorld({ ps: { reap: ran(1, 'still running after Stop-Process: 828') } });
+    expect(await main([WIN_DIR], w.io)).toBe(1);
+    expect(fails(w.out)).toEqual(['FAIL win-msix: cleanup processes: exit 1: still running after Stop-Process: 828']);
+    at(w.events, 'run Remove-AppxPackage');
+  });
+  it('win: a pfx or cer still there after removal is a cleanup FAIL', async () => {
+    const w = winWorld({ keeps: [`${WIN_WORK}\\probe.pfx`] });
+    expect(await main([WIN_DIR], w.io)).toBe(1);
+    expect(fails(w.out)).toEqual([`FAIL win-msix: cleanup probe.pfx: ${WIN_WORK}\\probe.pfx still exists`]);
+  });
+  it('win: a certificate removal that fails its re-check is a cleanup FAIL', async () => {
+    const w = winWorld({ ps: { 'cert-remove TrustedPeople': ran(1, `still there: Cert:\\LocalMachine\\TrustedPeople\\${THUMB}`) } });
+    expect(await main([WIN_DIR], w.io)).toBe(1);
+    expect(fails(w.out)).toEqual([`FAIL win-msix: cleanup certificate Cert:\\LocalMachine\\TrustedPeople: exit 1: still there: Cert:\\LocalMachine\\TrustedPeople\\${THUMB}`]);
+  });
+  it.each(['darwin', 'win32'] as const)('%s: an empty check list is exit 1: every required ok must be printed', async (platform) => {
+    const w = platform === 'darwin' ? macWorld({ io: { checks: [] } }) : winWorld({ io: { checks: [] } });
+    expect(await main([platform === 'darwin' ? MAC_DIR : WIN_DIR], w.io)).toBe(1);
+    expect(fails(w.out)).toEqual([
+      expect.stringMatching(/never shown to pass: replays a trace and draws the synthetic-ispf golden$/),
+      expect.stringMatching(/never shown to pass: with no host, opens the Connect dialog and connects$/),
+    ]);
+    expect(w.out).toContain(`${platform === 'darwin' ? 'mac-sandbox: 2 of 4' : 'win-msix: 1 of 3'} required ok lines`);
+  });
+});
+
+describe('the failure branches', () => {
+  it('mac: plutil, ditto and the ElectronTeamID read-back failing each FAIL, and nothing is launched', async () => {
+    const cases: [Record<string, Ran>, RegExp][] = [
+      [{ plutil: ran(1, 'entitlements.mas.plist: Encountered unknown tag') }, /plutil -lint .*entitlements\.mas\.plist failed \(exit 1\): .*unknown tag/],
+      [{ ditto: ran(1, 'ditto: No space left on device') }, /ditto \/a\/mas-universal\/TN3270\.app failed \(exit 1\): ditto: No space left on device/],
+      [{ 'PlistBuddy Print': ok('ZZZZZ99999\n') }, /ElectronTeamID reads back as ZZZZZ99999, not H68TN685J4/],
+    ];
+    for (const [answers, why] of cases) {
+      const w = macWorld({ answers });
+      expect(await main([MAC_DIR], w.io)).toBe(1);
+      expect(fails(w.out).join('\n')).toMatch(why);
+      expect(w.events).not.toContain('launch');
+    }
+  });
+  it('win: signtool failing is exit 1 and installs nothing; the cleanup still runs', async () => {
+    const w = winWorld({ signtool: ran(1, 'SignTool Error: A required function is not present.') });
+    expect(await main([WIN_DIR], w.io)).toBe(1);
+    expect(fails(w.out)).toEqual(['FAIL win-msix: signtool sign failed (exit 1): SignTool Error: A required function is not present.']);
+    expect(w.events).not.toContain('run Add-AppxPackage');
+    for (const e of ['run cert-remove My', 'run cert-remove TrustedPeople']) at(w.events, e);
+  });
+  it('win: the alias query exiting non-zero is exit 2, even when it printed an alias line first', async () => {
+    const w = winWorld({ ps: { alias: ran(1, `alias=${ALIAS}\nGet-Command : later error`) } });
+    expect(await main([WIN_DIR], w.io)).toBe(2);
+    expect(w.events).not.toContain('launch');
+  });
+  it('win: a setup failure before the certificate step removes no certificate (none was made)', async () => {
+    let n = 0;
+    const w = winWorld({ io: { env: { CI: 'true' } }, ps: {
+      installed: () => ok(n++ === 0 ? 'installed=TN3270.Probe_0.1.3.0_x64__5j71tdef09jdy\n' : ''),
+      'Remove-AppxPackage': ran(1, 'Remove-AppxPackage : Access denied'),
+    } });
+    expect(await main([WIN_DIR], w.io)).toBe(2);
+    expect(w.out.join('\n')).toMatch(/could not remove the stale TN3270\.Probe_0\.1\.3\.0_x64__5j71tdef09jdy \(exit 1\): Remove-AppxPackage : Access denied/);
+    expect(w.events.filter((e) => e.startsWith('run cert'))).toEqual([]);
+    expect(fails(w.out)).toEqual([]);
+  });
+  it('win: the alias query itself failing is exit 2', async () => {
+    const w = winWorld({ ps: { alias: ran(1, 'Get-Command : broken') } });
+    expect(await main([WIN_DIR], w.io)).toBe(2);
+    expect(w.out.join('\n')).toMatch(/not on PATH after Add-AppxPackage \(exit 1\): Get-Command : broken/);
+  });
+  it('win: the pid-to-package query failing, or reporting an exited pid, FAILs the confinement', async () => {
+    for (const [answer, why] of [[ran(1, 'Add-Type : compiler error'), /package is query failed \(exit 1\): Add-Type : compiler error/], [ok('OpenProcess failed, error 87\n'), /package is OpenProcess failed, error 87/]] as const) {
+      const w = winWorld({ ps: { GetPackageFullName: answer } });
+      expect(await main([WIN_DIR], w.io)).toBe(1);
+      expect(fails(w.out).join('\n')).toMatch(why);
+    }
+  });
+  it('win: whileRunning never called (the app exited first) leaves the identity unmeasured: FAIL', async () => {
+    const w = winWorld({ io: { launch: async () => ({ stdout: `${WIN_LINE}\n`, during: null, held: true, survivors: [] }) } });
+    expect(await main([WIN_DIR], w.io)).toBe(1);
+    expect(fails(w.out).join('\n')).toMatch(/package full name was not measured/);
+  });
+});
+
+describe('launchForProbe holds, and whileRunning only sees a live process', () => {
+  const withApp = async (src: string, fn: (route: { exe: string; prefix: string[]; env: Record<string, string>; installDir: string; probe: boolean }, tmp: string) => Promise<void>) => {
+    const saved = process.env.DISPLAY;
+    process.env.DISPLAY = saved ?? ':fake';
+    const tmp = realpathSync.native(mkdtempSync(join(tmpdir(), 'storeprobe-')));
+    try {
+      const app = join(tmp, 'fake-app.cjs');
+      writeFileSync(app, src);
+      await fn({ exe: process.execPath, prefix: [app], env: {}, installDir: tmp, probe: true }, tmp);
+    } finally {
+      if (saved === undefined) delete process.env.DISPLAY; else process.env.DISPLAY = saved;
+      rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    }
+  };
+  it('a probe line and then an exit (variant C\'s shape) is held=false', async () => {
+    await withApp("process.stdout.write('probe: sandbox=fake.id windowsStore=false\\n'); setTimeout(() => process.exit(133), 300);", async (route, tmp) => {
+      const l = await launchForProbe(route, [], { work: tmp, stayMs: 3_000 });
+      expect(l.stdout).toContain('probe: sandbox=fake.id');
+      expect(l.held).toBe(false);
+    });
+  }, 60_000);
+  it('the Connect dialog line holds at once; staying up past stayMs holds too', async () => {
+    await withApp("process.stdout.write('probe: sandbox=fake.id windowsStore=false\\nconnect: dialog shown\\n'); setInterval(() => {}, 1000);", async (route, tmp) => {
+      const t0 = Date.now();
+      const l = await launchForProbe(route, [], { work: tmp, stayMs: 30_000 });
+      expect(l.held).toBe(true);
+      expect(Date.now() - t0).toBeLessThan(20_000);
+      expect(typeof l.pid).toBe('number');
+    });
+    await withApp("process.stdout.write('probe: sandbox=fake.id windowsStore=false\\n'); setInterval(() => {}, 1000);", async (route, tmp) => {
+      expect((await launchForProbe(route, [], { work: tmp, stayMs: 500 })).held).toBe(true);
+    });
+  }, 60_000);
+  it('an app that exits without a probe line: whileRunning is never called on the dead pid', async () => {
+    await withApp('process.exit(0);', async (route, tmp) => {
+      let called = false;
+      const l = await launchForProbe(route, [], { work: tmp, whileRunning: () => { called = true; return 'x'; } });
+      expect(called).toBe(false);
+      expect(l.during).toBeNull();
+      expect(l.held).toBe(false);
+    });
+  }, 60_000);
+  it('STAY_MS is 5 s', () => { expect(STAY_MS).toBe(5_000); });
 });

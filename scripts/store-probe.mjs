@@ -38,7 +38,7 @@ import { homedir, tmpdir } from 'node:os';
 import { posix, resolve, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CHECKS, LAUNCH_MS, TRACE, probeSeen, start, stop, switches } from './package-checks.mjs';
-import { CheckFailed, until } from './smoke-lib.mjs';
+import { CheckFailed, sleep, until } from './smoke-lib.mjs';
 import { runCommand } from './verify-signatures.mjs';
 
 export { CheckFailed };
@@ -214,8 +214,12 @@ const STORES = ['Cert:\\CurrentUser\\My', 'Cert:\\LocalMachine\\TrustedPeople'];
 
 /** The first lines of a command's output, for a FAIL line. */
 const head = (text, n = 3) => (text ?? '').trim().split(/\r?\n/).slice(0, n).join(' | ') || '(no output)';
-/** A PowerShell single-quoted string. */
-const q = (s) => `'${String(s).replace(/'/g, "''")}'`;
+/**
+ * A PowerShell single-quoted string. PowerShell treats U+2018-U+201B as single quotes too
+ * (about_Quoting_Rules), so each is doubled like `'`.
+ */
+export const psQuote = (s) => `'${String(s).replace(/['\u2018\u2019\u201A\u201B]/g, (c) => c + c)}'`;
+const q = psQuote;
 
 /**
  * The newest SDK `bin\<10.x.y.z>\x64\<tool>`, by parsed version (not string order), among the
@@ -267,17 +271,25 @@ function one(files, re, what, dir) {
   throw new Setup(`expected exactly one ${what} in ${dir}, found ${hits.length === 0 ? 'none' : hits.join(', ')}; it has: ${files.join(', ') || '(nothing)'}`);
 }
 
-/** The ok/FAIL lines of one route, counting the FAILs. */
-function reporter(io, route) {
-  const r = { fails: 0 };
-  r.ok = (what) => io.log(`ok ${route}: ${what}`);
+
+/**
+ * The ok/FAIL lines of one route. `required` are the ok keys a pass needs: success is "every
+ * required ok was printed", not "no FAIL was printed" (so an empty check list cannot pass).
+ */
+function reporter(io, route, required) {
+  const r = { fails: 0, oks: new Set(), required };
+  r.ok = (key, what) => { r.oks.add(key); io.log(`ok ${route}: ${what}`); };
   r.fail = (why) => { r.fails++; io.log(`FAIL ${route}: ${why}`); };
+  r.missing = () => r.required.filter((k) => !r.oks.has(k));
   /** One cleanup step: always attempted, its failure a FAIL line, never a throw. */
   r.cleanup = async (what, fn) => {
     try { await fn(); } catch (e) { r.fail(`cleanup ${what}: ${e.message}`); }
   };
   return r;
 }
+
+/** The checks every route must pass: package-checks' list, whatever io.checks holds. */
+const REQUIRED_CHECKS = CHECKS.map(([name]) => name);
 
 /**
  * Runs the checks on `route`, each judged twice: the check itself (a CheckFailed is its FAIL),
@@ -298,34 +310,106 @@ async function runChecks(ctx, route, judgeProbe) {
       if (ctx.echo) io.log(`check ${name}: probe line ${JSON.stringify(res.probe)}`);
       const p = judgeProbe(parseProbeLine(res.probe));
       for (const x of p) rep.fail(`${name}: ${x}`);
-      if (p.length === 0) rep.ok(`${name}${res.note ? ` (${res.note})` : ''}`);
+      if (p.length === 0) rep.ok(name, `${name}${res.note ? ` (${res.note})` : ''}`);
     });
   }
 }
 
-/** The confinement launch, through io.launch; echoes its output; survivors are a FAIL. */
+/** How long the app must outlive its probe line, unless it shows the Connect dialog first. */
+export const STAY_MS = 5_000;
+
+/**
+ * The confinement launch, through io.launch; echoes its output. It passes only if the app HELD:
+ * after its probe line it showed the Connect dialog or was still running STAY_MS later (variant
+ * C, run 43115293433, printed `sandbox=<id>` and then died of `GPU process isn't usable`).
+ * Survivors of the kill are a FAIL. Records the started pid for the cleanup.
+ */
 async function confinementLaunch(ctx, route, args, whileRunning) {
   const l = await ctx.io.launch(route, args, { work: ctx.work, whileRunning });
   if (ctx.echo) ctx.io.log(`confinement launch output:\n${l.stdout}${l.stderr ?? ''}`.replace(/\s+$/, ''));
-  if (l.survivors.length > 0) ctx.rep.fail(`confinement launch: survived the kill: ${l.survivors.join(' ')}`);
-  return l;
+  if (typeof l.pid === 'number') ctx.pids.push(l.pid);
+  const problems = [];
+  if (l.held !== true) problems.push(`the app did not hold after its probe line: it exited within ${STAY_MS / 1000} s without showing the Connect dialog (a crash, as variant C's "GPU process isn't usable")`);
+  if (l.survivors.length > 0) problems.push(`confinement launch: survived the kill: ${l.survivors.join(' ')}`);
+  return { ...l, problems };
+}
+
+/** The scratch directory: under RUNNER_TEMP when set (as the spike), else the OS temp dir. */
+const scratch = (io) => io.fs.mkdtemp('tn3270-store-probe-', io.env.RUNNER_TEMP || undefined);
+
+/** May an existing container or package be treated as ours? Only on CI or when forced. */
+const mayReplace = (env) => env.CI === 'true' || env.STORE_PROBE_FORCE === '1';
+
+// ---------------------------------------------------------------------------------------------
+// macOS
+
+/** ElectronTeamID: PlistBuddy Add, else Set (the key exists), then Print it back. -> problems. */
+export function setTeamId(app, run) {
+  const bad = [];
+  const plist = posix.join(app, 'Contents', 'Info.plist');
+  const add = run(PLISTBUDDY, ['-c', `Add :ElectronTeamID string ${TEAM_ID}`, plist]);
+  if (add.status !== 0) {
+    const set = run(PLISTBUDDY, ['-c', `Set :ElectronTeamID ${TEAM_ID}`, plist]);
+    if (set.status !== 0) bad.push(`PlistBuddy could not add or set ElectronTeamID (exit ${set.status}): ${head(set.text)}`);
+  }
+  const got = run(PLISTBUDDY, ['-c', 'Print :ElectronTeamID', plist]);
+  if (got.status !== 0 || got.stdout.trim() !== TEAM_ID) bad.push(`ElectronTeamID reads back as ${head(got.text)}, not ${TEAM_ID}`);
+  return bad;
+}
+
+/**
+ * Signs `app` inside out, exactly as mac-sandbox.sh prepare() (variant D): the Frameworks dylibs,
+ * the frameworks --deep, the helper apps with `ent.inherit`, each login item's executables and
+ * then the item with `ent.login`, the app with `ent.main`. Every step runs; -> problems. Finding
+ * no framework, helper app or login-item executable is a problem: nothing signed is not "signed".
+ */
+export function signInsideOut(app, ent, { run, fs }) {
+  const bad = [];
+  const found = (args, what, atLeastOne) => {
+    const r = run('find', args);
+    if (r.status !== 0) { bad.push(`find ${what} failed (exit ${r.status}): ${head(r.text)}`); return []; }
+    const hits = r.stdout.split('\n').filter((l) => l !== '');
+    if (atLeastOne && hits.length === 0) bad.push(`found no ${what} to sign`);
+    return hits;
+  };
+  const sign = (args, what) => {
+    const r = run('codesign', args);
+    if (r.status !== 0) bad.push(`signing ${what} failed (exit ${r.status}): ${head(r.text)}`);
+  };
+  const fw = posix.join(app, 'Contents', 'Frameworks');
+  for (const f of found([fw, '-name', '*.dylib'], 'dylibs', false)) sign(['--force', '-s', '-', f], f);
+  // --deep on frameworks only: Electron Framework.framework nests executables (Helpers/chrome_crashpad_handler).
+  for (const f of found([fw, '-maxdepth', '1', '-name', '*.framework'], 'frameworks', true)) sign(['--force', '--deep', '-s', '-', f], f);
+  for (const f of found([fw, '-maxdepth', '1', '-name', '*.app'], 'helper apps', true)) sign(['--force', '-s', '-', '--entitlements', ent.inherit, f], f);
+  const items = posix.join(app, 'Contents', 'Library', 'LoginItems');
+  for (const name of (fs.exists(items) ? fs.list(items) : []).filter((n) => n.endsWith('.app'))) {
+    const li = posix.join(items, name);
+    for (const f of found([posix.join(li, 'Contents', 'MacOS'), '-type', 'f', '-perm', '-u+x'], `${name} executables`, true)) {
+      sign(['--force', '-s', '-', '--entitlements', ent.login, f], f);
+    }
+    sign(['--force', '-s', '-', '--entitlements', ent.login, li], li);
+  }
+  sign(['--force', '-s', '-', '--entitlements', ent.main, app], app);
+  return bad;
 }
 
 /**
  * macOS: a port of scripts/spike/mac-sandbox.sh's variant D (`prepare D ... teamid`, then the
  * first of `launches D`), run 43115293433. Steps, in the spike's order:
+ *   0. REFUSE (exit 2) if the container already exists, unless CI=true or STORE_PROBE_FORCE=1:
+ *      off CI it may be a real user's TN3270 data, and the cleanup removes it;
  *   1. plutil -lint the three entitlements files;
  *   2. remove a stale container (guarded), so its existence later is THIS launch's doing;
- *   3. ditto the MAS app into scratch;
- *   4. PlistBuddy Add (else Set) :ElectronTeamID, and Print it back;
- *   5. sign inside out: the Frameworks dylibs, the frameworks --deep, the helper apps with inherit,
- *      each login item's executables then the item with loginhelper, the app with main;
+ *   3. ditto the MAS app into scratch (under RUNNER_TEMP when set, as the spike);
+ *   4. PlistBuddy Add (else Set) :ElectronTeamID, and Print it back (setTeamId);
+ *   5. sign inside out (signInsideOut);
  *   6. codesign -d --entitlements :- and codesign --verify --deep --strict --verbose=2; an
  *      invalid copy (a signing failure, a --verify problem, no app-sandbox) launches nothing;
- *   7. the confinement launch (the spike's `bare`: --disable-gpu, TN3270_GUI_PROBE=1), then the
- *      container; judged by judgeMacConfinement;
+ *   7. the confinement launch (the spike's `bare`: --disable-gpu, TN3270_GUI_PROBE=1), which must
+ *      hold, then the container; judged by judgeMacConfinement;
  *   8. the checks on macRoute, every probe line judged;
- *   9. cleanup: the processes running from scratch (ps, kill -9 by PID), the container, the scratch.
+ *   9. cleanup: the processes running from scratch (ps, kill -9 by PID, re-listed), the
+ *      container, the scratch.
  */
 async function probeMac(ctx, dir) {
   const { io, run, phase, rep } = ctx;
@@ -334,12 +418,15 @@ async function probeMac(ctx, dir) {
     throw new Setup(`no ${src}: build Electron's MAS app first, with \`npm run package:gui -- --mac mas --universal -c.mac.identity=null\``);
   }
   const container = containerPath(io.home);
+  if (io.fs.exists(container) && !mayReplace(io.env)) {
+    throw new Setup(`refusing to run: ${container} already exists, and this probe removes it -- it may hold a real TN3270's data. Move it aside, or set STORE_PROBE_FORCE=1 (CI=true is allowed: the runner is fresh, so it is ours)`);
+  }
   const ent = {
     main: posix.join(RESOURCES, 'entitlements.mas.plist'),
     inherit: posix.join(RESOURCES, 'entitlements.mas.inherit.plist'),
     login: posix.join(RESOURCES, 'entitlements.mas.loginhelper.plist'),
   };
-  const work = io.fs.mkdtemp('tn3270-store-probe-');
+  const work = scratch(io);
   ctx.work = work;
   try {
     const bad = [];
@@ -354,57 +441,22 @@ async function probeMac(ctx, dir) {
     const copied = phase('copy', () => run('ditto', [src, app]));
     if (copied.status !== 0) { rep.fail(`ditto ${src} failed (exit ${copied.status}): ${head(copied.text)}`); return; }
 
-    phase('sign', () => {
-      const plist = posix.join(app, 'Contents', 'Info.plist');
-      const add = run(PLISTBUDDY, ['-c', `Add :ElectronTeamID string ${TEAM_ID}`, plist]);
-      if (add.status !== 0) {
-        const set = run(PLISTBUDDY, ['-c', `Set :ElectronTeamID ${TEAM_ID}`, plist]);
-        if (set.status !== 0) bad.push(`PlistBuddy could not add or set ElectronTeamID (exit ${set.status}): ${head(set.text)}`);
-      }
-      const got = run(PLISTBUDDY, ['-c', 'Print :ElectronTeamID', plist]);
-      if (got.status !== 0 || got.stdout.trim() !== TEAM_ID) bad.push(`ElectronTeamID reads back as ${head(got.text)}, not ${TEAM_ID}`);
-
-      const found = (args, what, atLeastOne) => {
-        const r = run('find', args);
-        if (r.status !== 0) { bad.push(`find ${what} failed (exit ${r.status}): ${head(r.text)}`); return []; }
-        const hits = r.stdout.split('\n').filter((l) => l !== '');
-        if (atLeastOne && hits.length === 0) bad.push(`found no ${what} to sign`);
-        return hits;
-      };
-      const sign = (args, what) => {
-        const r = run('codesign', args);
-        if (r.status !== 0) bad.push(`signing ${what} failed (exit ${r.status}): ${head(r.text)}`);
-      };
-      const fw = posix.join(app, 'Contents', 'Frameworks');
-      for (const f of found([fw, '-name', '*.dylib'], 'dylibs', false)) sign(['--force', '-s', '-', f], f);
-      // --deep on frameworks only: Electron Framework.framework nests executables (Helpers/chrome_crashpad_handler).
-      for (const f of found([fw, '-maxdepth', '1', '-name', '*.framework'], 'frameworks', true)) sign(['--force', '--deep', '-s', '-', f], f);
-      for (const f of found([fw, '-maxdepth', '1', '-name', '*.app'], 'helper apps', true)) sign(['--force', '-s', '-', '--entitlements', ent.inherit, f], f);
-      const items = posix.join(app, 'Contents', 'Library', 'LoginItems');
-      for (const name of (io.fs.exists(items) ? io.fs.list(items) : []).filter((n) => n.endsWith('.app'))) {
-        const li = posix.join(items, name);
-        for (const f of found([posix.join(li, 'Contents', 'MacOS'), '-type', 'f', '-perm', '-u+x'], `${name} executables`, true)) {
-          sign(['--force', '-s', '-', '--entitlements', ent.login, f], f);
-        }
-        sign(['--force', '-s', '-', '--entitlements', ent.login, li], li);
-      }
-      sign(['--force', '-s', '-', '--entitlements', ent.main, app], app);
-    });
+    phase('sign', () => bad.push(...setTeamId(app, run), ...signInsideOut(app, ent, { run, fs: io.fs })));
     const entitlements = run('codesign', ['-d', '--entitlements', ':-', app]).text;
     const verify = phase('verify', () => run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', app]));
     bad.push(...judgeSignatureVerify(verify.text, verify.status));
     if (!sandboxEntitled(entitlements)) bad.push('the signature does not entitle com.apple.security.app-sandbox (codesign -d --entitlements); not launched');
     if (bad.length > 0) { bad.forEach(rep.fail); return; }
-    rep.ok(`signed (ad-hoc, app-sandbox entitled, codesign --verify --deep --strict clean)`);
+    rep.ok('signed', 'signed (ad-hoc, app-sandbox entitled, codesign --verify --deep --strict clean)');
 
     const route = macRoute({ home: io.home, fs: io.fs, trace: io.trace }, app);
     const confined = await phase('confine', async () => {
       const l = await confinementLaunch(ctx, route, ['--disable-gpu']);
       const probe = parseProbeLine(l.stdout);
-      const p = judgeMacConfinement({ entitlements, containerExists: io.fs.exists(container), probe }, BUNDLE_ID);
+      const p = [...judgeMacConfinement({ entitlements, containerExists: io.fs.exists(container), probe }, BUNDLE_ID), ...l.problems];
       p.forEach(rep.fail);
-      if (p.length === 0) rep.ok(`confined (the app reports sandbox=${probe.sandbox}; ${container} exists)`);
-      return p.length === 0 && l.survivors.length === 0;
+      if (p.length === 0) rep.ok('confined', `confined (the app reports sandbox=${probe.sandbox}; ${container} exists)`);
+      return p.length === 0;
     });
     if (!confined) { io.log(`${ROUTE_MAC}: the checks were not run: without the confinement nothing else counts`); return; }
     await runChecks(ctx, route, (probe) => judgeProbeMac(probe, BUNDLE_ID));
@@ -417,20 +469,88 @@ async function probeMac(ctx, dir) {
   }
 }
 
-/** Kills (by PID) every process whose executable is inside scratch, never by name (the spike's reap). */
-function reapMac(ctx, work) {
-  const r = ctx.run('ps', ['-ww', '-axo', 'pid=,comm=']);
-  if (r.status !== 0) throw new Error(`ps failed (exit ${r.status}): ${head(r.text)}`);
+/** PIDs (strings) in `ps -ww -axo pid=,comm=` output whose executable is inside `work`. */
+export function pidsUnder(psOutput, work) {
   const under = [`${work}/`, `/private${work}/`];
-  const pids = r.stdout.split('\n').map((l) => /^\s*(\d+)\s+(.*)$/.exec(l)).filter((m) => m !== null && under.some((u) => m[2].startsWith(u))).map((m) => m[1]);
+  return psOutput.split('\n').map((l) => /^\s*(\d+)\s+(.*)$/.exec(l))
+    .filter((m) => m !== null && under.some((u) => m[2].startsWith(u))).map((m) => m[1]);
+}
+
+/**
+ * Kills (by PID) every process whose executable is inside scratch, never by name (the spike's
+ * reap), then re-lists: any still there is a throw (a FAIL), not a log line.
+ */
+async function reapMac(ctx, work) {
+  const list = () => {
+    const r = ctx.run('ps', ['-ww', '-axo', 'pid=,comm=']);
+    if (r.status !== 0) throw new Error(`ps failed (exit ${r.status}): ${head(r.text)}`);
+    return pidsUnder(r.stdout, work);
+  };
+  let pids = list();
   if (pids.length === 0) return;
   ctx.io.log(`${ROUTE_MAC}: reaping ${pids.join(' ')}`);
   const k = ctx.run('kill', ['-9', ...pids]);
   if (k.status !== 0) ctx.io.log(`${ROUTE_MAC}: kill -9 exit ${k.status}: ${head(k.text)}`);
+  for (let i = 0; i < 5 && (pids = list()).length > 0; i++) await sleep(200);
+  if (pids.length > 0) throw new Error(`still running after kill -9: ${pids.join(' ')}`);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Windows: the PowerShell steps, each a pure builder (tested for its exact text), run through
+// psRun. Every script starts with PS_PREAMBLE, so a failing cmdlet is a non-zero exit.
+
+export const PS_PREAMBLE = "$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue'";
+
+/** The full names of the TN3270.Probe packages installed now, one `installed=<name>` line each. */
+export const psInstalled = () => `@(Get-AppxPackage -Name ${q(IDENTITY_NAME)}) | ForEach-Object { "installed=$($_.PackageFullName)" }`;
+
+/** `installed=<name>` lines -> names. */
+export const parseInstalled = (text) => (text ?? '').split(/\r?\n/).map((l) => /^installed=(\S+)\s*$/.exec(l)?.[1]).filter((n) => n !== undefined);
+
+/**
+ * The spike's certificate: self-signed, subject = the appx publisher, code-signing EKU, in
+ * CurrentUser\My; its thumbprint printed FIRST (so the cleanup knows it even if a later line
+ * fails); the pfx and cer exported; the cer imported into LocalMachine\TrustedPeople and checked.
+ */
+export function psCertificate({ pfx, cer, password }) {
+  return [
+    `$c = New-SelfSignedCertificate -Type Custom -Subject ${q(PUBLISHER)} -KeyUsage DigitalSignature -CertStoreLocation Cert:\\CurrentUser\\My -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.3', '2.5.29.19={text}') -FriendlyName ${q(CERT_NAME)}`,
+    'Write-Output "thumbprint=$($c.Thumbprint)"',
+    `Export-PfxCertificate -Cert "Cert:\\CurrentUser\\My\\$($c.Thumbprint)" -FilePath ${q(pfx)} -Password (ConvertTo-SecureString -String ${q(password)} -Force -AsPlainText) | Out-Null`,
+    `Export-Certificate -Cert "Cert:\\CurrentUser\\My\\$($c.Thumbprint)" -FilePath ${q(cer)} | Out-Null`,
+    `Import-Certificate -FilePath ${q(cer)} -CertStoreLocation Cert:\\LocalMachine\\TrustedPeople | Out-Null`,
+    'if (-not (Test-Path "Cert:\\LocalMachine\\TrustedPeople\\$($c.Thumbprint)")) { throw "the certificate is not in LocalMachine\\TrustedPeople" }',
+  ].join('\n');
+}
+
+/** Add-AppxPackage, and on failure the deployment log of its ActivityID (the spike's Install). */
+export function psInstall(appx) {
+  return [
+    `try { Add-AppxPackage -Path ${q(appx)} -ErrorAction Stop; 'Add-AppxPackage: OK' }`,
+    'catch {',
+    '  $m = $_.Exception.Message; Write-Output "Add-AppxPackage: FAILED $m"',
+    "  $aid = [regex]::Match($m, '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}').Value",
+    '  if ($aid) { Get-AppPackageLog -ActivityID $aid -ErrorAction SilentlyContinue | Select-Object -First 40 | Format-List | Out-String | Write-Output }',
+    '  exit 1',
+    '}',
+  ].join('\n');
+}
+
+export const psListPackage = () => `Get-AppxPackage -Name ${q(IDENTITY_NAME)} | ConvertTo-Json -Compress`;
+
+/** The alias: Get-Command tn3270-gui.exe, else the WindowsApps alias file (the spike's AliasCheck). */
+export function psAlias() {
+  return [
+    '$c = Get-Command tn3270-gui.exe -ErrorAction SilentlyContinue',
+    'if ($c) { "alias=$($c.Source)" } else {',
+    "  $f = Join-Path $env:LOCALAPPDATA 'Microsoft\\WindowsApps\\tn3270-gui.exe'",
+    '  if (Test-Path $f) { "alias=$f" } else { "alias=" }',
+    '}',
+  ].join('\n');
 }
 
 /** The spike's SpikePkg: GetPackageFullName of a live pid, from outside the app. */
-const packageOfPid = (pid) => `Add-Type -TypeDefinition @'
+export const psPackageOfPid = (pid) => `Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -455,31 +575,87 @@ public static class StoreProbePkg {
 '@
 [StoreProbePkg]::Of(${Number(pid)})`;
 
-/** Removes our certificate from `store`: by thumbprint, or without one by subject AND friendly name. */
-const removeCert = (store, thumb) => (thumb
-  ? `$p = ${q(`${store}\\${thumb}`)}; Remove-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue; if (Test-Path -LiteralPath $p) { throw "still in ${store}: ${thumb}" }; 'removed'`
-  : `$c = @(Get-ChildItem ${q(store)} | Where-Object { $_.Subject -eq ${q(PUBLISHER)} -and $_.FriendlyName -eq ${q(CERT_NAME)} }); foreach ($x in $c) { Remove-Item -LiteralPath $x.PSPath -Force }; "removed $($c.Count) by subject"`);
+/**
+ * Kills OUR processes, by PID, then re-lists them and throws if any is left. Ours: the
+ * executable lies under EXACTLY `installLocation` (a trailing `\` in the comparison, so a sibling
+ * `..._xyz2` directory is not), or the pid is one this run started (`pids`) AND it is still the
+ * app's TN3270.exe (Windows reuses pids: a bare pid could now be a stranger's).
+ */
+export function psReap(installLocation, pids) {
+  const dir = installLocation ? q(`${installLocation.replace(/\\+$/, '')}\\`) : '$null';
+  return [
+    `$dir = ${dir}`,
+    `$ids = @(${pids.map((x) => Number(x)).filter((x) => Number.isInteger(x)).join(', ')})`,
+    "$ours = { param($p) $p.ExecutablePath -and (($dir -and $p.ExecutablePath.StartsWith($dir, [StringComparison]::OrdinalIgnoreCase)) -or (($ids -contains [int]$p.ProcessId) -and $p.ExecutablePath.EndsWith('\\TN3270.exe', [StringComparison]::OrdinalIgnoreCase))) }",
+    '$found = @(Get-CimInstance Win32_Process | Where-Object { & $ours $_ })',
+    'foreach ($p in $found) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue; "killed $($p.ProcessId) $($p.ExecutablePath)" }',
+    'if ($found.Count -gt 0) { Start-Sleep -Seconds 2 }',
+    '$left = @(Get-CimInstance Win32_Process | Where-Object { & $ours $_ })',
+    "if ($left.Count -gt 0) { throw \"still running after Stop-Process: $(($left | ForEach-Object { $_.ProcessId }) -join ' ')\" }",
+  ].join('\n');
+}
+
+/** Uninstalls EXACTLY `fullName` (never every package of the name), then checks it is gone. */
+export function psUninstall(fullName) {
+  return [
+    `Remove-AppxPackage -Package ${q(fullName)}`,
+    `if (@(Get-AppxPackage -Name ${q(IDENTITY_NAME)} | Where-Object { $_.PackageFullName -eq ${q(fullName)} }).Count -gt 0) { throw ${q(`still installed: ${fullName}`)} }`,
+    `${q(`removed ${fullName}`)}`,
+  ].join('\n');
+}
+
+/**
+ * Removes our certificate from `store`, then checks it is gone. By thumbprint when known; without
+ * one, by our exact placeholder SUBJECT (Export/Import-Certificate drop the FriendlyName, so it
+ * cannot be matched in TrustedPeople), and finding none is a throw: a removal was expected. In
+ * CurrentUser\My the private key goes too (`-DeleteKey`, the Certificate provider's Remove-Item
+ * dynamic parameter, PowerShell 3.0+). `-Path`: in Cert: Remove-Item supports only DeleteKey,
+ * Path, WhatIf and Confirm (about_Certificate_Provider); a thumbprint has no wildcard.
+ */
+export function psRemoveCert(store, thumbprint) {
+  const deleteKey = store === STORES[0] ? ' -DeleteKey' : '';
+  if (thumbprint) {
+    const p = `${store}\\${thumbprint}`;
+    return [
+      `$p = ${q(p)}`,
+      `if (Test-Path -LiteralPath $p) { Remove-Item -Path $p${deleteKey} }`,
+      `if (Test-Path -LiteralPath $p) { throw ${q(`still there: ${p}`)} }`,
+      `${q(`removed ${p}`)}`,
+    ].join('\n');
+  }
+  const ours = `Get-ChildItem -Path ${q(store)} | Where-Object { $_.Subject -eq ${q(PUBLISHER)} }`;
+  return [
+    `$c = @(${ours})`,
+    `if ($c.Count -eq 0) { throw ${q(`no certificate with subject ${PUBLISHER} in ${store}, and one was expected`)} }`,
+    `foreach ($x in $c) { Remove-Item -Path $x.PSPath${deleteKey} }`,
+    `if (@(${ours}).Count -gt 0) { throw ${q(`still there: subject ${PUBLISHER} in ${store}`)} }`,
+    '"removed $($c.Count) by subject"',
+  ].join('\n');
+}
 
 /**
  * Windows: a port of scripts/spike/win-appx.ps1's working path (the default package), run
  * 43112504521. Steps:
- *   1. the one TN3270-*-win-x64.appx, copied into scratch (the spike signed the artifact in place);
+ *   0. REFUSE (exit 2) if a TN3270.Probe package is already installed, unless CI=true or
+ *      STORE_PROBE_FORCE=1 (then those exact packages are removed first, by full name);
+ *   1. the one TN3270-*-win-x64.appx, copied into scratch (under RUNNER_TEMP when set: AppData is
+ *      the MSIX virtualization tree; the spike signed the artifact in place);
  *   2. the newest SDK signtool (the spike's SdkTool; never electron-builder's winCodeSign one);
- *   3. the certificate: New-SelfSignedCertificate (subject = the appx publisher, code-signing EKU),
- *      Export-PfxCertificate, Export-Certificate, Import-Certificate into LocalMachine\TrustedPeople;
+ *   3. the certificate (psCertificate);
  *   4. signtool sign /fd SHA256 /f <pfx> /p <pw>;
- *   5. Add-AppxPackage (with Get-AppPackageLog on failure), then Get-AppxPackage as JSON;
- *   6. the alias: Get-Command tn3270-gui.exe, else the WindowsApps alias file;
- *   7. the confinement launch through the alias, its pid's package full name sampled while it runs;
- *      judged by judgeWinConfinement;
+ *   5. Add-AppxPackage (psInstall), then Get-AppxPackage as JSON: the full name THIS run installed;
+ *   6. the alias (psAlias);
+ *   7. the confinement launch through the alias, its pid's package full name sampled while it
+ *      runs; it must hold; judged by judgeWinConfinement;
  *   8. the checks on winRoute, every probe line judged;
- *   9. cleanup: processes under the install location (by PID), Remove-AppxPackage, the certificate
- *      from both stores, the pfx and cer, the scratch.
+ *   9. cleanup: our processes by PID (psReap, re-listed), Remove-AppxPackage of exactly the
+ *      installed full name, the certificate from both stores (and its key), the pfx and cer, the
+ *      scratch.
  */
 async function probeWin(ctx, dir) {
   const { io, run, phase, rep } = ctx;
   const ps = (script) => {
-    const full = `$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue'\n${script}`;
+    const full = `${PS_PREAMBLE}\n${script}`;
     // -EncodedCommand (UTF-16LE base64), not -Command: no quoting of `"` or newlines through the
     // Windows command line can mangle the script. The echo shows the script itself.
     return run('powershell', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(full, 'utf16le').toString('base64')],
@@ -488,33 +664,41 @@ async function probeWin(ctx, dir) {
   let files;
   try { files = io.fs.list(dir); } catch (e) { throw new Setup(`cannot list ${dir}: ${e.message}`); }
   const name = one(files, /^TN3270-.+-win-x64\.appx$/, 'TN3270-*-win-x64.appx', dir);
+  const before = ps(psInstalled());
+  if (before.status !== 0) throw new Setup(`cannot tell whether ${IDENTITY_NAME} is already installed (exit ${before.status}): ${head(before.text)}`);
+  const stale = parseInstalled(before.stdout);
+  if (stale.length > 0 && !mayReplace(io.env)) {
+    throw new Setup(`refusing to run: ${stale.join(', ')} is already installed, and this probe would replace it. Remove it, or set STORE_PROBE_FORCE=1 (CI=true is allowed: the runner is fresh, so it is ours)`);
+  }
   let sdk;
   try { sdk = io.fs.list(SDK_BIN); } catch { sdk = []; }
   const signtool = newestSdkTool(sdk, io.fs.exists);
   if (signtool === null) throw new Setup(`no Windows SDK signtool: none of ${SDK_BIN}\\10.*\\x64\\signtool.exe exists (electron-builder's winCodeSign signtool cannot sign an appx, run 43112504521)`);
   io.log(`${ROUTE_WIN}: signtool ${signtool}`);
 
-  const work = io.fs.mkdtemp('tn3270-store-probe-');
+  const work = scratch(io);
   ctx.work = work;
   const pfx = win32.join(work, 'probe.pfx');
   const cer = win32.join(work, 'probe.cer');
   const pw = (io.secret ?? (() => randomUUID().replace(/-/g, '')))();
   ctx.secrets.push(pw);
+  let certAttempted = false;
   let thumb = null;
   let installLocation = null;
+  let installedFullName = null;
+  let installAttempted = false;
   try {
+    for (const old of stale) {
+      io.log(`${ROUTE_WIN}: removing the stale ${old} first (${io.env.CI === 'true' ? 'CI=true' : 'STORE_PROBE_FORCE=1'})`);
+      const r = ps(psUninstall(old));
+      if (r.status !== 0) throw new Setup(`could not remove the stale ${old} (exit ${r.status}): ${head(r.text)}`);
+    }
     const appx = win32.join(work, name);
     io.fs.copy(win32.join(dir, name), appx);
 
     phase('certificate', () => {
-      const r = ps([
-        `$c = New-SelfSignedCertificate -Type Custom -Subject ${q(PUBLISHER)} -KeyUsage DigitalSignature -CertStoreLocation Cert:\\CurrentUser\\My -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.3', '2.5.29.19={text}') -FriendlyName ${q(CERT_NAME)}`,
-        'Write-Output "thumbprint=$($c.Thumbprint)"',
-        `Export-PfxCertificate -Cert "Cert:\\CurrentUser\\My\\$($c.Thumbprint)" -FilePath ${q(pfx)} -Password (ConvertTo-SecureString -String ${q(pw)} -Force -AsPlainText) | Out-Null`,
-        `Export-Certificate -Cert "Cert:\\CurrentUser\\My\\$($c.Thumbprint)" -FilePath ${q(cer)} | Out-Null`,
-        `Import-Certificate -FilePath ${q(cer)} -CertStoreLocation Cert:\\LocalMachine\\TrustedPeople | Out-Null`,
-        'if (-not (Test-Path "Cert:\\LocalMachine\\TrustedPeople\\$($c.Thumbprint)")) { throw "the certificate is not in LocalMachine\\TrustedPeople" }',
-      ].join('\n'));
+      certAttempted = true;
+      const r = ps(psCertificate({ pfx, cer, password: pw }));
       thumb = /^thumbprint=([0-9A-Fa-f]{40})\s*$/m.exec(r.stdout)?.[1] ?? null;
       if (r.status !== 0 || thumb === null) throw new Setup(`the throwaway certificate was not made and trusted (exit ${r.status}): ${head(r.text)}`);
     });
@@ -522,64 +706,59 @@ async function probeWin(ctx, dir) {
     const signed = phase('sign', () => run(signtool, ['sign', '/fd', 'SHA256', '/f', pfx, '/p', pw, appx]));
     if (signed.status !== 0) { rep.fail(`signtool sign failed (exit ${signed.status}): ${head(signed.text)}`); return; }
 
-    const added = phase('install', () => ps([
-      `try { Add-AppxPackage -Path ${q(appx)} -ErrorAction Stop; 'Add-AppxPackage: OK' }`,
-      'catch {',
-      '  $m = $_.Exception.Message; Write-Output "Add-AppxPackage: FAILED $m"',
-      "  $aid = [regex]::Match($m, '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}').Value",
-      '  if ($aid) { Get-AppPackageLog -ActivityID $aid -ErrorAction SilentlyContinue | Select-Object -First 40 | Format-List | Out-String | Write-Output }',
-      '  exit 1',
-      '}',
-    ].join('\n')));
+    installAttempted = true;
+    const added = phase('install', () => ps(psInstall(appx)));
     if (added.status !== 0) { rep.fail(`Add-AppxPackage failed (exit ${added.status}): ${head(added.text, 6)}`); return; }
-    const listed = ps(`Get-AppxPackage -Name ${q(IDENTITY_NAME)} | ConvertTo-Json -Compress`);
+    const listed = ps(psListPackage());
     const pkg = listed.status === 0 ? parseAppxPackage(listed.stdout) : null;
     if (pkg === null) { rep.fail(`Get-AppxPackage lists no readable ${IDENTITY_NAME} package after the install (exit ${listed.status}): ${head(listed.text)}`); return; }
+    installedFullName = pkg.packageFullName;
     installLocation = pkg.installLocation;
     io.log(`${ROUTE_WIN}: installed ${pkg.packageFullName} (family ${pkg.packageFamilyName}) at ${installLocation}`);
 
-    const found = ps([
-      '$c = Get-Command tn3270-gui.exe -ErrorAction SilentlyContinue',
-      'if ($c) { "alias=$($c.Source)" } else {',
-      "  $f = Join-Path $env:LOCALAPPDATA 'Microsoft\\WindowsApps\\tn3270-gui.exe'",
-      '  if (Test-Path $f) { "alias=$f" } else { "alias=" }',
-      '}',
-    ].join('\n'));
+    const found = ps(psAlias());
     const alias = found.status === 0 ? (/^alias=(.+?)\s*$/m.exec(found.stdout)?.[1] ?? null) : null;
     if (alias === null) throw new Setup(`the app execution alias tn3270-gui.exe is not on PATH after Add-AppxPackage (exit ${found.status}): ${head(found.text)}`);
 
     const route = winRoute(io, { alias, installLocation });
     const confined = await phase('confine', async () => {
       const l = await confinementLaunch(ctx, route, switches(win32.join(work, 'confine-user-data')),
-        (pid) => { const r = ps(packageOfPid(pid)); return r.status === 0 ? parsePackageFullName(r.stdout) : `query failed (exit ${r.status}): ${head(r.text)}`; });
+        (pid) => { const r = ps(psPackageOfPid(pid)); return r.status === 0 ? parsePackageFullName(r.stdout) : `query failed (exit ${r.status}): ${head(r.text)}`; });
       const probe = parseProbeLine(l.stdout);
-      const p = judgeWinConfinement({ pkg, probe, started: l.during }, IDENTITY_NAME);
+      const p = [...judgeWinConfinement({ pkg, probe, started: l.during }, IDENTITY_NAME), ...l.problems];
       p.forEach(rep.fail);
-      if (p.length === 0) rep.ok(`confined (the app reports windowsStore=true; the alias-started process is ${l.during})`);
-      return p.length === 0 && l.survivors.length === 0;
+      if (p.length === 0) rep.ok('confined', `confined (the app reports windowsStore=true; the alias-started process is ${l.during})`);
+      return p.length === 0;
     });
     if (!confined) { io.log(`${ROUTE_WIN}: the checks were not run: without the confinement nothing else counts`); return; }
     await runChecks(ctx, route, judgeProbeWin);
   } finally {
     await phase('cleanup', async () => {
       await rep.cleanup('processes', () => {
-        if (installLocation === null) return;
-        const r = ps([
-          `$d = ${q(installLocation)}`,
-          'Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($d, [StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue; "killed $($_.ProcessId) $($_.ExecutablePath)" }',
-        ].join('\n'));
+        if (installLocation === null && ctx.pids.length === 0) return;
+        const r = ps(psReap(installLocation, ctx.pids));
         if (r.status !== 0) throw new Error(`exit ${r.status}: ${head(r.text)}`);
       });
       await rep.cleanup('Remove-AppxPackage', () => {
-        const r = ps([
-          `foreach ($p in @(Get-AppxPackage -Name ${q(IDENTITY_NAME)})) { Remove-AppxPackage -Package $p.PackageFullName; "removed $($p.PackageFullName)" }`,
-          `if (@(Get-AppxPackage -Name ${q(IDENTITY_NAME)}).Count -gt 0) { throw 'still installed' }`,
-        ].join('\n'));
-        if (r.status !== 0) throw new Error(`exit ${r.status}: ${head(r.text)}`);
+        let ours = installedFullName === null ? [] : [installedFullName];
+        if (installedFullName === null && installAttempted) {
+          // The install failed or was not read back: whatever is installed NOW is this run's,
+          // because nothing was before (or the stale ones were removed above). Each by full name.
+          const r = ps(psInstalled());
+          if (r.status !== 0) throw new Error(`cannot list what the failed install left (exit ${r.status}): ${head(r.text)}`);
+          ours = parseInstalled(r.stdout);
+        }
+        const errors = [];
+        for (const fullName of ours) {
+          const r = ps(psUninstall(fullName));
+          if (r.status !== 0) errors.push(`${fullName}: exit ${r.status}: ${head(r.text)}`);
+        }
+        if (errors.length > 0) throw new Error(errors.join('; '));
       });
       for (const store of STORES) {
         await rep.cleanup(`certificate ${store}`, () => {
-          const r = ps(removeCert(store, thumb));
+          if (!certAttempted) return;
+          const r = ps(psRemoveCert(store, thumb));
           if (r.status !== 0) throw new Error(`exit ${r.status}: ${head(r.text)}`);
         });
       }
@@ -599,7 +778,7 @@ const USAGE = 'usage: store-probe.mjs [artifacts/gui]';
 /**
  * `io`: `{ run, fs, platform, env, log, home }`, and optionally `launch` (default
  * launchForProbe), `checks` (default package-checks' CHECKS), `trace`, `now`, `secret`.
- * Resolves the exit status.
+ * Resolves the exit status: 0 only when every required ok line was printed and no FAIL was.
  */
 export async function main(argv, io) {
   const secrets = [];
@@ -624,7 +803,6 @@ export async function main(argv, io) {
   };
   const full = { launch: launchForProbe, ...io };
   const t0 = now();
-  let rep;
   try {
     const rest = [];
     for (const a of argv) {
@@ -633,10 +811,16 @@ export async function main(argv, io) {
     }
     if (rest.length > 1) throw new Setup(`one artifacts directory, not ${rest.length}\n${USAGE}`);
     const dir = rest[0] ?? 'artifacts/gui';
-    const driver = io.platform === 'darwin' ? probeMac : io.platform === 'win32' ? probeWin : undefined;
-    if (driver === undefined) throw new Setup(`nothing to probe on ${io.platform}: the store probe runs on macOS and Windows`);
-    rep = reporter(io, io.platform === 'darwin' ? ROUTE_MAC : ROUTE_WIN);
-    await driver({ io: full, run, phase, rep, echo, secrets, work: undefined }, dir);
+    const mac = io.platform === 'darwin';
+    if (!mac && io.platform !== 'win32') throw new Setup(`nothing to probe on ${io.platform}: the store probe runs on macOS and Windows`);
+    const route = mac ? ROUTE_MAC : ROUTE_WIN;
+    const rep = reporter(io, route, [...(mac ? ['signed'] : []), 'confined', ...REQUIRED_CHECKS]);
+    await (mac ? probeMac : probeWin)({ io: full, run, phase, rep, echo, secrets, pids: [], work: undefined }, dir);
+    const missing = rep.missing();
+    io.log(`${route}: ${rep.required.length - missing.length} of ${rep.required.length} required ok lines`);
+    // Every required ok must have been printed: an empty or partial check list cannot pass. (With
+    // a FAIL already printed, the missing oks are its consequence, and only counted above.)
+    if (rep.fails === 0) for (const k of missing) rep.fail(`never shown to pass: ${k}`);
     return rep.fails > 0 ? 1 : 0;
   } catch (err) {
     for (const line of (err instanceof Setup ? err.message : `error: ${err.message}`).split('\n')) io.log(`store-probe: ${line}`);
@@ -649,37 +833,44 @@ export async function main(argv, io) {
 /**
  * The confinement launch (default io.launch): starts `route` with `args` through package-checks'
  * `start` (probe on, NO_SEAMS), waits for its `probe:` line (or its exit, at most LAUNCH_MS),
- * calls `whileRunning(pid)` while it still runs, then kills it by PID with package-checks' `stop`
- * and reports any survivor. An app that cannot start THROWS (exit 2).
+ * calls `whileRunning(pid)` while it still runs, then requires it to HOLD (`held`: it printed
+ * `connect: dialog shown`, or was still running STAY_MS after the probe line), then kills it by
+ * PID with package-checks' `stop` and reports any survivor. An app that cannot start THROWS.
  */
-export async function launchForProbe(route, args, { work, whileRunning }) {
+export async function launchForProbe(route, args, { work, whileRunning, stayMs = STAY_MS }) {
   const dir = mkdtempSync(posixOrHost(work, 'confine-'));
   const p = await start(route, args, {}, dir);
   p.child.stdin.end();
   let during = null;
+  let held = false;
   let survivors;
+  const dialog = () => p.stdout.includes('connect: dialog shown');
   try {
     await until(() => probeSeen(p.stdout) !== null || p.exited, LAUNCH_MS);
     if (!p.exited && whileRunning !== undefined && p.child.pid !== undefined) during = whileRunning(p.child.pid);
+    if (probeSeen(p.stdout) !== null) {
+      await until(() => dialog() || p.exited, stayMs);
+      held = dialog() || !p.exited;
+    }
   } finally {
     survivors = await stop(route, p);
   }
   await p.closed;
   if (p.error !== undefined) throw new Error(`cannot start ${route.exe}: ${p.error.message}`);
-  return { stdout: p.stdout, stderr: p.stderr, during, survivors };
+  return { stdout: p.stdout, stderr: p.stderr, during, held, pid: p.child.pid, survivors };
 }
 
 /** `work` + `/` or `\` + `name`, by the separator `work` already uses (it is a host path). */
 const posixOrHost = (work, name) => (work.includes('\\') ? win32.join(work, name) : posix.join(work, name));
 
-/** The real file system, for the CLI. */
+/** The real file system, for the CLI. `mkdtemp(prefix, parent)`: under `parent`, default the OS temp dir. */
 export const nodeFs = Object.freeze({
   exists: existsSync,
   list: (d) => readdirSync(d),
   copy: (from, to) => cpSync(from, to, { recursive: true }),
   rm: (p) => rmSync(p, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }),
   mkdir: (d) => mkdirSync(d, { recursive: true }),
-  mkdtemp: (prefix) => mkdtempSync(posixOrHost(tmpdir(), prefix)),
+  mkdtemp: (prefix, parent = tmpdir()) => mkdtempSync(posixOrHost(parent, prefix)),
   read: (p) => readFileSync(p, 'utf8'),
   write: (p, text) => writeFileSync(p, text),
 });

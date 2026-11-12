@@ -49,8 +49,8 @@ export interface Fs {
   copy: (from: string, to: string) => void;
   rm: (path: string) => void;
   mkdir: (dir: string) => void;
-  /** A fresh scratch directory named `<prefix>XXXXXX` (the real one: under the OS tmpdir). */
-  mkdtemp: (prefix: string) => string;
+  /** A fresh scratch directory `<parent>/<prefix>XXXXXX`; `parent` defaults to the OS temp dir. */
+  mkdtemp: (prefix: string, parent?: string) => string;
   read: (path: string) => string;
   write: (path: string, text: string) => void;
 }
@@ -58,8 +58,10 @@ export const nodeFs: Readonly<Fs>;
 export function removeContainer(io: { home: string; fs: Pick<Fs, 'rm' | 'exists'> }, path: string): void;
 
 /** One confinement launch: its output, what `whileRunning(pid)` said, and any survivor of the kill. */
-export interface Launched { stdout: string; stderr?: string; during: string | null; survivors: string[] }
-export type Launch = (route: Route, args: string[], opts: { work: string; whileRunning?: (pid: number) => string | null }) => Promise<Launched>;
+/** `held`: after its probe line the app showed the Connect dialog, or still ran STAY_MS later. */
+export interface Launched { stdout: string; stderr?: string; during: string | null; held: boolean; pid?: number; survivors: string[] }
+export type Launch = (route: Route, args: string[], opts: { work: string; whileRunning?: (pid: number) => string | null; stayMs?: number }) => Promise<Launched>;
+export const STAY_MS: number;
 export const launchForProbe: Launch;
 
 export interface Io {
@@ -79,3 +81,19 @@ export interface Io {
   secret?: () => string;
 }
 export function main(argv: string[], io: Io): Promise<number>;
+
+export function psQuote(s: string): string;
+export function setTeamId(app: string, run: Run): string[];
+export function signInsideOut(app: string, ent: { main: string; inherit: string; login: string }, io: { run: Run; fs: Pick<Fs, 'exists' | 'list'> }): string[];
+export function pidsUnder(psOutput: string, work: string): string[];
+export const PS_PREAMBLE: string;
+export function psInstalled(): string;
+export function parseInstalled(text: string): string[];
+export function psCertificate(o: { pfx: string; cer: string; password: string }): string;
+export function psInstall(appx: string): string;
+export function psListPackage(): string;
+export function psAlias(): string;
+export function psPackageOfPid(pid: number): string;
+export function psReap(installLocation: string | null, pids: number[]): string;
+export function psUninstall(fullName: string): string;
+export function psRemoveCert(store: string, thumbprint: string | null): string;
