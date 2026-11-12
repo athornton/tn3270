@@ -105,7 +105,7 @@ describe('store stand-in config', () => {
     expect(d['com.apple.security.application-groups']).toEqual(['H68TN685J4.io.github.athornton.tn3270']);
   });
 
-  it.skip('the inherit entitlements have NO application-groups (variant C crashed with it present)', () => { // MUTATION 2
+  it('the inherit entitlements have NO application-groups (variant C crashed with it present)', () => {
     const d = plist('entitlements.mas.inherit.plist');
     expect(d['com.apple.security.application-groups']).toBeUndefined();
     expect(d['com.apple.security.inherit']).toBe(true);
