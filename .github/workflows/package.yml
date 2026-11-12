@@ -21,6 +21,18 @@
 #               the build -- a real pty and a fork, which only Linux runners here give it cheaply;
 #               the two ubuntu jobs (the parity runner and the Node floor) carry it, so both the
 #               newest and the oldest supported Node run it, not every OS/arch.
+#   masbuild    also build Electron's MAS app, unsigned (`--mac mas --universal
+#               -c.mac.identity=null`), into artifacts/gui/mas-universal/: the store probe's macOS
+#               input (store-probe plan Task 6). macos-latest only. After both verify steps, so it
+#               cannot disturb what they judge; its own step has no signing env, so it never signs
+#               or notarizes, on a signing run too. NEVER uploaded: the gui-* globs are one level
+#               deep, and mas-universal/ holds only an app directory.
+#   probe       run scripts/store-probe.mjs (store-probe spec, Amendment 2026-11-12) on EVERY run,
+#               tags included: the app confined as each store confines it -- macos-latest's
+#               App-Sandboxed MAS copy, windows-latest's installed MSIX (the .appx win.target
+#               builds) -- must prove its confinement from inside the process and pass
+#               package-smoke's two checks. Before package-smoke and the uploads. Nothing it builds
+#               is uploaded: no upload path names `.appx` or `mas-universal`.
 #
 #   node        the Node major/minor this job runs (setup-node)
 #   nodeopts    NODE_OPTIONS for the test step only (empty: none)
@@ -120,6 +132,9 @@ jobs:
             gui: true
             # Signs the universal app (macos-26-intel below stays unsigned: never uploaded).
             sign: true
+            # The store probe's sandboxed route: the MAS stand-in, built here and probed.
+            masbuild: true
+            probe: true
           - os: macos-26-intel
             # Builds the universal app too, so its package smoke runs the x86_64 slice natively.
             # Not uploaded: it would duplicate macos-latest's universal artifacts.
@@ -131,6 +146,8 @@ jobs:
             gui: true
             # Never signed in CI (spec amendment 2026-11-11), so verified unsigned on EVERY run.
             verify: unsigned
+            # The store probe's MSIX route: the .appx that `--win --x64` builds (win.target).
+            probe: true
           - name: ubuntu-latest-node20.19
             os: ubuntu-latest
             xvfb: 'xvfb-run -a -s "-screen 0 1280x1024x24"'
@@ -241,6 +258,31 @@ jobs:
         run: node scripts/verify-signatures.mjs --expect ${{ matrix.verify }} artifacts/gui
         env:
           VERIFY_SIGNATURES_ECHO: '1'
+      # The store probe's macOS input, Electron's MAS build. `-c.mac.identity=null`, not
+      # -c.mas.identity: electron-builder coerces the string "null" for config.mac only, and the
+      # mas config deep-assigns over mac (macPackager.js getPlatformConfig); a null identity makes
+      # no .pkg and leaves artifacts/gui/mas-universal/TN3270.app (spike run 43115293433). NO env:
+      # TN3270_SIGN, CSC_LINK and APPLE_API_KEY_ID/ISSUER live in the Developer ID step's env only,
+      # and CSC_IDENTITY_AUTO_DISCOVERY stays the global 'false', so signing.cjs is in unsigned
+      # mode (identity null, notarize false). On a signing run the .p8 step's APPLE_API_KEY is in
+      # GITHUB_ENV here too; unused: unsigned mode turns notarization off, and electron-builder
+      # never notarizes a mas build anyway (macPackager.js sign: `if (!isMas)`). After both verify
+      # steps, so the dmg/zip they judged (and that are uploaded) are already checked.
+      - if: matrix.masbuild
+        name: package:gui (MAS stand-in for the store probe, unsigned, never uploaded)
+        run: npm run package:gui -- --mac mas --universal -c.mac.identity=null
+      # On EVERY run (no ref, input or event in the `if:`): store-probe.mjs's header has the routes.
+      # BEFORE package-smoke: on Windows package-smoke ends with an NSIS uninstall that returns at
+      # once and finishes in the background, which the MSIX install and alias launch should not
+      # race; and the probe starts from a runner nothing has yet launched TN3270 on. Its own
+      # cleanup removes the MSIX, the container and its scratch (in RUNNER_TEMP), so package-smoke
+      # still meets a clean runner. Before the uploads: nothing it builds is in them.
+      - if: matrix.probe
+        name: store probe
+        run: node scripts/store-probe.mjs artifacts/gui
+        env:
+          # Every command and its raw output in the log, the pfx password masked.
+          STORE_PROBE_ECHO: '1'
       - if: matrix.builder
         run: ${{ matrix.xvfb }} node scripts/package-smoke.mjs
         env:

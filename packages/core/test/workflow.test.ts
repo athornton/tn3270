@@ -259,6 +259,90 @@ describe('package.yml release wiring', () => {
   it('wires no Azure signing: no azure/login, no AZURE_* variable', () => {
     expect(packageCode()).not.toMatch(/azure\/login|AZURE_/);
   });
+  // Store probe (store-probe plan Task 6 and its overrides). The MAS stand-in and the installed
+  // MSIX are built, launched and judged on every run, and NEVER uploaded.
+  // Comment lines dropped: a step's chunk ends with the NEXT step's leading comment, whose prose
+  // may name what this step must not use.
+  const packageSteps = () => jobBlock('package').split(/\n      - /).map((s) => s.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n'));
+  const MAS_BUILD = /run: npm run package:gui -- --mac mas --universal -c\.mac\.identity=null$/m;
+  const PROBE_RUN = /run: node scripts\/store-probe\.mjs artifacts\/gui$/m;
+
+  it('probe: true on exactly macos-latest and windows-latest; masbuild: true on macos-latest only', () => {
+    const entries = matrixEntries();
+    expect(entries.filter((e) => /\n\s+probe:/.test(e)).map(entryName)).toEqual(['macos-latest', 'windows-latest']);
+    for (const e of entries.filter((x) => /\n\s+probe:/.test(x))) expect(e).toMatch(/^\s+probe: true$/m);
+    const mas = entries.filter((e) => /\n\s+masbuild:/.test(e));
+    expect(mas.map(entryName)).toEqual(['macos-latest']);
+    expect(mas[0]).toMatch(/^\s+masbuild: true$/m);
+  });
+
+  it('the MAS build step: masbuild runners only, identity null, and no signing credentials', () => {
+    const steps = packageSteps().filter((s) => /--mac mas\b/.test(s));
+    expect(steps.length, 'MAS build steps').toBe(1);
+    const step = steps[0]!;
+    expect(step).toMatch(/^if: matrix\.masbuild\n/);
+    expect(step).toMatch(MAS_BUILD);
+    // TN3270_SIGN, CSC_LINK, APPLE_* and a CSC_IDENTITY_AUTO_DISCOVERY override live in the
+    // Developer ID package:gui step's env only: here they could sign or notarize the stand-in.
+    expect(step).not.toMatch(/TN3270_SIGN|CSC_|APPLE_|secrets\.|\benv:/);
+  });
+
+  it('store probe: on every event, ECHO on, after the MAS build and both verifies, before package-smoke and the uploads', () => {
+    const steps = packageSteps();
+    const probes = steps.flatMap((s, i) => (/run: .*store-probe\.mjs/.test(s) ? [i] : []));
+    expect(probes.length, 'store probe steps').toBe(1);
+    const probe = probes[0]!;
+    const step = steps[probe]!;
+    // Exactly `matrix.probe`: no ref, input or event, so pushes, pull requests and tags all run it.
+    expect(step.split('\n')[0]).toBe('if: matrix.probe');
+    expect(step).not.toMatch(/github\.|inputs\.|startsWith/);
+    expect(step).toMatch(/^        name: store probe$/m);
+    expect(step).toMatch(PROBE_RUN);
+    expect(step).toMatch(/^          STORE_PROBE_ECHO: '1'$/m);
+    const at = (re: RegExp) => steps.findIndex((s) => re.test(s));
+    const gui = at(/run: npm run package:gui -- \$\{\{ matrix\.builder \}\}/);
+    const mas = at(MAS_BUILD);
+    const smoke = at(/run: .*node scripts\/package-smoke\.mjs\b/);
+    const verifies = steps.flatMap((s, i) => (/run: node scripts\/verify-signatures\.mjs\b/.test(s) ? [i] : []));
+    const uploads = steps.flatMap((s, i) => (/uses: actions\/upload-artifact@/.test(s) ? [i] : []));
+    for (const [name, i] of Object.entries({ gui, mas, smoke })) expect(i, name).toBeGreaterThanOrEqual(0);
+    expect(verifies.length, 'verify steps').toBe(2);
+    expect(uploads.length, 'upload steps').toBeGreaterThan(0);
+    expect(gui, 'package:gui before the MAS build').toBeLessThan(mas);
+    // The MAS build cannot disturb what verify-signatures judges (or the uploaded dmg/zip).
+    for (const v of verifies) expect(v, 'verify before the MAS build').toBeLessThan(mas);
+    expect(mas, 'MAS build before the probe').toBeLessThan(probe);
+    expect(probe, 'probe before package-smoke').toBeLessThan(smoke);
+    for (const u of uploads) expect(probe, 'probe before every upload').toBeLessThan(u);
+  });
+
+  it('no upload matches the appx or the MAS app; the gui-* upload is exactly the five installer globs', () => {
+    const uploads = packageSteps().filter((s) => /uses: actions\/upload-artifact@/.test(s));
+    for (const u of uploads) {
+      const path = /\n {10}path: ([^|\n].*|\|\n(?: {12}.*\n?)+)/.exec(u)?.[1];
+      expect(path, `a path: in ${u.split('\n')[0]}`).toBeDefined();
+      expect(path).not.toMatch(/appx|mas|\*\*/i);
+    }
+    const gui = uploads.find((u) => /name: gui-\$\{\{ matrix\.os \}\}/.test(u));
+    expect(gui, 'the gui-* upload').toBeDefined();
+    const globs = /\n {10}path: \|\n((?: {12}\S.*\n)+)/.exec(gui!)?.[1]?.trimEnd().split('\n').map((l) => l.trim());
+    // Non-recursive, one level: none can descend into artifacts/gui/mas-universal/ (an app
+    // directory only, run 43115293433) or match the top-level TN3270-<v>-win-x64.appx.
+    expect(globs).toEqual([
+      'artifacts/gui/*.AppImage',
+      'artifacts/gui/*.deb',
+      'artifacts/gui/*.dmg',
+      'artifacts/gui/*.zip',
+      'artifacts/gui/*.exe',
+    ]);
+  });
+
+  it('the header documents the probe and masbuild matrix keys', () => {
+    const header = wf.slice(0, wf.indexOf('\nname: package\n'));
+    expect(header).toMatch(/^#   probe {2,}\S/m);
+    expect(header).toMatch(/^#   masbuild {2,}\S/m);
+  });
+
   it('the GUI harness loop runs every harness in packages/gui/scripts (a new one cannot be left out)', () => {
     // Harnesses are the .mjs scripts there that launch the app, minus the build tools. seam-errors
     // was added on 2026-11-12 with the replay-hang fix and was not in the loop until this test.
