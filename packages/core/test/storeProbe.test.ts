@@ -8,7 +8,7 @@ import {
   BUNDLE_ID, CheckFailed, IDENTITY_NAME, PUBLISHER, TEAM_ID, containerPath, judgeMacConfinement, judgeSignatureVerify, judgeWinConfinement,
   launchForProbe, macRoute, main, newestSdkTool, parseAppxPackage, parseProbeLine, removeContainer, winRoute,
   PS_PREAMBLE, STAY_MS, parseInstalled, pidsUnder, psAlias, psCertificate, psInstall, psInstalled, psListPackage, psPackageOfPid, psQuote,
-  psReap, psRemoveCert, psUninstall, setTeamId, signInsideOut, nodeFs, type Ran,
+  psReap, psRemoveCert, psUninstall, setTeamId, signInsideOut, nodeFs, mayReplace, NOT_BEFORE_SLACK_MIN, type Ran,
 } from '../../../scripts/store-probe.mjs';
 import {
   ALIAS, CONTAINER, HOME, INSTALL, LOGIN_HELPER, MAC_APP, MAC_DIR, MAC_FIND, MAC_SRC, MAC_WORK, PW, SANDBOXED_LINE, SDK, SIGNTOOL,
@@ -427,7 +427,7 @@ describe('main on Windows (a port of win-appx.ps1)', () => {
     expect(ps('GetPackageFullName')).toMatch(/\[StoreProbePkg\]::Of\(828\)$/);
     // The cleanup runs the builders' exact scripts: our processes (install dir, started pid), the
     // EXACT installed full name, our thumbprint in both stores.
-    expect(ps('reap')).toBe(`${PS_PREAMBLE}\n${psReap(INSTALL, [828])}`);
+    expect(ps('reap')).toBe(`${PS_PREAMBLE}\n${psReap(INSTALL)}`);
     expect(ps('Remove-AppxPackage')).toBe(`${PS_PREAMBLE}\n${psUninstall('TN3270.Probe_0.1.4.0_x64__5j71tdef09jdy')}`);
     expect(ps('cert-remove My')).toBe(`${PS_PREAMBLE}\n${psRemoveCert('Cert:\\CurrentUser\\My', THUMB)}`);
     expect(ps('cert-remove TrustedPeople')).toBe(`${PS_PREAMBLE}\n${psRemoveCert('Cert:\\LocalMachine\\TrustedPeople', THUMB)}`);
@@ -489,14 +489,26 @@ describe('main on Windows (a port of win-appx.ps1)', () => {
     ]);
     for (const e of ['run cert-remove TrustedPeople', `rm ${WIN_WORK}\\probe.pfx`, `rm ${WIN_WORK}\\probe.cer`, `rm ${WIN_WORK}`]) at(w.events, e);
   });
-  it('the certificate not made: exit 2; without a thumbprint the cleanup removes ours by SUBJECT (not FriendlyName) from both stores', async () => {
+  it('New-SelfSignedCertificate known to have failed (an answer without a thumbprint): exit 2, and NO certificate fallback runs', async () => {
     const w = winWorld({ ps: { certificate: ran(1, 'New-SelfSignedCertificate : Access denied') } });
     expect(await main([WIN_DIR], w.io)).toBe(2);
     expect(w.out.join('\n')).toMatch(/throwaway certificate was not made and trusted \(exit 1\): New-SelfSignedCertificate : Access denied/);
+    expect(w.events.filter((e) => e.startsWith('run cert-remove'))).toEqual([]);
+    expect(w.out).toContain('win-msix: certificate Cert:\\CurrentUser\\My: New-SelfSignedCertificate failed, so there is none to remove');
+    expect(fails(w.out)).toEqual([]);
+  });
+  it('the certificate step\'s answer LOST (runCommand threw, e.g. a timeout): exit 2, and the fallback runs in both stores, since the run start', async () => {
+    const w = winWorld({ ps: {
+      certificate: () => { throw new Error('cannot run powershell: spawnSync powershell ETIMEDOUT'); },
+      'cert-remove My': ok('fallback: no certificate of this run in Cert:\\CurrentUser\\My; nothing removed\n'),
+    }, io: { now: () => Date.parse('2026-11-12T01:00:00.000Z') } });
+    expect(await main([WIN_DIR], w.io)).toBe(2);
     const rms = w.calls.filter((c) => c[0] === 'powershell' && psKind(psScript(c)).startsWith('cert-remove')).map(psScript);
-    expect(rms).toHaveLength(2);
-    expect(rms).toEqual([`${PS_PREAMBLE}\n${psRemoveCert('Cert:\\CurrentUser\\My', null)}`, `${PS_PREAMBLE}\n${psRemoveCert('Cert:\\LocalMachine\\TrustedPeople', null)}`]);
-    for (const x of rms) expect(x).not.toContain('FriendlyName');
+    const since = '2026-11-12T01:00:00.000Z'; // the clock when the certificate step began
+    expect(rms).toEqual([`${PS_PREAMBLE}\n${psRemoveCert('Cert:\\CurrentUser\\My', null, since)}`, `${PS_PREAMBLE}\n${psRemoveCert('Cert:\\LocalMachine\\TrustedPeople', null, since)}`]);
+    // Zero matches is logged, not a FAIL: a lost answer does not prove a certificate was made.
+    expect(w.out).toContain('win-msix: certificate Cert:\\CurrentUser\\My: fallback: no certificate of this run in Cert:\\CurrentUser\\My; nothing removed');
+    expect(fails(w.out)).toEqual([]);
   });
   it('FAIL-CLOSED: windowsStore=false from the confinement launch is exit 1, checks not run', async () => {
     const w = winWorld({ launched: { stdout: 'probe: sandbox=none windowsStore=false\n' } });
@@ -587,20 +599,20 @@ const lines = (...ls: string[]) => ls.join('\n');
 const FULL = 'TN3270.Probe_0.1.4.0_x64__5j71tdef09jdy';
 
 describe('PowerShell builders: the exact scripts', () => {
-  it('psReap: ours is under EXACTLY the install dir (trailing \\), or a started pid that is still TN3270.exe; re-listed; a leftover throws', () => {
-    expect(psReap(INSTALL, [828])).toBe(lines(
+  it('psReap: ours is strictly an ExecutablePath under EXACTLY the install dir (trailing \\); no pid branch; re-listed; a leftover throws', () => {
+    const want = lines(
       String.raw`$dir = 'C:\Program Files\WindowsApps\TN3270.Probe_0.1.4.0_x64__5j71tdef09jdy\'`,
-      '$ids = @(828)',
-      String.raw`$ours = { param($p) $p.ExecutablePath -and (($dir -and $p.ExecutablePath.StartsWith($dir, [StringComparison]::OrdinalIgnoreCase)) -or (($ids -contains [int]$p.ProcessId) -and $p.ExecutablePath.EndsWith('\TN3270.exe', [StringComparison]::OrdinalIgnoreCase))) }`,
+      '$ours = { param($p) $p.ExecutablePath -and $p.ExecutablePath.StartsWith($dir, [StringComparison]::OrdinalIgnoreCase) }',
       '$found = @(Get-CimInstance Win32_Process | Where-Object { & $ours $_ })',
       'foreach ($p in $found) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue; "killed $($p.ProcessId) $($p.ExecutablePath)" }',
       'if ($found.Count -gt 0) { Start-Sleep -Seconds 2 }',
       '$left = @(Get-CimInstance Win32_Process | Where-Object { & $ours $_ })',
       `if ($left.Count -gt 0) { throw "still running after Stop-Process: $(($left | ForEach-Object { $_.ProcessId }) -join ' ')" }`,
-    ));
-    // No install location: only the started pids (still TN3270.exe); no pids and no dir match nothing.
-    expect(psReap(null, [828]).split('\n')[0]).toBe('$dir = $null');
-    expect(psReap(`${INSTALL}\\`, []).split('\n').slice(0, 2)).toEqual([String.raw`$dir = 'C:\Program Files\WindowsApps\TN3270.Probe_0.1.4.0_x64__5j71tdef09jdy\'`, '$ids = @()']);
+    );
+    expect(psReap(INSTALL)).toBe(want);
+    expect(psReap(`${INSTALL}\\`)).toBe(want);
+    // Its absence pinned: no pid list, no ProcessId match, no TN3270.exe-by-name match.
+    for (const gone of ['$ids', '[int]$p.ProcessId', '-contains', 'TN3270.exe']) expect(psReap(INSTALL)).not.toContain(gone);
   });
   it('psUninstall: exactly the full name, then checks that full name is gone', () => {
     expect(psUninstall(FULL)).toBe(lines(
@@ -623,15 +635,30 @@ describe('PowerShell builders: the exact scripts', () => {
       String.raw`'removed Cert:\LocalMachine\TrustedPeople\4E7733D6F453C85023DF5488E7B8A9964885E700'`,
     ));
   });
-  it('psRemoveCert without a thumbprint: by our exact SUBJECT (FriendlyName does not survive Export/Import); none found throws', () => {
-    expect(psRemoveCert('Cert:\\LocalMachine\\TrustedPeople', null)).toBe(lines(
-      String.raw`$c = @(Get-ChildItem -Path 'Cert:\LocalMachine\TrustedPeople' | Where-Object { $_.Subject -eq 'CN=TN3270 Store Probe' })`,
-      String.raw`if ($c.Count -eq 0) { throw 'no certificate with subject CN=TN3270 Store Probe in Cert:\LocalMachine\TrustedPeople, and one was expected' }`,
-      'foreach ($x in $c) { Remove-Item -Path $x.PSPath }',
-      String.raw`if (@(Get-ChildItem -Path 'Cert:\LocalMachine\TrustedPeople' | Where-Object { $_.Subject -eq 'CN=TN3270 Store Probe' }).Count -gt 0) { throw 'still there: subject CN=TN3270 Store Probe in Cert:\LocalMachine\TrustedPeople' }`,
-      '"removed $($c.Count) by subject"',
+  it('psRemoveCert fallback in CurrentUser\\My: Subject AND FriendlyName; none found is printed, not thrown; the key goes too', () => {
+    const ours = String.raw`Get-ChildItem -Path 'Cert:\CurrentUser\My' | Where-Object { $_.Subject -eq 'CN=TN3270 Store Probe' -and $_.FriendlyName -eq 'TN3270 store probe' }`;
+    expect(psRemoveCert('Cert:\\CurrentUser\\My', null, '2026-11-12T01:00:00.000Z')).toBe(lines(
+      `$c = @(${ours})`,
+      String.raw`if ($c.Count -eq 0) { 'fallback: no certificate of this run in Cert:\CurrentUser\My; nothing removed'; exit 0 }`,
+      'foreach ($x in $c) { Remove-Item -Path $x.PSPath -DeleteKey }',
+      String.raw`if (@(` + ours + String.raw`).Count -gt 0) { throw 'still there: this run''s certificate in Cert:\CurrentUser\My' }`,
+      String.raw`"fallback: removed $($c.Count) from Cert:\CurrentUser\My"`,
     ));
-    expect(psRemoveCert('Cert:\\CurrentUser\\My', null)).toContain('foreach ($x in $c) { Remove-Item -Path $x.PSPath -DeleteKey }');
+  });
+  it('psRemoveCert fallback in LocalMachine\\TrustedPeople: Subject AND self-signed AND NotBefore >= the run start minus 11 min', () => {
+    const ours = String.raw`Get-ChildItem -Path 'Cert:\LocalMachine\TrustedPeople' | Where-Object { $_.Subject -eq 'CN=TN3270 Store Probe' -and $_.Issuer -eq $_.Subject -and $_.NotBefore.ToUniversalTime() -ge $since }`;
+    expect(psRemoveCert('Cert:\\LocalMachine\\TrustedPeople', null, '2026-11-12T01:00:00.000Z')).toBe(lines(
+      `$since = [DateTime]::Parse('2026-11-12T01:00:00.000Z', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal).AddMinutes(-11)`,
+      `$c = @(${ours})`,
+      String.raw`if ($c.Count -eq 0) { 'fallback: no certificate of this run in Cert:\LocalMachine\TrustedPeople; nothing removed'; exit 0 }`,
+      'foreach ($x in $c) { Remove-Item -Path $x.PSPath }',
+      String.raw`if (@(` + ours + String.raw`).Count -gt 0) { throw 'still there: this run''s certificate in Cert:\LocalMachine\TrustedPeople' }`,
+      String.raw`"fallback: removed $($c.Count) from Cert:\LocalMachine\TrustedPeople"`,
+    ));
+    // New-SelfSignedCertificate dates NotBefore 10 minutes back (Microsoft Learn), hence the 11.
+    expect(NOT_BEFORE_SLACK_MIN).toBe(11);
+    expect(() => psRemoveCert('Cert:\\LocalMachine\\TrustedPeople', null, null)).toThrow(/needs the run's start time/);
+    expect(() => psRemoveCert('Cert:\\LocalMachine\\TrustedPeople', null, 'yesterday')).toThrow(/needs the run's start time/);
   });
   it('psCertificate: the spike\'s flags, the thumbprint first, the TrustedPeople check', () => {
     expect(psCertificate({ pfx: 'C:\\w\\probe.pfx', cer: 'C:\\w\\probe.cer', password: 'pw' })).toBe(lines(
@@ -711,7 +738,16 @@ describe('mac builders: signInsideOut, setTeamId, pidsUnder', () => {
   });
 });
 
-describe('safety: never touch a real user\'s app (CI=true or STORE_PROBE_FORCE=1 allow it)', () => {
+const HOSTED = { GITHUB_ACTIONS: 'true', RUNNER_ENVIRONMENT: 'github-hosted', CI: 'true' };
+const SELF_HOSTED = { GITHUB_ACTIONS: 'true', RUNNER_ENVIRONMENT: 'self-hosted', CI: 'true' };
+
+describe('safety: never touch a real user\'s app (only a GitHub-hosted runner or STORE_PROBE_FORCE=1 is exempt)', () => {
+  it('mayReplace: GitHub-hosted or forced only', () => {
+    expect(mayReplace(HOSTED)).toBe(true);
+    expect(mayReplace({ STORE_PROBE_FORCE: '1' })).toBe(true);
+    for (const env of [{}, { CI: 'true' }, SELF_HOSTED, { GITHUB_ACTIONS: 'true' }, { RUNNER_ENVIRONMENT: 'github-hosted' },
+      { GITHUB_ACTIONS: '1', RUNNER_ENVIRONMENT: 'github-hosted' }, { STORE_PROBE_FORCE: 'true' }]) expect(mayReplace(env), JSON.stringify(env)).toBe(false);
+  });
   it('mac: an existing container is refused, exit 2, nothing run and nothing removed', async () => {
     const w = macWorld({ containerBefore: true });
     expect(await main([MAC_DIR], w.io)).toBe(2);
@@ -719,13 +755,25 @@ describe('safety: never touch a real user\'s app (CI=true or STORE_PROBE_FORCE=1
     expect(w.calls).toEqual([]);
     expect(w.events.filter((e) => e.startsWith('rm ') || e.startsWith('mkdtemp'))).toEqual([]);
   });
-  it.each([[{ CI: 'true' }], [{ STORE_PROBE_FORCE: '1' }]])('mac: %o lets the existing container be removed and the probe run', async (env) => {
+  it.each([[HOSTED], [{ STORE_PROBE_FORCE: '1' }]])('mac: %o lets the existing container be removed and the probe run', async (env) => {
     const w = macWorld({ containerBefore: true, io: { env } });
     expect(await main([MAC_DIR], w.io)).toBe(0);
     expect(at(w.events, `rm ${CONTAINER}`)).toBeLessThan(at(w.events, 'run ditto'));
   });
-  it('mac: CI other than "true", or FORCE other than "1", still refuses', async () => {
-    for (const env of [{ CI: '1' }, { STORE_PROBE_FORCE: 'yes' }]) expect(await main([MAC_DIR], macWorld({ containerBefore: true, io: { env } }).io)).toBe(2);
+  it('mac: CI=true alone (act), a self-hosted runner, or FORCE other than "1" still refuses, and says why', async () => {
+    for (const env of [{ CI: 'true' }, SELF_HOSTED, { STORE_PROBE_FORCE: 'yes' }]) {
+      const w = macWorld({ containerBefore: true, io: { env } });
+      expect(await main([MAC_DIR], w.io), JSON.stringify(env)).toBe(2);
+      expect(w.out.join('\n')).toMatch(/only a GitHub-hosted runner, GITHUB_ACTIONS=true and RUNNER_ENVIRONMENT=github-hosted, is exempt.*CI=true alone is not, self-hosted runners and act set it too/);
+      expect(w.calls).toEqual([]);
+    }
+  });
+  it('win: CI=true alone, or a self-hosted runner, still refuses', async () => {
+    for (const env of [{ CI: 'true' }, SELF_HOSTED]) {
+      const w = winWorld({ ps: { installed: ok(`installed=${FULL}\n`) }, io: { env } });
+      expect(await main([WIN_DIR], w.io), JSON.stringify(env)).toBe(2);
+      expect(w.events.filter((e) => e.startsWith('run '))).toEqual(['run installed']);
+    }
   });
   it('win: an installed TN3270.Probe is refused, exit 2, nothing installed or removed', async () => {
     const w = winWorld({ ps: { installed: ok(`installed=${FULL}\n`) } });
@@ -733,7 +781,7 @@ describe('safety: never touch a real user\'s app (CI=true or STORE_PROBE_FORCE=1
     expect(w.out.join('\n')).toMatch(new RegExp(`refusing to run: ${FULL.replace(/\./g, '\\.')} is already installed`));
     expect(w.events.filter((e) => e.startsWith('run '))).toEqual(['run installed']);
   });
-  it.each([[{ CI: 'true' }], [{ STORE_PROBE_FORCE: '1' }]])('win: %o removes the stale package by its exact full name first, then runs', async (env) => {
+  it.each([[HOSTED], [{ STORE_PROBE_FORCE: '1' }]])('win: %o removes the stale package by its exact full name first, then runs', async (env) => {
     let n = 0;
     const w = winWorld({ ps: { installed: () => ok(n++ === 0 ? 'installed=TN3270.Probe_0.1.3.0_x64__5j71tdef09jdy\n' : '') }, io: { env } });
     expect(await main([WIN_DIR], w.io)).toBe(0);
@@ -840,7 +888,7 @@ describe('the failure branches', () => {
   });
   it('win: a setup failure before the certificate step removes no certificate (none was made)', async () => {
     let n = 0;
-    const w = winWorld({ io: { env: { CI: 'true' } }, ps: {
+    const w = winWorld({ io: { env: HOSTED }, ps: {
       installed: () => ok(n++ === 0 ? 'installed=TN3270.Probe_0.1.3.0_x64__5j71tdef09jdy\n' : ''),
       'Remove-AppxPackage': ran(1, 'Remove-AppxPackage : Access denied'),
     } });

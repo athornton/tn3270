@@ -94,6 +94,9 @@ export function psInstall(appx: string): string;
 export function psListPackage(): string;
 export function psAlias(): string;
 export function psPackageOfPid(pid: number): string;
-export function psReap(installLocation: string | null, pids: number[]): string;
+export function psReap(installLocation: string): string;
 export function psUninstall(fullName: string): string;
-export function psRemoveCert(store: string, thumbprint: string | null): string;
+/** `sinceIso`: the run's start (ISO 8601), needed by the TrustedPeople fallback. */
+export function psRemoveCert(store: string, thumbprint: string | null, sinceIso?: string | null): string;
+export const NOT_BEFORE_SLACK_MIN: number;
+export function mayReplace(env: Record<string, string | undefined>): boolean;

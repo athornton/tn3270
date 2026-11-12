@@ -322,12 +322,11 @@ export const STAY_MS = 5_000;
  * The confinement launch, through io.launch; echoes its output. It passes only if the app HELD:
  * after its probe line it showed the Connect dialog or was still running STAY_MS later (variant
  * C, run 43115293433, printed `sandbox=<id>` and then died of `GPU process isn't usable`).
- * Survivors of the kill are a FAIL. Records the started pid for the cleanup.
+ * Survivors of the kill are a FAIL.
  */
 async function confinementLaunch(ctx, route, args, whileRunning) {
   const l = await ctx.io.launch(route, args, { work: ctx.work, whileRunning });
   if (ctx.echo) ctx.io.log(`confinement launch output:\n${l.stdout}${l.stderr ?? ''}`.replace(/\s+$/, ''));
-  if (typeof l.pid === 'number') ctx.pids.push(l.pid);
   const problems = [];
   if (l.held !== true) problems.push(`the app did not hold after its probe line: it exited within ${STAY_MS / 1000} s without showing the Connect dialog (a crash, as variant C's "GPU process isn't usable")`);
   if (l.survivors.length > 0) problems.push(`confinement launch: survived the kill: ${l.survivors.join(' ')}`);
@@ -337,8 +336,21 @@ async function confinementLaunch(ctx, route, args, whileRunning) {
 /** The scratch directory: under RUNNER_TEMP when set (as the spike), else the OS temp dir. */
 const scratch = (io) => io.fs.mkdtemp('tn3270-store-probe-', io.env.RUNNER_TEMP || undefined);
 
-/** May an existing container or package be treated as ours? Only on CI or when forced. */
-const mayReplace = (env) => env.CI === 'true' || env.STORE_PROBE_FORCE === '1';
+/**
+ * May an existing container or package be treated as ours? Only on a GitHub-HOSTED runner (fresh
+ * per job, so anything there is a previous step's) or when forced. NOT `CI=true`: self-hosted
+ * runners and `act` set it too, and a self-hosted Mac may be the owner's own machine. GitHub's
+ * "Variables reference", Default environment variables (docs.github.com/en/actions/reference/
+ * workflows-and-actions/variables, read 2026-11-12): GITHUB_ACTIONS is "Always set to `true` when
+ * GitHub Actions is running the workflow"; RUNNER_ENVIRONMENT is "The environment of the runner
+ * executing the job. Possible values are: `github-hosted` for GitHub-hosted runners provided by
+ * GitHub, and `self-hosted` for self-hosted runners configured by the repository owner."
+ */
+export const mayReplace = (env) => (env.GITHUB_ACTIONS === 'true' && env.RUNNER_ENVIRONMENT === 'github-hosted') || env.STORE_PROBE_FORCE === '1';
+/** Why mayReplace said yes, for the log. */
+const replaceReason = (env) => (env.STORE_PROBE_FORCE === '1' ? 'STORE_PROBE_FORCE=1' : 'a GitHub-hosted runner');
+/** The refusal's remedy, shared by both drivers. */
+const REMEDY = 'or set STORE_PROBE_FORCE=1 (only a GitHub-hosted runner, GITHUB_ACTIONS=true and RUNNER_ENVIRONMENT=github-hosted, is exempt: it is fresh, so whatever is there is ours; CI=true alone is not, self-hosted runners and act set it too)';
 
 // ---------------------------------------------------------------------------------------------
 // macOS
@@ -396,8 +408,9 @@ export function signInsideOut(app, ent, { run, fs }) {
 /**
  * macOS: a port of scripts/spike/mac-sandbox.sh's variant D (`prepare D ... teamid`, then the
  * first of `launches D`), run 43115293433. Steps, in the spike's order:
- *   0. REFUSE (exit 2) if the container already exists, unless CI=true or STORE_PROBE_FORCE=1:
- *      off CI it may be a real user's TN3270 data, and the cleanup removes it;
+ *   0. REFUSE (exit 2) if the container already exists, unless on a GitHub-hosted runner or
+ *      STORE_PROBE_FORCE=1 (mayReplace): elsewhere it may be a real user's TN3270 data, and the
+ *      cleanup removes it;
  *   1. plutil -lint the three entitlements files;
  *   2. remove a stale container (guarded), so its existence later is THIS launch's doing;
  *   3. ditto the MAS app into scratch (under RUNNER_TEMP when set, as the spike);
@@ -419,7 +432,7 @@ async function probeMac(ctx, dir) {
   }
   const container = containerPath(io.home);
   if (io.fs.exists(container) && !mayReplace(io.env)) {
-    throw new Setup(`refusing to run: ${container} already exists, and this probe removes it -- it may hold a real TN3270's data. Move it aside, or set STORE_PROBE_FORCE=1 (CI=true is allowed: the runner is fresh, so it is ours)`);
+    throw new Setup(`refusing to run: ${container} already exists, and this probe removes it -- it may hold a real TN3270's data. Move it aside, ${REMEDY}`);
   }
   const ent = {
     main: posix.join(RESOURCES, 'entitlements.mas.plist'),
@@ -576,17 +589,17 @@ public static class StoreProbePkg {
 [StoreProbePkg]::Of(${Number(pid)})`;
 
 /**
- * Kills OUR processes, by PID, then re-lists them and throws if any is left. Ours: the
- * executable lies under EXACTLY `installLocation` (a trailing `\` in the comparison, so a sibling
- * `..._xyz2` directory is not), or the pid is one this run started (`pids`) AND it is still the
- * app's TN3270.exe (Windows reuses pids: a bare pid could now be a stranger's).
+ * Kills OUR processes, by PID, then re-lists them and throws if any is left. Ours: the executable
+ * lies under EXACTLY `installLocation` (a trailing `\` in the comparison, so a sibling `..._xyz2`
+ * directory is not). Strictly by ExecutablePath: the alias launch runs TN3270.exe from under the
+ * install location (run 43112504521: "package of pid 828 (C:\Program Files\WindowsApps\
+ * TN3270.Probe_..._x64__5j71tdef09jdy\app\TN3270.exe)"), so a pid list could only ever add a
+ * stranger that reused a pid.
  */
-export function psReap(installLocation, pids) {
-  const dir = installLocation ? q(`${installLocation.replace(/\\+$/, '')}\\`) : '$null';
+export function psReap(installLocation) {
   return [
-    `$dir = ${dir}`,
-    `$ids = @(${pids.map((x) => Number(x)).filter((x) => Number.isInteger(x)).join(', ')})`,
-    "$ours = { param($p) $p.ExecutablePath -and (($dir -and $p.ExecutablePath.StartsWith($dir, [StringComparison]::OrdinalIgnoreCase)) -or (($ids -contains [int]$p.ProcessId) -and $p.ExecutablePath.EndsWith('\\TN3270.exe', [StringComparison]::OrdinalIgnoreCase))) }",
+    `$dir = ${q(`${installLocation.replace(/\\+$/, '')}\\`)}`,
+    '$ours = { param($p) $p.ExecutablePath -and $p.ExecutablePath.StartsWith($dir, [StringComparison]::OrdinalIgnoreCase) }',
     '$found = @(Get-CimInstance Win32_Process | Where-Object { & $ours $_ })',
     'foreach ($p in $found) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue; "killed $($p.ProcessId) $($p.ExecutablePath)" }',
     'if ($found.Count -gt 0) { Start-Sleep -Seconds 2 }',
@@ -605,15 +618,30 @@ export function psUninstall(fullName) {
 }
 
 /**
- * Removes our certificate from `store`, then checks it is gone. By thumbprint when known; without
- * one, by our exact placeholder SUBJECT (Export/Import-Certificate drop the FriendlyName, so it
- * cannot be matched in TrustedPeople), and finding none is a throw: a removal was expected. In
- * CurrentUser\My the private key goes too (`-DeleteKey`, the Certificate provider's Remove-Item
+ * How far before its creation New-SelfSignedCertificate dates NotBefore: "The default value for
+ * this parameter is 10 minutes before the certificate was created" (New-SelfSignedCertificate,
+ * Microsoft Learn, -NotBefore), plus a minute of slack. So "made by this run" is NotBefore at or
+ * after the run's start minus this, not the start itself (which would never match).
+ */
+export const NOT_BEFORE_SLACK_MIN = 11;
+
+/**
+ * Removes our certificate from `store`, then checks it is gone. By thumbprint when known.
+ * Without one (the certificate step's result was lost, e.g. runCommand threw on a timeout), the
+ * FALLBACK matches only what this run can have made:
+ *   - CurrentUser\My: our exact Subject AND FriendlyName (it survives in the store it was made in);
+ *   - LocalMachine\TrustedPeople: our exact Subject AND Issuer equal to it (self-signed; Export/
+ *     Import-Certificate drop the FriendlyName) AND NotBefore at or after `sinceIso` minus
+ *     NOT_BEFORE_SLACK_MIN minutes.
+ * Finding none in the fallback is NOT a throw (a lost result does not prove one was made); it is
+ * printed and logged. What it found must be gone afterwards, or it throws.
+ * In CurrentUser\My the private key goes too (`-DeleteKey`, the Certificate provider's Remove-Item
  * dynamic parameter, PowerShell 3.0+). `-Path`: in Cert: Remove-Item supports only DeleteKey,
  * Path, WhatIf and Confirm (about_Certificate_Provider); a thumbprint has no wildcard.
  */
-export function psRemoveCert(store, thumbprint) {
-  const deleteKey = store === STORES[0] ? ' -DeleteKey' : '';
+export function psRemoveCert(store, thumbprint, sinceIso) {
+  const my = store === STORES[0];
+  const deleteKey = my ? ' -DeleteKey' : '';
   if (thumbprint) {
     const p = `${store}\\${thumbprint}`;
     return [
@@ -623,21 +651,27 @@ export function psRemoveCert(store, thumbprint) {
       `${q(`removed ${p}`)}`,
     ].join('\n');
   }
-  const ours = `Get-ChildItem -Path ${q(store)} | Where-Object { $_.Subject -eq ${q(PUBLISHER)} }`;
+  if (!my && (typeof sinceIso !== 'string' || Number.isNaN(Date.parse(sinceIso)))) throw new Error(`psRemoveCert: the fallback in ${store} needs the run's start time, not ${sinceIso}`);
+  const filter = my
+    ? `$_.Subject -eq ${q(PUBLISHER)} -and $_.FriendlyName -eq ${q(CERT_NAME)}`
+    : `$_.Subject -eq ${q(PUBLISHER)} -and $_.Issuer -eq $_.Subject -and $_.NotBefore.ToUniversalTime() -ge $since`;
+  const ours = `Get-ChildItem -Path ${q(store)} | Where-Object { ${filter} }`;
   return [
+    ...(my ? [] : [`$since = [DateTime]::Parse(${q(sinceIso)}, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal).AddMinutes(-${NOT_BEFORE_SLACK_MIN})`]),
     `$c = @(${ours})`,
-    `if ($c.Count -eq 0) { throw ${q(`no certificate with subject ${PUBLISHER} in ${store}, and one was expected`)} }`,
+    `if ($c.Count -eq 0) { ${q(`fallback: no certificate of this run in ${store}; nothing removed`)}; exit 0 }`,
     `foreach ($x in $c) { Remove-Item -Path $x.PSPath${deleteKey} }`,
-    `if (@(${ours}).Count -gt 0) { throw ${q(`still there: subject ${PUBLISHER} in ${store}`)} }`,
-    '"removed $($c.Count) by subject"',
+    `if (@(${ours}).Count -gt 0) { throw ${q(`still there: this run's certificate in ${store}`)} }`,
+    `"fallback: removed $($c.Count) from ${store}"`,
   ].join('\n');
 }
 
 /**
  * Windows: a port of scripts/spike/win-appx.ps1's working path (the default package), run
  * 43112504521. Steps:
- *   0. REFUSE (exit 2) if a TN3270.Probe package is already installed, unless CI=true or
- *      STORE_PROBE_FORCE=1 (then those exact packages are removed first, by full name);
+ *   0. REFUSE (exit 2) if a TN3270.Probe package is already installed, unless on a GitHub-hosted
+ *      runner or STORE_PROBE_FORCE=1 (mayReplace; then those exact packages are removed first, by
+ *      full name);
  *   1. the one TN3270-*-win-x64.appx, copied into scratch (under RUNNER_TEMP when set: AppData is
  *      the MSIX virtualization tree; the spike signed the artifact in place);
  *   2. the newest SDK signtool (the spike's SdkTool; never electron-builder's winCodeSign one);
@@ -668,7 +702,7 @@ async function probeWin(ctx, dir) {
   if (before.status !== 0) throw new Setup(`cannot tell whether ${IDENTITY_NAME} is already installed (exit ${before.status}): ${head(before.text)}`);
   const stale = parseInstalled(before.stdout);
   if (stale.length > 0 && !mayReplace(io.env)) {
-    throw new Setup(`refusing to run: ${stale.join(', ')} is already installed, and this probe would replace it. Remove it, or set STORE_PROBE_FORCE=1 (CI=true is allowed: the runner is fresh, so it is ours)`);
+    throw new Setup(`refusing to run: ${stale.join(', ')} is already installed, and this probe would replace it. Remove it, ${REMEDY}`);
   }
   let sdk;
   try { sdk = io.fs.list(SDK_BIN); } catch { sdk = []; }
@@ -682,14 +716,16 @@ async function probeWin(ctx, dir) {
   const cer = win32.join(work, 'probe.cer');
   const pw = (io.secret ?? (() => randomUUID().replace(/-/g, '')))();
   ctx.secrets.push(pw);
-  let certAttempted = false;
+  /** none: not tried; made: thumbprint known; failed: it answered without one; unknown: its answer was lost. */
+  let cert = 'none';
+  let startedAt = null;
   let thumb = null;
   let installLocation = null;
   let installedFullName = null;
   let installAttempted = false;
   try {
     for (const old of stale) {
-      io.log(`${ROUTE_WIN}: removing the stale ${old} first (${io.env.CI === 'true' ? 'CI=true' : 'STORE_PROBE_FORCE=1'})`);
+      io.log(`${ROUTE_WIN}: removing the stale ${old} first (${replaceReason(io.env)})`);
       const r = ps(psUninstall(old));
       if (r.status !== 0) throw new Setup(`could not remove the stale ${old} (exit ${r.status}): ${head(r.text)}`);
     }
@@ -697,9 +733,13 @@ async function probeWin(ctx, dir) {
     io.fs.copy(win32.join(dir, name), appx);
 
     phase('certificate', () => {
-      certAttempted = true;
-      const r = ps(psCertificate({ pfx, cer, password: pw }));
+      startedAt = new Date((io.now ?? Date.now)()).toISOString();
+      cert = 'unknown';
+      const r = ps(psCertificate({ pfx, cer, password: pw })); // a throw leaves `unknown`
       thumb = /^thumbprint=([0-9A-Fa-f]{40})\s*$/m.exec(r.stdout)?.[1] ?? null;
+      // The thumbprint is printed right after New-SelfSignedCertificate, under Stop: an answer
+      // without one means New-SelfSignedCertificate itself failed, so nothing was made.
+      cert = thumb === null ? 'failed' : 'made';
       if (r.status !== 0 || thumb === null) throw new Setup(`the throwaway certificate was not made and trusted (exit ${r.status}): ${head(r.text)}`);
     });
 
@@ -735,8 +775,8 @@ async function probeWin(ctx, dir) {
   } finally {
     await phase('cleanup', async () => {
       await rep.cleanup('processes', () => {
-        if (installLocation === null && ctx.pids.length === 0) return;
-        const r = ps(psReap(installLocation, ctx.pids));
+        if (installLocation === null) return; // nothing was installed, so nothing of ours can run
+        const r = ps(psReap(installLocation));
         if (r.status !== 0) throw new Error(`exit ${r.status}: ${head(r.text)}`);
       });
       await rep.cleanup('Remove-AppxPackage', () => {
@@ -757,9 +797,11 @@ async function probeWin(ctx, dir) {
       });
       for (const store of STORES) {
         await rep.cleanup(`certificate ${store}`, () => {
-          if (!certAttempted) return;
-          const r = ps(psRemoveCert(store, thumb));
+          if (cert === 'none') return;
+          if (cert === 'failed') { io.log(`${ROUTE_WIN}: certificate ${store}: New-SelfSignedCertificate failed, so there is none to remove`); return; }
+          const r = ps(psRemoveCert(store, thumb, startedAt));
           if (r.status !== 0) throw new Error(`exit ${r.status}: ${head(r.text)}`);
+          if (thumb === null) io.log(`${ROUTE_WIN}: certificate ${store}: ${head(r.stdout)}`);
         });
       }
       for (const f of [pfx, cer]) {
@@ -815,7 +857,7 @@ export async function main(argv, io) {
     if (!mac && io.platform !== 'win32') throw new Setup(`nothing to probe on ${io.platform}: the store probe runs on macOS and Windows`);
     const route = mac ? ROUTE_MAC : ROUTE_WIN;
     const rep = reporter(io, route, [...(mac ? ['signed'] : []), 'confined', ...REQUIRED_CHECKS]);
-    await (mac ? probeMac : probeWin)({ io: full, run, phase, rep, echo, secrets, pids: [], work: undefined }, dir);
+    await (mac ? probeMac : probeWin)({ io: full, run, phase, rep, echo, secrets, work: undefined }, dir);
     const missing = rep.missing();
     io.log(`${route}: ${rep.required.length - missing.length} of ${rep.required.length} required ok lines`);
     // Every required ok must have been printed: an empty or partial check list cannot pass. (With
