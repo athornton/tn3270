@@ -1629,7 +1629,7 @@ holds as one item.
    Windows installer is unsigned. Windows signing is planned through the **Microsoft Store as an
    MSIX** (Microsoft signs it); the unsigned NSIS `.exe` stays a release artifact. The Mac App
    Store is planned too, and neither store gets a submission before x3270 parity.
-   **Store probe** (2026-11-12, branch `store-probe`): every CI run builds and launches an
+   **Store probe** (2026-11-12, merged `559ea78`): every CI run builds and launches an
    App-Sandboxed Mac App Store stand-in and an installed MSIX, each proving its confinement and
    passing package-smoke's two checks; nothing is uploaded (`docs/releasing.md`, *Store probe*).
 15. **The rest of the GUI ("milestone B").** `File` → `Connect…` in a running window (which means

@@ -1,18 +1,16 @@
-# Handoff — state as of 2026-11-12 (0.1.4 RELEASED: npm by the tag workflow with provenance, and the first GitHub release with the seven installers, SHA256SUMS and scriv notes; macOS CODE SIGNING MERGED (`db5a93d`; released installers up to 0.1.4 are UNSIGNED), Windows CI signing DROPPED for the Microsoft Store; STORE PROBE BUILT AND PROVEN on branch `store-probe` (not merged); next: the merge, then the x3270 parity checklist)
+# Handoff — state as of 2026-11-12 (0.1.4 RELEASED: npm by the tag workflow with provenance, and the first GitHub release with the seven installers, SHA256SUMS and scriv notes; macOS CODE SIGNING MERGED (`db5a93d`; released installers up to 0.1.4 are UNSIGNED), Windows CI signing DROPPED for the Microsoft Store; STORE PROBE MERGED (`559ea78`); next: the x3270 parity checklist, the store gate)
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
-`docs/live-testing.md` (the live-host runbook and log). For this branch specifically, read
-`docs/superpowers/specs/2026-11-05-packaging-design.md` and
-`docs/superpowers/plans/2026-11-05-packaging.md` (15 tasks, all 15 done as code; Task 15 was this
-documentation pass).
+`docs/live-testing.md` (the live-host runbook and log). For the most recent work, read the spec and plan the
+latest START HERE entry names. Each finished feature has its own pair under `docs/superpowers/`.
 
-## START HERE — PACKAGING IS MERGED (`5669a3a`); NEXT IS THE ROADMAP IN README *Remaining* 14-22
+## START HERE — LATEST FIRST; NEXT IS THE x3270 PARITY CHECKLIST, THEN README *Remaining* 15-22
 
-**2026-11-12, LATEST: THE STORE PROBE IS BUILT AND PROVEN. Branch `store-probe`, pushed, not
-merged.** Spec `docs/superpowers/specs/2026-11-11-store-probe-design.md` (read its *Amendment
-2026-11-12*), plan `docs/superpowers/plans/2026-11-11-store-probe.md` (Tasks 0-8 done; the merge,
-`--no-ff`, is the user's call). Every CI run, tags included, builds and launches a confined
+**2026-11-12, LATEST: THE STORE PROBE IS MERGED to `main` `--no-ff` as `559ea78`** (tree identical
+to the gated branch head `8b7f7ee`; CI on the merge, run 43161861526, green 6/6; branch deleted,
+`main` is the only branch). Spec `docs/superpowers/specs/2026-11-11-store-probe-design.md` (read its *Amendment
+2026-11-12*), plan `docs/superpowers/plans/2026-11-11-store-probe.md` (Tasks 0-8 done). Every CI run, tags included, builds and launches a confined
 stand-in for each store and fails if it is not confined or fails package-smoke's two checks:
 `macos-latest` builds Electron's MAS app (`--mac mas --universal -c.mac.identity=null`), signs a
 copy ad hoc into the App Sandbox with three entitlements files (the application group in the main
@@ -29,14 +27,14 @@ check, and its PR names the entitlement or capability.** The identity values (`T
   (MSIX; the unsigned NSIS `.exe` stays a GitHub release artifact). Nothing goes into either before
   feature parity with x3270; the 026 punch is optional for parity.
 - **The three-piece store plan:**
-  1. **the probe: DONE** (this branch);
+  1. **the probe: DONE** (merged `559ea78`);
   2. **the parity checklist: NEXT.** Each x3270 feature marked ours, missing or deliberately
      skipped; it is the store gate. Its own spec, not yet written;
   3. **submission: at parity.** Name reservation, the real identities, the `mas` target's
      certificates and provisioning profile, listings. The tag run builds the store packages and
      the user uploads them by hand; the stores get a chosen subset of the GitHub releases, not
      every version. Its own spec, written when parity is near.
-- **Also on this branch.** `fc5e988`: the GUI's replay and screenshot seams (`TN3270_GUI_REPLAY`,
+- **Also in that merge.** `fc5e988`: the GUI's replay and screenshot seams (`TN3270_GUI_REPLAY`,
   `TN3270_GUI_SHOT`) exit 1 with one stderr line on a file error instead of hanging (the spike's
   sandboxed EPERM sat until killed). `packages/gui/scripts/seam-errors.mjs` is the harness for it:
   a missing, directory and chmod-000 trace and an unwritable shot path, each a non-zero exit within

@@ -656,7 +656,7 @@ For the unsigned builds, the workarounds still apply:
 
 ## Store probe
 
-**Built 2026-11-12 on branch `store-probe`.** Spec
+**Built 2026-11-12 on branch `store-probe`, merged to `main` as `559ea78`.** Spec
 `docs/superpowers/specs/2026-11-11-store-probe-design.md` (its *Amendment 2026-11-12* supersedes
 the parts it names), plan `docs/superpowers/plans/2026-11-11-store-probe.md`. Both stores are
 planned (Mac App Store, and the Microsoft Store as an MSIX), but nothing goes to either before
