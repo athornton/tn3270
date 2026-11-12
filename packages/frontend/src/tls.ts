@@ -59,10 +59,12 @@ export const HANDSHAKE_TIMEOUT_MS = 10_000;
  * leaves the connect to the OS's own SYN retries: measured 2026-11-09 on this Linux box, a connect
  * to TEST-NET 192.0.2.1 was still pending after 3 s and the kernel's `tcp_syn_retries=6` gives up
  * only after ~127 s. Through the GUI's Connect dialog or the TUI's prompt that was two minutes of
- * "Connecting to ..." with only Quit to press. (The TLS path is bounded by the handshake deadline
- * above, which its socket arms before the TCP connect.)
+ * "Connecting to ..." with only Quit to press. The TLS path has this same deadline on its TCP
+ * connect, and arms the handshake deadline above only once that connect succeeds -- until
+ * 2026-11-12 it armed the handshake deadline before the connect, so an unanswered SYN under TLS
+ * was misreported after 10 s as a host that never completed a handshake.
  *
- * 30 s, longer than the TLS deadline, because there is no handshake to blame: a slow first route
+ * 30 s, longer than the handshake deadline, because a connect has no handshake to blame: a slow first route
  * to a distant host is a real case, and a wrong refusal is worse than a slow one. It is a CONNECT
  * deadline only -- disarmed the moment the socket connects (see `tcpConnect`), never an idle
  * timer, for the same reason the TLS path clears its timeout after the handshake.
@@ -236,7 +238,7 @@ const CONNECT_WORDS: Readonly<Record<string, string>> = {
   ETIMEDOUT: 'timed out',
   ENETUNREACH: 'network unreachable',
   EAI_AGAIN: 'name lookup failed, try again',
-  // Our own code, from `tcpConnect`'s plaintext deadline; Node has none for a plaintext connect.
+  // Our own code, from `tcpConnect`'s connect deadline (both paths); Node has none for a connect.
   CONNECT_TIMEOUT: `no answer within ${CONNECT_TIMEOUT_MS / 1000} s`,
   EHOSTUNREACH: 'host unreachable',
 };
@@ -322,15 +324,22 @@ export function tcpConnect(
       port,
       rejectUnauthorized: options.verify,
       ...(ca !== undefined ? { ca: [ca] } : {}),
-      // Doubles as the handshake deadline: measured to fire on a stalled
-      // handshake, so no second timer is needed.
-      timeout: handshakeMs,
+      // NO `timeout` OPTION HERE. Node arms it the moment the socket is created, BEFORE the TCP
+      // connect, so it was a deadline on the connect as much as on the handshake: a host that never
+      // answered the SYN was reported after 10 s as having "accepted the connection but never
+      // completed a TLS handshake", where `-insecure` said "cannot connect ... no answer within
+      // 30 s" (README audit, 2026-11-12). The two deadlines are armed separately below.
     });
     const conn = adapt(sock);
     let settled = false;
+    // THE SAME CONNECT DEADLINE AS THE PLAINTEXT PATH, an explicit timer for the reason given
+    // there. `fail('CONNECT_TIMEOUT')` words it through `describeTlsError`, which hands every
+    // connect-stage code to `describeConnectError`, so the message is the plaintext one exactly.
+    const connectDeadline = setTimeout(() => { fail('CONNECT_TIMEOUT'); }, connectMs);
     const fail = (code: string | undefined, err?: Error) => {
       if (settled) return;
       settled = true;
+      clearTimeout(connectDeadline);
       const e: Error & { code?: string } = new Error(describeTlsError(code, host, port), { cause: err });
       // THE CODE RIDES ALONG so a front end can re-word the remedy for how the session was started
       // (`describeTlsError`'s `remedy`); the message above is the command-line wording. Our own
@@ -344,6 +353,13 @@ export function tcpConnect(
       reject(e);
     };
 
+    // The handshake deadline starts only once TCP is up: from here on the host HAS accepted the
+    // connection, which is what HANDSHAKE_TIMEOUT's words say. The socket's own `timeout` is the
+    // handshake deadline (measured to fire on a stalled handshake, test/tls-harness.test.ts).
+    sock.on('connect', () => {
+      clearTimeout(connectDeadline);
+      if (!settled) sock.setTimeout(handshakeMs);
+    });
     sock.on('timeout', () => { fail('HANDSHAKE_TIMEOUT'); });
     sock.on('error', (e: NodeJS.ErrnoException) => {
       // After a successful handshake this is an ordinary mid-session socket
@@ -358,6 +374,7 @@ export function tcpConnect(
       // regression test for exactly this, because it is the line an implementer
       // would naturally omit.
       sock.setTimeout(0);
+      clearTimeout(connectDeadline);   // already cleared by `connect`; this keeps it unconditional
       settled = true;
       resolve(conn);
     });

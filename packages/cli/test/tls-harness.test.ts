@@ -163,9 +163,11 @@ describeTls('a plaintext host does not reject TLS, it hangs', () => {
   });
 
   it("fires tls.connect's timeout event during a stalled handshake", async () => {
-    // Establishes that `timeout` is a usable handshake deadline, so the
-    // implementation needs no separate timer. It is an INACTIVITY timer, so the
-    // implementation must clear it on secureConnect -- see the spec.
+    // Establishes that `timeout` is a usable handshake deadline. It is an
+    // INACTIVITY timer, so the implementation must clear it on secureConnect --
+    // see the spec. And passed to tls.connect it is armed BEFORE the TCP
+    // connect, so the implementation arms it with setTimeout() on `connect`
+    // instead and bounds the connect with its own deadline (tls.ts, 2026-11-12).
     const stub = await startPlaintextStub((s) => { s.write(IAC_DO_TN3270E); });
     try {
       const what = await new Promise<string>((resolve) => {

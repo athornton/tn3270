@@ -73,8 +73,8 @@ stand-ins for both and launches them on every run (`scripts/store-probe.mjs`; `d
 `[prefix:][LU,LU@]host[:port]` the command line takes), model (default `3278-2-E`), and a TLS
 checkbox (on by default; untick it for a plaintext host such as Hercules). **It stays open until a
 connect succeeds.** While an attempt is in flight its error line shows `Connecting to
-HOST:PORT...`, for up to the 10-second TLS handshake deadline, or the 30-second connect
-deadline with TLS unticked.
+HOST:PORT...`, for up to the 30-second connect deadline, plus with TLS on the 10-second
+handshake deadline that starts once the host accepts the connection.
 A failure is shown on that same line, never in the terminal window (the wordings are in
 *Connecting over TLS*), and the fields keep what you typed, so pressing Connect again **retries the
 SAME session** with whatever you changed. **Quit, Escape and closing the dialog all quit the app
@@ -785,19 +785,18 @@ does not speak TLS — a Hercules or other vintage system — use -insecure.
 at the TUI's no-host prompt (see *Installing* and *Using the TUI*); everywhere else they name
 `-insecure`, as above.
 
-**A plaintext connect has a deadline too: 30 seconds** (`CONNECT_TIMEOUT_MS`). A host that
-silently drops packets gets `cannot connect to HOST:PORT: no answer within 30 s
+**The TCP connect has a deadline too: 30 seconds** (`CONNECT_TIMEOUT_MS`), with TLS on or off.
+A host that silently drops packets gets `cannot connect to HOST:PORT: no answer within 30 s
 (CONNECT_TIMEOUT)` — measured against the blackholed TEST-NET address 192.0.2.1: exit 1 after
 31 s. It is a connect deadline only, disarmed the moment the socket connects, so an idle session
-is never dropped by it.
+is never dropped by it; the 10-second handshake deadline starts only then.
 
 **A host that is down or misspelled is not a TLS problem, even with TLS on.** Refused, no such
 host and unreachable connects happen before any TLS byte is exchanged, so every front end words
 them as `cannot connect to HOST:PORT: connection refused (ECONNREFUSED)` or `no such host
-(ENOTFOUND)`, never `TLS connection to ... failed`. **One exception:** with TLS on, a host that
-never answers the TCP connect hits the 10-second handshake deadline and is reported as `accepted
-the connection but never completed a TLS handshake`, although it accepted nothing. A reset or a
-stall during the handshake is a TLS failure, and says so.
+(ENOTFOUND)` — or, for one that never answers, `no answer within 30 s (CONNECT_TIMEOUT)` —
+never `TLS connection to ... failed`. A reset or a stall during the handshake is a TLS failure,
+and says so.
 
 **Reconnect always replays the LAST EXPLICIT TLS choice, never a keystroke, menu or host
 frame.** On the command line that choice is fixed for the run — there is nothing else to replay.
