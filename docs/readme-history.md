@@ -676,3 +676,447 @@ test that pins its bytes directly; what covers it is `dftSession.test.ts`'s
 **And it is witnessed live**: the 2026-09-29 TK5 run shows `00 0c 81 95` in answer to the host's
 own `ReadPartition`. Note that **a host may issue no Query at all** — VM did not on that day's
 control run — so check `grep -c "81 95"` in a trace before reading it as evidence about DDM.
+
+## From README § intro (moved 2026-11-12)
+
+The status paragraphs above the first heading, replaced by a shorter summary:
+
+**Status: there is a working GUI, a working terminal client, a scripting CLI, and a
+browser gateway.**
+The protocol core, an s3270-compatible scripting CLI, extended data stream with Query
+Reply, 3279 color, `IND$FILE` file transfer, TLS, screen models 2–5, TN3270E, a
+c3270-style TUI, an Electron GUI and a browser gateway are all done, and everything but
+TN3270E is verified against two live hosts — VM/370 and MVS 3.8j. (`IND$FILE` is reachable
+from the **TUI and the GUI** as well as the CLI — `Ctrl-T` opens a transfer form in the TUI and a
+transfer window in the GUI. The **browser** is the one front end that still cannot transfer, and
+deliberately: see *What is not implemented*.)
+
+**There are FOUR front ends**: the scripting CLI, the TUI, the Electron GUI, and the web
+gateway, which serves the GUI's own renderer to a browser over a WebSocket.
+
+**Packaging is out.** All four front ends are on npm (since 0.1.0, 2026-11-08; released by tag
+from GitHub Actions with provenance since 0.1.3), and native installers (macOS, Linux, Windows) are
+built and smoke-tested in CI on five runners. **From the next release, the macOS app is
+signed**: a Developer ID, notarized and stapled. The Windows installer stays unsigned (a
+Microsoft Store MSIX, which Microsoft signs, is planned), and so do the Linux packages. Releases
+up to 0.1.4, and every CI artifact from main and PRs, are unsigned. See *Installing* below and
+`docs/releasing.md`.
+Started with no arguments, the GUI now opens a Connect dialog (host, model, TLS) instead of refusing to run; given a host it still
+takes it on the command line exactly as the other front ends do. It also has a menu bar — Edit for
+copy and paste, View for the keypad and keyboard, and Model for the model and oversize (picked while
+disconnected, applied at the next connect; `Alt-M` pops it up; its first item, Disconnect,
+drops the host session so the choices free up). The mouse presses keypad
+buttons and selects text for copying, and nothing else: no click-to-place-cursor and no light
+pen. See *What is not implemented* below, which is
+the honest part of this file.
+
+## From README § Installing (moved 2026-11-12)
+
+The lead paragraph, the native-installer paragraph (signing status, unsigned-build workarounds and
+the 2026-11-08 hand checks), the minimum-OS sourcing and the Connect dialog's dated history. The
+workarounds are also in `docs/releasing.md`, *Unsigned-app notes*.
+
+**On npm since 0.1.0 (2026-11-08), currently 0.1.4 (2026-11-10, the first with a GitHub release;
+published by the tag workflow, with provenance, since 0.1.3); the native installers come from a
+green run of `.github/workflows/package.yml`, and the macOS app is signed from the next release**
+(see `docs/releasing.md`).
+
+**Native installers** (macOS universal `.dmg`/`.zip`, Linux x64 and arm64 AppImage/`.deb`, a
+Windows x64 NSIS installer) come from `npm run package:gui` via electron-builder. **From 0.1.4 on,
+each version's GitHub release** (the repository's *Releases* page, tag `vX.Y.Z`) carries all seven,
+built and tested by that tag's CI run, with a `SHA256SUMS` beside them (`sha256sum -c SHA256SUMS`
+on Linux, `shasum -a 256 -c SHA256SUMS` on macOS; `--ignore-missing` to check only the ones you
+downloaded) and notes quoting that version's `CHANGELOG.md` entry. Earlier versions' installers
+were CI artifacts only. **From the next release, a release's mac app is signed**: the
+`TN3270.app` in the `.dmg` and `.zip` with a Developer ID, notarized and stapled (the `.dmg` file
+itself is not signed, by design). **The Windows installer is not signed**, in a release or
+anywhere else: a Microsoft Store (MSIX) route, which Microsoft signs, is planned, and the NSIS
+`.exe` stays on the GitHub release for people who prefer it. The Linux packages are not signed.
+The CI checks every mac and Windows artifact's signature state on every run
+(`scripts/verify-signatures.mjs`). **Unsigned mac builds:** releases up to 0.1.4, and every CI
+artifact from main, PRs and branch pushes. For those, macOS Gatekeeper blocks
+a downloaded unsigned app, and the way through is System Settings → Privacy & Security → *Open
+Anyway* after the first blocked launch, or `xattr -dr com.apple.quarantine
+/Applications/TN3270.app`. **Checked by hand by the user on 2026-11-08:** on Apple Silicon the
+fully unsigned build runs once permitted through *Open Anyway* (a cumbersome step, but not a
+refusal), and the Linux arm64 `.deb`, Linux x64 AppImage and Windows 11 installer all just run,
+each through the Connect dialog. electron-builder's `identity: null` (the unsigned config) means
+no signature was applied, not an ad-hoc one. On the (unsigned) Windows installer, SmartScreen
+warns, and *More info → Run anyway* gets past it.
+
+**Minimum OS**, from Electron 44.10.2's own stated platform support
+(`node_modules/electron/README.md`, "Platform support"): macOS Ventura (13) and up; Windows 10 and
+up; Linux distributions still supported by both Chromium and the distro maker. The macOS figure is
+also what the built app declares: `LSMinimumSystemVersion` 13.0 in the CI-built universal
+`TN3270.app` (measured 2026-11-06). Windows 10 and the Linux statement are Electron's claim, not
+measured against this build.
+
+**Starting `tn3270-gui` with no host opens a Connect dialog** — host (the same
+`[prefix:][LU,LU@]host[:port]` the command line takes), model (default `3278-2-E`), and a TLS
+checkbox (on by default; untick it for a plaintext host such as Hercules). **The dialog stays open
+until a connect succeeds** (2026-11-08; it used to close on the first press and have no way back —
+see *Connecting over TLS*). Pressing Connect shows `Connecting to HOST:PORT...`, the host exactly
+as typed, on the dialog's own error line while the attempt is in flight — up to the 10-second TLS
+handshake deadline, or the 30-second connect deadline for a **plaintext** attempt (added
+2026-11-09: before it, a host that merely drops packets was given up on only by the OS's own TCP
+timeout, around two minutes on Linux) — and Quit still works throughout. A failure is shown on that same line, never in the terminal
+window — the TLS-against-a-plaintext-host case reads `Untick TLS in the Connect dialog: ...`,
+naming the checkbox right beside it — and the host, model and TLS fields keep what you typed, so
+fixing the one thing that was wrong and pressing Connect again **retries the SAME session** with
+whatever you changed. **Quit, Escape and closing the dialog all quit the app until a connect has
+succeeded**, including mid-attempt: the in-flight connect dies with the process. Once connected,
+the dialog closes and is never used again this run — a dropped connection goes through the
+ordinary reconnect path, and switching host mid-session is `File` → `Connect…` (roadmap item 15,
+not built). **`--terminal-type` on the command line** fixes the terminal type for the session's
+life, so after the first attempt the dialog's Model control is disabled (its title says why)
+rather than offer a choice a retry would ignore.
+
+## From README § What works today (moved 2026-11-12)
+
+Dated passages replaced by a current-state summary. The GUI and gateway launch blocks and the
+headless note were plain duplicates of *Using the GUI* and *Using the web gateway* and were dropped.
+
+- **MVS 3.8j (TK5)** — logs on to TSO, reaches ISPF's primary option menu, pages
+  through the tutorial, exits and logs off cleanly. Reproduced on four separate
+  userids.
+- **VM/370 (VM/CE 1.2)** — logs on, reaches CMS, has `QUERY DISK A` answered *by CMS*
+  with its disk table, and logs off with CP's own `LOGOFF AT` accounting. That last
+  part is the difference between being understood and being tolerated.
+
+**3279 color is real and proven on the wire, not just in unit tests.** TK5's ISPF
+menu renders five distinct foreground colors where the base-attribute map can only
+produce four — two of them (turquoise, neutral-white) come from the host's SA/SFE
+extended attributes and would have been silently discarded before. The SA orders we
+parse are **byte-for-byte identical to s3270's** on the same panel, checked as a
+color-capable 3279.
+
+**`IND$FILE` file transfer works on both hosts, in both directions, in BOTH PROTOCOLS**, with a
+binary round-tripping byte-identically each way. **`Ctrl-T` opens a transfer form in the TUI and a
+transfer window in the GUI**; the browser still cannot reach it. **The GUI's window has NOT been
+driven against a live host** — see *Using the GUI* and `docs/live-testing.md`.
+
+**DFT MODE WORKS, AND THE HOST CHOOSES IT — 2026-09-29.** Both engines are built for every
+transfer and the first inbound frame decides, because the client does not select the protocol:
+x3270's `ft_running` merely *reports* which one arrived (`ft.c:556`). **Live against MVS 3.8j
+TK5 at 43x80: 11 DFT frames, zero CUT frames, 249 bytes byte-identical both directions.** That
+geometry matters — **CUT needs a 24x80 screen and refuses anything else**, so a 43x80 transfer
+is only possible over DFT, and until this landed a `-model 3278-4-E` session could not transfer
+a file at all. The 24x80 requirement is still real but it is now raised **when CUT is chosen**
+rather than before the host is asked, which is the one behavior change: a CUT-only host at
+43x80 is primed before we find out, and VM/370's MECAFF refuses with its own text in about a
+second. **DDM is advertised BY DEFAULT as of 2026-09-29**, so a DFT-capable host will choose
+DFT; `-ddm off` restores the CUT-only behavior. See *Using the CLI*.
+
+One honest limit remains: **`Lrecl` is silently ignored for `Recfm=V` on VM/CMS** — confirmed on
+the wire 2026-09-24 by a three-case run where `RECFM V LRECL 80` and `RECFM V` alone are
+indistinguishable while `RECFM F LRECL 80` differs, so the keyword demonstrably reaches
+the host and CMS simply disregards it. TSO honors it as a *maximum* (`VB 1024` measured
+through the form). So a `V 80` readback on CMS is not confirmation the field took effect,
+and the field stays enabled because disabling it would make a real TSO attribute
+unexpressible.
+
+**There is a GUI.** `packages/gui` is an Electron window with a canvas renderer that
+blits glyphs from an atlas baked out of x3270's own 3270 bitmap font, at integer scale with
+antialiasing off — the authentic 3278/3279 face, and deterministic enough that screenshots
+can be compared byte for byte. It renders live screens from both Hercules systems, sizes
+itself to the model the host negotiates, and takes typed input. `Ctrl-]` quits, because
+Ctrl-C is the Clear AID.
+
+
+**And there is a browser gateway.** `packages/web` serves that same canvas renderer — the
+same file, not a copy — to a browser, with a WebSocket where the Electron app has IPC:
+
+```sh
+npm run build
+node packages/web/dist/main.js -insecure -model 3278-4-E HOST:PORT
+```
+
+Loopback by default, a cross-origin upgrade refused, and `wss://` in-process given
+`--tls-cert`, so a terminating proxy is optional rather than required. The access token is
+**off** by default and paired with that loopback bind — `--auth on` turns it on and prints
+it in the URL, and is what you want the moment you `--bind` anything wider. It renders live screens from both Hercules systems, and a
+session outlives its socket for `--grace` seconds so a reload reattaches instead of logging
+on again. **Without `--tls-cert`, keystrokes — including passwords — cross the network in
+the clear**, which it says out loud on startup. Full flag list and the security notes:
+`packages/web/README.md`.
+
+That the renderer is genuinely shared rather than merely similar is checked in pixels:
+`packages/web/scripts/browser-shot.mjs` compares the served page against the Electron app's
+own screenshot golden and requires them to be identical.
+
+**On a headless Linux box** you also need an X server and two Chromium flags, neither of
+which a Mac wants: `--no-sandbox` because the sandbox needs privileges a shared box may not
+grant, and `--disable-gpu` because without GL a hidden window HANGS rather than failing.
+`docs/live-testing.md` has the full recipe under *The Electron GUI against both hosts*.
+
+**TN3270E negotiates end to end** — device type, functions, the 5-byte header, SNA
+responses, SYSREQ and LU selection — but against real s3270 and an in-repo TN3270E
+server, **not against a live host**. Neither Hercules system offers the option at all,
+and the one real host that does — public z/VM 4.4, probed 2026-09-17 — **offers it and
+then withdraws it** after our device-type request, so what has a live witness is the
+*offer* and our *fallback*, not a completed negotiation. **That withdrawal is the host's
+own non-conformance, not ours** — real s3270 was refused by it identically — but that
+exonerates the implementation rather than verifying it. See *TN3270E* and *Verification*.
+
+Inbound records are **byte-identical to real x3270** (s3270 4.5ga6) in 5 of 6 records;
+the sixth differs by design, where s3270 blocks on a hardcoded `Wait(InputField)`.
+
+## From README § Build and test (moved 2026-11-12)
+
+Superseded: every package now declares `engines` `>=20.19` and CI tests Node 22 and 20.19; the
+import list missed `node:module` and `node:readline/promises`; the package graph left out
+`node-files` and the `frontend` edges; the test count went stale.
+
+Developed and tested on Node 26. `package.json` declares no `engines` floor and
+no other version has been tried; the code targets ES2023 with `NodeNext` modules and its
+runtime imports are only `node:child_process`, `node:crypto`, `node:fs`, `node:http`,
+`node:https`, `node:net`, `node:path`, `node:readline`, `node:tls`, `node:url` and
+`node:zlib` — taken from the BUILT output, so the type-only `node:stream` is excluded. All
+are long-standing, so Node 18+ ought to work for the client, but that is inference rather
+than a tested claim. **The test suite needs more than the client does**: `integration.test.ts`
+drives the gateway with Node's own built-in `WebSocket`, which is what makes it an independent
+check of our hand-rolled framing, and that global is only unflagged from Node 22.
+Only `packages/gui` depends on anything outside the standard library, and its dependency is
+Electron. **`packages/web` adds none** — Node has a WebSocket client but no server, so the
+framing is hand-rolled behind a seam that a `ws` wrapper could replace wholesale. The package
+graph is `core <- frontend <- { cli, tui }` and `core <- canvas <- { gui, web }`.
+
+```sh
+npm install        # pulls Electron, which is ~230 MB of binary
+npm run build      # NOT `npm run build --workspaces`, which fails on the
+                   # data-only fixtures package
+npm test           # 2959 tests, 119 files
+npm run typecheck
+```
+
+`npm run build` also bakes the GUI's glyph atlas out of the vendored bitmap font, so it is
+not optional before running the GUI. Note that `npm install` may not run Electron's own
+postinstall depending on your npm's script-approval settings, in which case the binary is
+fetched on first launch instead — "Downloading Electron binary..." is that, not a hang.
+
+## From README § Using the GUI (moved 2026-11-12)
+
+The flag paragraph, the reconnect paragraph, and the ~45-line paragraph that mixed missing features,
+menus, the mouse, live status, Attn, PA1/PA2 and the `keys.mjs` harness, plus the `clicks.mjs`
+paragraph. Superseded: `keys.mjs` now sends 25 chords (23 actions, 2 absences); `clicks.mjs`'s
+plumbing list (`mousedown`, `hitTest`, the scale-and-offset inverse) describes the canvas-drawn keypad
+deleted 2026-10-06, and its mutation figure (a bare `return`, 1643 tests) disagrees with the
+harness's own header (`if (Date.now() > 0) return;`, 1637 tests in 70 files); both harnesses now run
+in CI. The transfer window was live-verified 2026-10-02.
+
+The flags are the TUI's, unchanged — `-model`, `--terminal-type`, `-oversize`, `-tn3270e on|off`,
+the TLS set, and the full `[prefix:][LU,LU@]host[:port]` shape. (`-oversize auto` measures the
+display here; see *Oversize*.) That is not a coincidence or a
+promise to keep them in step: all three front ends parse them with the same code in
+`packages/frontend`. `-scheme` is the one flag that is not shared with the CLI, since a
+script-driven client has nothing to render; see *Using the TUI* for what it picks between.
+
+**Clicking a keypad button and selecting text are the only things the mouse does**; the light pen
+is not implemented, and text selection is deliberately not built on it (see *Remaining* for why
+that distinction matters).
+
+**Sys Req and Newline have no chord, in any front end, and that is deliberate.** c3270 defines no
+Sys Req chord either; Newline's would be `Ctrl-J`, which *is* `\n` (0x0a) and already means Enter
+in a terminal — one byte cannot be both, and turning Return into a cursor move is not a trade
+worth making. The keypad button is their route, which is a large part of why the keypad exists.
+
+**While disconnected, `Enter` and `Ctrl-C` (Clear) reconnect to the same host and port**, and send
+nothing. VM prints `Press Enter or Clear to continue` in the instant a `LOGOFF` drops the line, on
+the last screen it ever painted — and until now both keys did nothing whatever, because a
+disconnected `sendAID` throws and the shared dispatch swallows it. The status line says so too:
+`X Disconnected -- press Enter to reconnect`, and only once there is a host to go back to, so a
+replayed trace does not offer a key that cannot work. **This is a deliberate divergence from
+x3270**, which binds no key to its `Reconnect()` action; the TLS decision, the port and any `N:` or
+`LU@` from the original host argument are all replayed, never re-derived, and a second press while
+the first attempt is still dialling is refused rather than opening a second socket.
+
+**What it does not have yet:** a preferences store, and `File` → `Connect…` for a session already
+running. A launch with no host opens a Connect dialog instead of refusing to run (see *Installing*);
+a launch given a host still takes it on the command line. It does have a menu bar (Edit for
+copy and paste, View for the keypad and keyboard, Model for the model and oversize -- disabled while
+connected or connecting, applied at the next connect, and popped up by `Alt-M`). The Model menu
+starts with **Disconnect**, enabled only while connected, which drops the host session so a choice
+can be made without waiting for the host to drop the line (`Enter` or `Clear` then reconnects with
+it; a connect attempt still in flight cannot be cancelled, so the item stays disabled until it
+settles). Then it offers the eight models, then oversize None, Auto and the `-oversize` size given at startup, if
+any. **A model choice can reset the oversize to None** when the oversize cannot go with that model
+(a non-`-E` model, or a fixed size smaller than the model), and the window says so; pick a model
+the size fits and then the size again to get it back. **A `--terminal-type` session has no Model
+menu**: its terminal type is fixed, so there is nothing to choose. **On the 3270 canvas the mouse does one thing: dragging selects
+a rectangle of text for copying** (see *Copy and paste*). Clicking the screen does not place the
+cursor and there is no light pen. The keypad is not on the canvas at all: it is real HTML buttons, in
+its own window in the GUI and an overlay in the browser, so the mouse works on it normally, as it does
+in the *transfer* window. **The browser has the Model menu too, as an overlay: `Alt-M`** opens a
+picker with the same choices from the gateway, disabled while connected or connecting, and a
+choice applies at the next connect; its **Disconnect** button, like the menu's item, drops the
+host session while connected. The same model-resets-oversize rule applies, and the picker
+says so (see `packages/web/README.md`). **What is implemented
+but not yet verified against a live host:** the PF and
+Clear keys (they travel the same path as ordinary typing, which *is* verified end to end),
+the `Ctrl-]` quit, the in-window error message for a failed connection, and **the whole transfer
+window** — see *File transfer* above. **Attn is a
+Telnet BREAK, measured against VM/370's pre-logon banner with no visible reaction** — a real
+null result, not a gap in testing; whether CP responds once logged into CMS is a different,
+untested state. **PA1/PA2 are verified on one half and not the other, and the two halves
+should not be merged back together:** the CLI's `PA(n)` command makes the identical
+`sendAID` call the GUI's `Alt-1`/`Alt-2` bindings make, and driving it against MVS's ISPF
+got a real, quoted, distinct reaction to each — `ISP088E ... TERMINATED DUE TO ATTENTION
+INTERRUPT` for PA1, a bare `READY` redisplay for PA2 — so our AID bytes and the host's
+reaction to them are settled. The local half is settled too — first by **hand**: the author
+reported PA1 working from a real keypress in the app against MVS on 2026-09-15, and now by a
+guard as well. `actionForKey` maps Alt+digit and is unit-tested against a synthetic key-like
+object; the plumbing from a real keypress to that mapper — the renderer's `keydown` listener,
+the IPC hop,
+`ipcMain` — is guarded by `packages/gui/scripts/keys.mjs`, which sends **19 chords as real
+Chromium key events and asserts the 17 actions that must arrive, in order, plus two that must
+not** (`Ctrl+Z` and `F13`). **The nineteenth is `Ctrl+T`, and this list exists to have caught it and
+did not**: the chord was dead — `canvas/src/keys.ts` had no `t` in its CTRL table — while the `Xfer`
+keypad button opened the window fine, because the keypad route never goes through that table. The
+harness only found it once the chord was added to the list. It is **not part of `npm test`** (it spawns Electron): run it by hand,
+`node packages/gui/scripts/keys.mjs`, as you would `shot.mjs` or `pty-smoke.py`. `npm test`
+only pins its invocation. Its failure has been observed rather than assumed — breaking the
+renderer's `keydown` listener leaves the suite green and reddens only the harness.
+
+**The mouse path has the same kind of guard, for the same reason.**
+`packages/gui/scripts/clicks.mjs` shows the keypad with a real `Ctrl-K`, then clicks **9 buttons
+by label** with real Chromium mouse events and asserts the 10 actions that must arrive in order
+(the toggle plus one per button). Its value is the plumbing — `mousedown`, the primary-button
+guard, the scale-and-offset inverse, `hitTest`, `sendAction`, IPC, `applyAction` — none of which
+any unit test can execute, because `renderer.ts` throws at module load outside a browser. Proved
+as a mutation: a bare `return` at the top of the `mousedown` listener leaves build, typecheck and
+every test clean — 1643 of them, as the suite stood when that mutation was measured — while every
+keypad button is dead, and only this harness reddens. Like `keys.mjs` it is not part of `npm test`;
+`npm test` pins its invocation.
+
+## From README § The keypad (moved 2026-11-12)
+
+The keypad passages of *What works today*, condensed into *The keypad*:
+
+**There is a keypad of 48 buttons, two of which had no other way to be pressed.** `Ctrl-K` opens
+it — PF1–PF24, PA1–PA3, and the special keys a PC keyboard has not got. In the **Electron GUI** it
+is a separate window you can leave open beside the terminal; in a **browser** it is an opaque
+overlay over the page, because a tab cannot open an OS window. Either way the buttons are **real
+HTML controls** with tooltips naming what each key does, grouped under headings, and styled like a
+native application rather than like a 3270.
+
+**It was drawn into the canvas until 2026-10-06** — inverse-video blocks blitted through the
+screen's own glyph atlas, as a third region of the draw list below the status line. That looked
+like a 3270 and the author's verdict on it was *ugly*, and *modal in an annoying way*: it toggled,
+and was awkward to leave up while working. A separate window is non-modal by construction, which
+is the complaint answered structurally rather than tuned. The keypad **no longer grows the window
+or scrolls the page**, since it is not part of the drawing at all.
+
+Clicking a button fires exactly the action its label names. **`Sys Req` and `Newline` have no
+keyboard chord in any front end**, so for those two the button is the only route there is; `Dup`
+and `Field Mark` do have chords (`Ctrl-D`/`Ctrl-F`), so losing their buttons would cost the mouse
+and not the keyboard.
+
+The TUI has no mouse, so `Ctrl-K` there opens a **keyboard-navigable list** of the same 48 keys
+instead — arrows move (`k`/`w` and `j`/`s` too), Enter fires, `Esc` closes — with each key's chord shown beside it, read
+from the same binding table the keymap is checked against so the on-screen help cannot drift. Every
+line is padded to one width, so the list is an opaque block rather than 48 ragged lines with the
+host's screen showing through the chord column.
+
+Four 3270 keys became reachable in the process, having been implemented in `core` with no way to
+press them: **Dup** (`Ctrl-D`), **Field Mark** (`Ctrl-F`), **Sys Req** and **Newline**. The last
+two get no chord — see *Using the TUI*. **Sys Req now puts bytes on the wire against a classic
+host**, as a test request read heading (`01 6c 61 02`) followed by any modified field data, rather
+than the AID you would expect. **All four are live-verified on both Hercules hosts** — Sys Req and
+Dup as of 2026-09-21, Field Mark and Newline 2026-09-24 — but no *keypad button* has been
+clicked at a host: the runs drove the CLI, which shares `applyAction` with the button but not the
+click plumbing. See *What is not implemented*.
+
+From *The keypad* itself:
+
+**It OPENS rather than toggling**, and the window's own close button closes it. That is deliberate:
+the old in-canvas keypad toggled, and being hard to leave up was half the objection to it. Pressing
+`Ctrl-K` again brings the window forward rather than stacking a second one.
+
+## From README § Copy and paste (moved 2026-11-12)
+
+**A press becomes a selection once the pointer moves 4 pixels**, roughly the browser's own drag
+threshold, even if it never leaves the cell it started on. So **a single character can be
+selected**: press on it, nudge, release. A plain click with ordinary hand jitter selects nothing,
+so clicking the screen does not arm a copy. (Until 2026-11-03 the rule was the rectangle's size,
+and the smallest selection was two cells.) Machine-checked in both front ends: GUI `select.mjs`
+and `browser-clicks`'s `webSingleCell` and `webClickNoCopy`.
+
+**IN THE BROWSER EVERY COPY GESTURE WORKS: `Cmd-C` on a Mac, the browser's Edit > Copy, and the
+chord `Ctrl-Shift-C` (`Cmd-Shift-C` on a Mac).** `Ctrl-C` is still Clear there too, so on Linux and
+Windows the keyboard route is the shifted chord. The browser once had the chord alone, and the
+history is measured: the 3270 selection is the emulator's own state rather than a DOM text
+selection, so with no `copy` listener `Cmd-C` copied nothing in any browser tried (2026-10-28),
+and once a listener existed Firefox's Edit > Copy was still refused for want of a keystroke's user
+activation (2026-11-02), until the fetch below made the menu work (2026-11-03).
+
+**The selection is cleared by any keystroke that does something, by every repaint from the
+host, and by an error message painted over the screen** — a highlight over changed text would offer you a copy of something that is no longer
+there. **The copy chord is the one exception**, for the obvious reason: clearing on it would
+destroy the rectangle it is about to send, so copying would reliably copy nothing. You can copy the
+same selection twice.
+
+**A consequence worth knowing, because it looks like a bug and is not:** the clear on a host
+repaint does not check whether the repaint touched your selection. A 3270 host sends frames you did
+not ask for — an unsolicited write from a running job, a status-line update, a timed panel refresh
+— so a frame arriving between your drag and your copy discards the selection, and the copy then
+does nothing and says nothing. On a busy panel you may have to select and copy again. The
+alternative — keeping a highlight over text the host has changed underneath it — was judged worse,
+since it offers a copy of something you never saw.
+
+**The web gateway has BOTH copy and paste** (2026-10-27). It did not for a long time, and the
+reason is worth keeping: a copy has to extract the text on the gateway's machine, where the screen
+buffer lives, and then get it back to *your* clipboard — which needed a protocol message that did
+not exist. It exists now, so the selected text travels back over the WebSocket when the drag ends,
+and the page writes your own clipboard when you copy.
+
+**The one limit left on a plain-`http` LAN address is the fast copy above.** Writing a clipboard
+asynchronously requires a **secure context**: `localhost` has one even over plain `http`, a LAN
+address over `http` does not. Only the fallback writes asynchronously, so it is the only thing
+that can be refused, and it says so on the screen rather than failing silently. Serving over
+`https` (the gateway has `--tls-cert`) or reaching it on loopback removes even that.
+
+## From README § File transfer (IND$FILE) (moved 2026-11-12)
+
+Superseded: the window is live-verified on both hosts and both engines, and of the three items
+listed as still open only the close guard on TSO remains (`docs/live-testing.md`, *The GUI
+transfer window*).
+
+The host decides which protocol is used — CUT or DFT — and the window drives both, **reporting a
+running byte count on each**. CUT reports per frame; DFT reports per accepted data frame, through
+`Session`'s `transferProgress` event.
+
+**THAT USED TO SAY DFT WAS SILENT BY DESIGN, AND IT WAS A BUG RATHER THAN A DESIGN.** `onProgress`
+was reached only from the CUT frame handler, and the same gap meant nothing re-armed the 30-second
+per-frame deadline during a DFT transfer — so **any DFT transfer longer than 30 seconds was killed by
+a timer meant to detect a stalled CUT host**, with the doubly-misleading message `stalled: no CUT
+frame from the host within 30s`. Found 2026-10-02 by a 200 KB live run; 249-byte files had always
+finished inside the window. See `docs/live-testing.md`, *A 200 KB DFT transfer was killed by CUT's
+stall detector*.
+
+**While a transfer is running, the transfer window refuses its own close** — the red button and
+`Cmd-W` are both prevented, the window is brought forward, and `Cancel` is left as the only enabled
+control. Cancel tells the host to leave transfer mode rather than abandoning it mid-frame. **Two
+other ways out do not refuse, they cancel**, and they must not be read as the same guard: quitting
+the app (`Ctrl-]` or `Cmd-Q`) cancels a running transfer first and then quits, rather than becoming
+unquittable; and closing the TERMINAL window destroys the transfer window with it, which also
+cancels — Electron fires the child's `closed` **without** its `close`, so the refusal never runs on
+that path and a separate hook does the cancelling. **If the session drops underneath**, the transfer
+is cancelled too, so the window does not sit refusing every close on a dead session.
+
+`Exist` is yours to set and the Save panel deliberately does not set it: `append` has no equivalent
+in a file chooser, so the three-way choice (`keep`/`replace`/`append`) stays explicit. Canceling
+either panel leaves whatever you had typed in the Local file field alone.
+
+**NOT YET DRIVEN AGAINST A LIVE HOST.** The *protocol* is live-verified on both hosts in both
+directions and in both modes (see *Verification*), and this window's Electron wiring is covered by
+`packages/gui/scripts/transfer.mjs` — 10 checks, under Xvfb, in replay mode with the native dialog
+**stubbed**, because a real modal under Xvfb has nobody to click it. The four close/cancel paths
+described above were each driven by hand under Xvfb with a **fake** transfer, which proves `cancel`
+is reached on each and nothing about the bytes it then sends. **BOTH OF THOSE GAPS ARE NOW CLOSED, 2026-10-02.** A real transfer through this front end is
+live-verified against VM/CMS -- 249 bytes both directions, byte-identical, reproduced twice
+(`packages/gui/scripts/live-transfer.py vm`) -- and **the user verified the native dialog on macOS by
+hand, in ASCII mode**, which no scripted run here has ever used. Both logs and the four remaining
+open items are in `docs/live-testing.md` — *The transfer window's four teardown paths* for what was
+driven with a fake transfer, and *The GUI transfer window* for the live results. **Still open there:
+TSO/DFT from any platform**, the close guard against a transfer actually in flight, and the progress
+line against real byte counts.
