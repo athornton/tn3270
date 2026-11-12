@@ -94,7 +94,7 @@ describe('store stand-in config', () => {
     },
   );
 
-  it.skip('the main entitlements grant network.client (the Connect check needs it) and no network.server', () => { // MUTATION 4
+  it('the main entitlements grant network.client (the Connect check needs it) and no network.server', () => {
     const d = plist('entitlements.mas.plist');
     expect(d['com.apple.security.network.client']).toBe(true);
     expect(d['com.apple.security.network.server']).toBeUndefined();
