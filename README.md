@@ -17,7 +17,7 @@ The protocol core, extended data stream with Query Reply, 3279 color, `IND$FILE`
 and everything but TN3270E is verified against two live hosts — VM/370 and MVS 3.8j. All four
 front ends are on npm, with native installers for macOS, Linux and Windows; see *Installing*. The
 mouse selects text and presses keypad buttons; there is no click-to-place-cursor and no light pen.
-See *What is not implemented*, which is the honest part of this file.
+See *What is not implemented* for known gaps and deficiencies.
 
 ## Installing
 

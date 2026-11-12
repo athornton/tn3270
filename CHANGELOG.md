@@ -27,7 +27,7 @@ them into a new entry at the top of this file. See `docs/releasing.md`.
 - No user-facing change from 0.1.1.
 
 <a id='changelog-0.1.2'></a>
-## 0.1.2 (2026-11-09)
+## 0.1.2 (2026-11-09) — not released
 
 ### Other changes
 
