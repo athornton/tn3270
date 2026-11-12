@@ -60,8 +60,8 @@ import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  CAPTURE_SWITCHES, descendants, displayEnv, fail, gone, groupEmpty, judgeShot, killTree, launch, said, sleep,
-  startServer, until,
+  CAPTURE_SWITCHES, descendants, displayEnv, fail, gone, groupEmpty, judgeShot, killTree, launch, said,
+  startServer, until, within,
 } from './smoke-lib.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -135,7 +135,7 @@ export async function stop(r, p) {
   if (pid === undefined) return [];
   const tree = linux ? [pid, ...descendants(pid)] : [pid];
   killTree(p.child);
-  await Promise.race([p.closed, sleep(10_000)]);
+  await within(p.closed, 10_000);
   if (win) {
     const { processDir } = routeDefaults(r);
     if (processDir === undefined) return ['(the route has no processDir or installDir to look under)'];
@@ -149,7 +149,7 @@ export async function stop(r, p) {
 }
 
 /** Waits for the launch to exit by itself, up to `ms`; true when it did. */
-export const exitedWithin = (p, ms) => Promise.race([p.closed.then(() => true), sleep(ms).then(() => false)]);
+export const exitedWithin = (p, ms) => within(p.closed, ms);
 
 /**
  * The last `probe:` line on `stdout`, or null. Anchored at a line start: probe.ts prints it as

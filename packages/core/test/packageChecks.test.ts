@@ -1,10 +1,11 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  CHECKS, GOLDEN, NO_SEAMS, TRACE, defaultStage, dialogConnects, drawsGolden, probeSeen, routeDefaults, start, switches,
+  CHECKS, GOLDEN, NO_SEAMS, TRACE, defaultStage, dialogConnects, drawsGolden, exitedWithin, probeSeen, routeDefaults, start, switches,
   type Route,
 } from '../../../scripts/package-checks.mjs';
 
@@ -163,4 +164,40 @@ describe('start: no inherited APP_SANDBOX_CONTAINER_ID (it would fake the probe 
       rmSync(tmp, { recursive: true, force: true });
     }
   }, 30_000);
+});
+
+describe('exitedWithin leaves no timer pending (the ~2 minute exit tail, CI runs 43065643116 and 43142211500)', () => {
+  it('when the launch exits first, the LAUNCH_MS timer is cleared', async () => {
+    vi.useFakeTimers();
+    try {
+      expect(await exitedWithin({ closed: Promise.resolve({ code: 0, signal: null }) }, 120_000)).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+  it('when the time runs out first, it says false and leaves nothing either', async () => {
+    vi.useFakeTimers();
+    try {
+      const r = exitedWithin({ closed: new Promise(() => {}) }, 1_000);
+      expect(vi.getTimerCount()).toBe(1); // the wait itself holds a real timer while it waits
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(await r).toBe(false);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+  it('a node process whose launch exited first exits at once, not LAUNCH_MS later', () => {
+    const url = new URL('../../../scripts/package-checks.mjs', import.meta.url).href;
+    const t0 = Date.now();
+    const r = spawnSync(process.execPath, ['--input-type=module', '-e',
+      `const { exitedWithin } = await import(${JSON.stringify(url)}); console.log(await exitedWithin({ closed: Promise.resolve() }, 60000));`],
+    { encoding: 'utf8', timeout: 50_000 });
+    expect(r.stdout.trim()).toBe('true');
+    expect(r.status).toBe(0);
+    expect(Date.now() - t0).toBeLessThan(15_000);
+  }, 60_000);
+  it('no bare Promise.race against a sleep is left in the launch scripts', () => {
+    for (const f of ['package-checks.mjs', 'install-smoke.mjs', 'smoke-lib.mjs', 'store-probe.mjs', 'package-smoke.mjs']) {
+      const src = readFileSync(fileURLToPath(new URL(`../../../scripts/${f}`, import.meta.url)), 'utf8');
+      expect(src, f).not.toMatch(/Promise\.race\(\[[^\]]*(sleep\(|setTimeout\()/);
+    }
+  });
 });

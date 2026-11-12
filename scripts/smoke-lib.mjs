@@ -34,6 +34,24 @@ export function said(r) {
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * Waits for `promise` to settle or `ms` to pass, whichever is first: true when the promise won.
+ * The timer is ALWAYS cleared, win or lose. Racing a bare sleep against the promise leaves the
+ * losing sleep's timer pending, and a pending timer keeps Node alive: package-smoke and the store
+ * probe sat idle for ~2 minutes after their last `ok` (CI runs 43065643116, 43142211500;
+ * measured here: 116 s), the LAUNCH_MS sleep of the last drawsGolden still counting down. NOT
+ * unref'd: while it is being waited on, the wait must hold the process.
+ */
+export async function within(promise, ms) {
+  let timer;
+  const timeout = new Promise((r) => { timer = setTimeout(() => r(false), ms); });
+  try {
+    return await Promise.race([promise.then(() => true, () => true), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Polls `cond` until true or `ms` elapse; true when it held. */
 export async function until(cond, ms) {
   const deadline = Date.now() + ms;

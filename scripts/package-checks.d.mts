@@ -26,6 +26,8 @@ export function routeDefaults(route: Route): {
   stage: (dir: string) => Staged; probe: boolean; processDir: string | undefined;
 };
 export function switches(userData: string): string[];
+/** Waits for the launch to exit by itself, up to `ms`: true when it did. Leaves no timer pending. */
+export function exitedWithin(p: { closed: Promise<unknown> }, ms: number): Promise<boolean>;
 /** A started launch (smoke-lib's `launch`): output growing as it runs. */
 export interface Started {
   child: import('node:child_process').ChildProcessWithoutNullStreams; stdout: string; stderr: string; exited: boolean;

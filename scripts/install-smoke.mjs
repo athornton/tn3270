@@ -67,7 +67,7 @@ import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { publishedPackages, tarballName } from './pack.mjs';
-import { CAPTURE_SWITCHES, CheckFailed, displayEnv, fail, gone, judgeShot, killTree, run as runIn, said } from './smoke-lib.mjs';
+import { CAPTURE_SWITCHES, CheckFailed, displayEnv, fail, gone, judgeShot, killTree, run as runIn, said, within } from './smoke-lib.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const artifacts = join(root, 'artifacts', 'npm');
@@ -166,7 +166,7 @@ async function webServes(env) {
     if (problems.length > 0) fail(`${problems.join('; ')} (served at ${url}; stderr ${JSON.stringify(stderr)})`);
   } finally {
     killTree(child);
-    await Promise.race([exited, new Promise((r) => setTimeout(r, 5_000))]);
+    await within(exited, 5_000);
   }
   if (!gone(child.pid)) fail(`killed PID ${child.pid}, but it is still running`);
 }
