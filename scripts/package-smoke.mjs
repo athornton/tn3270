@@ -18,7 +18,7 @@
  *
  * Linux: the AppImage, run with `APPIMAGE_EXTRACT_AND_RUN=1` (no FUSE needed; the runtime then
  * prints the extracted file names on a buffered stdout that interleaves with the app's own, so
- * the `shot:` line is looked for anywhere, not at a line start -- see `drawsGolden`); and the .deb, unpacked with `dpkg-deb -x` into a fresh directory and
+ * the `shot:` line is looked for anywhere, not at a line start -- see `drawsGolden` in package-checks.mjs); and the .deb, unpacked with `dpkg-deb -x` into a fresh directory and
  * run from `opt/TN3270/tn3270-gui` (electron-builder.cjs `linux.executableName`). No dpkg-deb is
  * a SKIP on a dev box but a FAIL under `CI=true`: GitHub's ubuntu runners have it. Every Linux
  * launch adds `--no-sandbox`: Ubuntu 23.10+ blocks the unprivileged user namespaces Chromium's
@@ -54,49 +54,25 @@
  * and the check FAILs naming what IS there if that is not it. Afterwards `Uninstall TN3270.exe /S`
  * (common.nsh `UNINSTALL_FILENAME`), best effort.
  *
- * Every launch on every OS gets `--user-data-dir=<fresh dir>` (Electron's userData; main.ts
- * strips it before parsing, electronSwitches.ts), so a run never reads or writes the real
- * `TN3270` app-data directory -- XDG_CONFIG_HOME alone would cover only Linux.
- *
- * ## THE GOLDEN, ON EVERY OS
- *
- * `synthetic-ispf.sha256` was recorded on Linux under Xvfb at scale factor 1 in sRGB, and the hash
- * is of the raw bitmap. Every launch passes `CAPTURE_SWITCHES` (smoke-lib.mjs) to ask Chromium for
- * exactly that, and the hash must then match on every OS. Measured before that rule (CI runs 2 and
- * 3, 2026-11-06): macOS arm64, Windows and both Linux runners matched byte for byte; macos-26-intel
- * captured 1440x700 (scale 2) with greens shifted by the display profile, and the same geometry.
- *
- * ## EVERY LAUNCH IS BOUNDED AND KILLED BY PID
- *
- * 120 s per launch. POSIX: each launch leads its own process group and the group is SIGKILLed;
- * Windows: `taskkill /T /F /PID`. Then the check asserts no survivor: the process group is empty
- * (POSIX; on Linux also every descendant recorded from /proc before the kill), or no process runs
- * from the install directory (Windows, by ExecutablePath). Never by name -- `pkill -f electron`
- * kills other people's sessions on a shared box.
+ * Every launch on every OS gets a fresh `--user-data-dir`, and every launch is bounded and killed
+ * by PID; THE GOLDEN, ON EVERY OS and the kill rules are in package-checks.mjs, which holds the
+ * two checks and their launch plumbing (moved there so store-probe.mjs runs the same checks).
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import {
-  CAPTURE_SWITCHES, CheckFailed, descendants, displayEnv, fail, gone, groupEmpty, judgeShot, killTree, launch,
-  said, sleep,
-  startServer, until,
-} from './smoke-lib.mjs';
+import { CheckFailed, fail } from './smoke-lib.mjs';
+import { CHECKS } from './package-checks.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const ARTIFACTS = join(root, 'artifacts', 'gui');
-const TRACE = join(root, 'packages', 'fixtures', 'traces', 'synthetic-ispf-like.trace');
-/** shot.mjs case 1's golden; read at check time, never copied here. */
-const GOLDEN = join(root, 'packages', 'gui', 'test', 'golden', 'synthetic-ispf.sha256');
-const GOLDEN_PNG = join(root, 'packages', 'gui', 'test', 'golden', 'synthetic-ispf.png');
 const VERSION = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version;
 const PLATFORM = process.platform;
 const linux = PLATFORM === 'linux';
 const win = PLATFORM === 'win32';
 const CI = process.env.CI === 'true';
-const LAUNCH_MS = 120_000;
 
 const argv = process.argv.slice(2);
 for (const a of argv) {
@@ -132,145 +108,6 @@ const linuxArch = (ext) => {
   if (process.arch === 'arm64') return 'arm64';
   return fail(`no Linux artifact is built for ${process.arch}`);
 };
-
-// ---------------------------------------------------------------------------------------------
-// The checks
-
-/** Every seam this smoke does not use, cleared: an inherited one would replay, type or photograph. */
-const NO_SEAMS = {
-  TN3270_GUI_REPLAY: '', TN3270_GUI_SHOT: '', TN3270_GUI_KEYS: '', TN3270_GUI_CLICKS: '',
-  TN3270_GUI_SELECT: '', TN3270_GUI_TRANSFER: '', TN3270_GUI_URL: '', TN3270_GUI_CONNECT: '',
-  TN3270_GUI_PROBE: '',
-};
-
-/**
- * The Chromium switches every launch gets; main.ts strips them (electronSwitches.ts). `dir` is
- * the launch's fresh directory: its `user-data` is the app's userData, on every OS.
- */
-const switches = (dir) => ['--disable-gpu', ...CAPTURE_SWITCHES, ...(linux ? ['--no-sandbox'] : []), `--user-data-dir=${join(dir, 'user-data')}`];
-
-/** Starts the route's app with `args` and `extraEnv`; see `launch` in smoke-lib.mjs. */
-async function start(r, args, extraEnv, cwd) {
-  const env = await displayEnv({ ...process.env, ...r.env, ...NO_SEAMS, ...extraEnv });
-  delete env.TN3270_GUI_MAIN;
-  // windowsHide OFF (unmeasured caution): it puts SW_HIDE in STARTUPINFO, which Windows applies
-  // to a process's first ShowWindow -- possibly the very window being captured.
-  return launch(r.exe, [...r.prefix, ...args], env, { group: true, spawnOptions: { cwd, windowsHide: false } });
-}
-
-/** Windows: PIDs of every process whose executable lives under `dir` (PowerShell CIM). */
-function winProcessesUnder(dir) {
-  const ps = `Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith('${dir.replace(/'/g, "''")}', [StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { $_.ProcessId }`;
-  const r = spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], { encoding: 'utf8', timeout: 60_000, windowsHide: true });
-  if (r.status !== 0) return [`(powershell failed: ${r.error?.message ?? r.stderr})`];
-  return r.stdout.split(/\s+/).filter((s) => s !== '');
-}
-
-/**
- * Kills the launch's whole tree and returns whatever survived (empty: nothing did). The tree is
- * recorded BEFORE the kill on Linux, because a reparented orphan is no longer anyone's
- * descendant afterwards.
- */
-async function stop(r, p) {
-  const pid = p.child.pid;
-  if (pid === undefined) return [];
-  const tree = linux ? [pid, ...descendants(pid)] : [pid];
-  killTree(p.child);
-  await Promise.race([p.closed, sleep(10_000)]);
-  if (win) {
-    let left = [];
-    await until(() => (left = winProcessesUnder(r.installDir)).length === 0, 10_000);
-    return left;
-  }
-  for (const q of tree) { try { process.kill(q, 'SIGKILL'); } catch { /* gone */ } }
-  await until(() => groupEmpty(pid) && tree.every(gone), 10_000);
-  return [...(groupEmpty(pid) ? [] : [`process group ${pid}`]), ...tree.filter((q) => !gone(q))];
-}
-
-/** Waits for the launch to exit by itself, up to `ms`; true when it did. */
-const exitedWithin = (p, ms) => Promise.race([p.closed.then(() => true), sleep(ms).then(() => false)]);
-
-/** Check 1: shot.mjs case 1's argv and env, and the synthetic-ispf golden. */
-async function drawsGolden(r, work) {
-  if (!existsSync(TRACE)) fail(`the input trace ${TRACE} is missing from the repository`);
-  if (!existsSync(GOLDEN)) fail(`the golden ${GOLDEN} is missing from the repository`);
-  const want = readFileSync(GOLDEN, 'utf8').trim();
-  // A fresh directory each run, so a capture left by an earlier run cannot be what passes.
-  const dir = mkdtempSync(join(work, 'shot-'));
-  const shot = join(dir, 'shot.png');
-  const p = await start(r, [...switches(dir), '-insecure', '-model', '3278-2-E', '127.0.0.1:1'],
-    { TN3270_GUI_REPLAY: TRACE, TN3270_GUI_SHOT: shot, TN3270_GUI_SHOT_MS: '2500' }, dir);
-  p.child.stdin.end();
-  const exited = await exitedWithin(p, LAUNCH_MS);
-  const survivors = await stop(r, p);
-  const { code, signal } = await p.closed;
-  const res = { code, signal, stdout: p.stdout, stderr: `${p.stderr}${p.error?.message ?? ''}`, timedOut: !exited };
-  if (survivors.length > 0) fail(`survived the kill: ${survivors.join(' ')}`);
-  // NOT anchored at the start of a line. MEASURED 2026-11-06: the AppImage runtime prints each
-  // extracted file's name to a buffered stdout and the tail of that buffer lands in the middle of
-  // the app's own output -- `/tmp/ebsmshot: /tmp/.../shot.png 720x350`. The path is this run's
-  // fresh mkdtemp, so finding it anywhere, followed by `WxH` at the end of the line, is still
-  // this run's capture and nothing else.
-  const escaped = shot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const size = new RegExp(`shot: ${escaped} (\\d+)x(\\d+)\\r?$`, 'm').exec(res.stdout);
-  if (code !== 0 || size === null) {
-    fail(`expected exit 0 and "shot: ${shot} WxH" on stdout; got ${said(res)}`);
-  }
-  // A renderer exception draws a blank window and still captures it (see shot.mjs).
-  const thrown = res.stdout.split(/\r?\n/).filter((l) => l.startsWith('renderer[3]'));
-  if (thrown.length > 0) fail(`the renderer threw: ${thrown.join(' | ')}`);
-  if (!existsSync(`${shot}.sha256`)) fail(`no ${shot}.sha256 was written; got ${said(res)}`);
-  const got = readFileSync(`${shot}.sha256`, 'utf8').trim();
-  return judgeShot({ got, want, shot, goldenPng: GOLDEN_PNG });
-}
-
-/** Check 2: no host, so the Connect dialog; its submit must reach a plaintext telnet server. */
-async function dialogConnects(r, work) {
-  const srv = await startServer();
-  const dir = mkdtempSync(join(work, 'connect-'));
-  const p = await start(r, switches(dir), {
-    TN3270_GUI_CONNECT: JSON.stringify({ host: `127.0.0.1:${srv.port}`, model: '3278-2-E', tls: false }),
-    // Linux: a fresh config directory as well, for anything that reads XDG rather than userData.
-    ...(linux ? { XDG_CONFIG_HOME: join(dir, 'config') } : {}),
-  }, dir);
-  p.child.stdin.end();
-  let survivors = [];
-  let checks;
-  try {
-    // THE SERVER IS THE WITNESS, NOT STDOUT. The first CI run (2026-11-06, ubuntu-latest) had the
-    // AppImage's `connect: submitted` line never reach this pipe -- the AppImage runtime holds the
-    // app's stdout -- while the server HAD received WILL TERMINAL-TYPE: the submit worked and the
-    // check waited out LAUNCH_MS for a line, then killed a working app. So wait for either, and
-    // decide on the bytes. With NO host argument, a telnet reply can only come from the dialog's
-    // submit; one `connect:` line is still required, so a launch that dialled by some other route
-    // cannot pass.
-    // From launch to submit: cold start, and on the AppImage its extraction too.
-    await until(() => p.stdout.includes('connect: submitted') || srv.willTtype() || p.exited, LAUNCH_MS);
-    // ~10 s from the SUBMIT for the handshake reply.
-    await until(() => srv.willTtype(), 10_000);
-    checks = [
-      ['a connect: line (dialog shown or submitted)',
-        p.stdout.includes('connect: dialog shown') || p.stdout.includes('connect: submitted')],
-      ['IAC WILL TERMINAL-TYPE within 10 s of the submit', srv.willTtype()],
-    ];
-  } finally {
-    survivors = await stop(r, p);
-    await srv.close();
-  }
-  if (survivors.length > 0) checks.push([`no survivors (left: ${survivors.join(' ')})`, false]);
-  const missing = checks.filter(([, ok]) => !ok).map(([what]) => what);
-  if (missing.length > 0) {
-    const { code, signal } = await p.closed;
-    fail(`missing: ${missing.join('; ')}; server saw ${srv.seen.connections} connection(s), bytes ${srv.seen.bytes.toString('hex').slice(0, 40) || '(none)'}; `
-      + said({ code, signal, stdout: p.stdout.split('\n').filter((l) => l.startsWith('connect')).join('\n'), stderr: p.stderr, timedOut: !p.exited && !p.stdout.includes('connect: submitted') }));
-  }
-  return '';
-}
-
-const CHECKS = [
-  ['replays a trace and draws the synthetic-ispf golden', drawsGolden],
-  ['with no host, opens the Connect dialog and connects', dialogConnects],
-];
 
 // ---------------------------------------------------------------------------------------------
 // The routes: each `prepare(work)` returns the route's launch, or FAILs/SKIPs; `cleanup` after.
@@ -419,7 +256,7 @@ async function main() {
       try {
         for (const [name, fn] of CHECKS) {
           try {
-            const note = await fn(r, rwork);
+            const { note } = await fn(r, rwork);
             passed++;
             process.stdout.write(`ok ${route.name}: ${name}${note}\n`);
           } catch (e) {
