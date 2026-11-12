@@ -379,7 +379,7 @@ export interface ClipboardWriter {
  * Put the operator's copied text on their clipboard, or say why it could not be done.
  *
  * HERE RATHER THAN IN `bridge.ts` SO THE NO-API ROUTE CAN BE TESTED, which is the same split
- * `socketUrl` above exists for and the same one `transferBridge.ts` makes for its save dialog.
+ * `socketUrl` above exists for and the same one `transferBridge.ts` makes for its download sink.
  * `bridge.ts` touches real browser globals at module load, so no unit test can import it; this
  * takes the clipboard and the warn sink as PARAMETERS, so both routes are drivable with no DOM.
  * It is an exported plain function and not a fifth member of `BridgeApi`, exactly as `socketUrl`
@@ -388,10 +388,11 @@ export interface ClipboardWriter {
  * ## `clip === undefined` IS THE COMMON CASE AND THE UNTESTED ROUTE IS THE ONE THAT ROTS
  *
  * `navigator.clipboard` is SECURE-CONTEXT-ONLY, and a LAN deployment of this gateway on plain
- * `http` does not have one. `transferBridge.ts` records the identical situation for
- * `showSaveFilePicker` -- "`undefined` is the COMMON case for this gateway, not an edge one" --
- * and the structural lesson with it: "the fallback is the one at risk of rotting, because a
- * developer on Chrome-over-localhost always gets the picker." So the capability is INJECTED here
+ * `http` does not have one. `transferBridge.ts` recorded the identical situation for
+ * `showSaveFilePicker` (a route removed 2026-11-12): "`undefined` is the COMMON case for this
+ * gateway, not an edge one", and the structural lesson with it: "the fallback is the one at risk
+ * of rotting, because a developer on Chrome-over-localhost always gets the picker." So the
+ * capability is INJECTED here
  * rather than read from `navigator` at the point of use, which is the whole reason this function
  * exists instead of an inline `if` in the entry point.
  *

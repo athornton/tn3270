@@ -134,7 +134,7 @@ export interface TransferBridge {
    * a gateway that helpfully sent one empty chunk is refused by `ChunkReassembler` with
    * `chunk 0 arrived after all 0 bytes`, so there was no path at all.
    *
-   * The caller (Task 8's boot file, on `transferDone`) calls this when a successful receive
+   * The caller (`endTransfer` below, on `transferDone`) calls this when a successful receive
    * staged nothing. A transfer that DID stage bytes is untouched, so this cannot mask a
    * half-finished one.
    */

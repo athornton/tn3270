@@ -412,13 +412,14 @@ export function createGatewayTransfer(deps: GatewayTransferDeps): GatewayTransfe
           refuses a receive when `request.exist === 'keep' && files.exists(...)`
           (`transferRun.ts:110-114`), which is x3270's `Exist` check (ft.c:666-674). On this
           gateway there is no gateway-side file for that check to be ABOUT: the destination is the
-          operator's machine, and their own save dialog is what asks about overwriting. Answering
+          operator's machine, and the browser's own download handling decides about overwriting
+          (it renames, or prompts if the operator configured that). Answering
           true would refuse every receive that did not pass `Exist=replace`, and `keep` is the
           default.
 
           `append` IS `write`. `Exist=append` makes the driver call it instead (`:335`, `:401`),
           and on a socket-carried transfer the two mean the same thing: the bytes go to the
-          browser, and whether they are appended to anything is that save dialog's business. An
+          browser, and whether they are appended to anything is the browser's business. An
           `append` that did nothing would make `Exist=append` a receive that captured nothing and
           reported SUCCESS -- the empty-file-under-a-success-message failure `transferRun.ts`
           already records once (`:290-298`).

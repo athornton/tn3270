@@ -11,11 +11,16 @@ import { createTransferBridge, endTransfer } from './transferBridge.js';
  *
  * `gui/src/transferBoot.ts` states the rule this follows: if a branch here is about the MODEL it
  * belongs in `transferUi.ts`, and what remains is about real elements -- focus, caret, enablement,
- * and the two browser capabilities that have no Node equivalent. That is why this file has no unit
- * test and `transferUi.test.ts`, `transferBridge.test.ts` and `transferOverlay.test.ts` do:
+ * and the two browser capabilities that have no Node equivalent. That is why the model's tests are
+ * `transferUi.test.ts`, `transferBridge.test.ts` and `transferOverlay.test.ts`:
  * `vitest.config.ts` sets `environment: 'node'`, there is no `document` in any test in this repo,
- * and jsdom is not a dependency. The cover for this file is the real-browser harness
+ * and jsdom is not a dependency. The main cover for this file is the real-browser harness
  * (`packages/web/scripts/browser-clicks.mjs`), the same split `renderer.ts` has against `blit.ts`.
+ *
+ * ONE THIN UNIT TEST EXISTS SINCE 2026-11-12, `transferBoot.test.ts`, over a fake document. It
+ * pins the two inputs this file hands the download: the `deriveLocalFileOnReceive` option and
+ * the `saveName` given to `endTransfer`. Deleting either left every unit test green, and the
+ * harness is run by hand.
  *
  * ## THE DEEP IMPORT SPECIFIERS ARE REQUIRED, AND A BARE ONE WOULD BLANK THE PAGE
  *
