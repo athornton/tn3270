@@ -149,8 +149,10 @@ export interface BridgeDeps {
    * `tsconfig.base.json`'s `exactOptionalPropertyTypes: true` a bare `?:` accepts the property
    * being ABSENT but rejects it being present and `undefined`, so the annotation is what lets a
    * caller inject the result of a condition rather than branching on the whole object literal.
-   * `bridge.ts` passes a real function today; `transferBridge.ts`'s `savePicker` records the
-   * measurement (`TS2379`) for the dep that is genuinely handed `undefined`.
+   * `bridge.ts` passes a real function today. MEASURED 2026-10-07 on a dep that WAS handed
+   * `undefined` (the since-removed `savePicker`): without the annotation, the pattern
+   * `dep: cond ? fn : undefined` fails with `TS2379 ... Consider adding 'undefined' to the types
+   * of the target's properties`.
    */
   readonly showTransfer?: (() => void) | undefined;
   /**
@@ -366,8 +368,7 @@ export function socketUrl(documentHref: string): string {
  * A narrowing of `navigator.clipboard` to the one method this uses.
  *
  * Declared rather than taken from `lib.dom` so `writeClipboard` can be handed `undefined`, which
- * `Navigator.clipboard`'s own type forbids -- see that function's note. The same shape and the
- * same reason as `transferBridge.ts`'s `SaveSink`, which narrows a `FileSystemWritableFileStream`
+ * `Navigator.clipboard`'s own type forbids -- see that function's note. Narrowed to what this uses,
  * so a unit test can supply one.
  */
 export interface ClipboardWriter {

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createTransferOverlay } from '../src/transferOverlay.js';
+import { createTransferBridge, endTransfer } from '../src/transferBridge.js';
 
 /**
  * A fake element, matching `keypadOverlay.test.ts`'s idiom exactly: `environment: 'node'` means
@@ -202,5 +203,29 @@ describe('hiding an already-hidden overlay', () => {
     o.show();
     o.hide();
     expect(prompts, 'an open form with unsaved bytes still prompts').toBe(1);
+  });
+});
+
+describe('a completed receive, through the real bridge', () => {
+  it('does NOT prompt on close: it was downloaded as it completed', () => {
+    // The receive-discard prompt was for bytes waiting on a Save button; since 2026-11-12 the
+    // completion downloads them (`endTransfer`), so nothing is left to discard.
+    const bridge = createTransferBridge({ send: () => {}, saveFallback: () => {} });
+    let prompts = 0;
+    const el = fakeEl();
+    const o = createTransferOverlay({
+      element: el as unknown as HTMLElement,
+      build: () => {},
+      hasUnsaved: () => bridge.hasUnsaved(),
+      confirmDiscard: () => { prompts += 1; return true; },
+    });
+    o.show();
+    bridge.acceptData(0, 2, new Uint8Array([1, 2]));
+    endTransfer(bridge, {
+      ok: true, error: '', bytes: 2, direction: 'receive', refusal: undefined, saveName: 'nap.h',
+    });
+    o.hide();
+    expect(prompts).toBe(0);
+    expect(el.hidden).toBe(true);
   });
 });

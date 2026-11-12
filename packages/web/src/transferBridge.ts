@@ -20,13 +20,11 @@ import { MAX_TRANSFER_BYTES, ChunkReassembler, chunkBytes } from './transferChun
  *
  * ## EVERY BROWSER CAPABILITY IS INJECTED
  *
- * `vitest.config.ts` sets `environment: 'node'`: there is no `document`, no `File`, no `Blob`, no
- * `URL.createObjectURL` and no `showSaveFilePicker` in any test in this repo, and jsdom is not a
- * dependency. The same constraint produced the same shape in `bridgecore.ts` (its socket) and
- * `transferUi.ts` (its DOM). `savePicker` being `undefined` IS the feature-detection result,
- * injected rather than read from `window` at the call site -- which is what lets a unit test drive
- * BOTH save routes. The fallback is the one at risk of rotting, because a developer on
- * Chrome-over-localhost always gets the picker.
+ * `vitest.config.ts` sets `environment: 'node'`: there is no `document`, no `File`, no `Blob` and
+ * no `URL.createObjectURL` in any test in this repo, and jsdom is not a dependency. The same
+ * constraint produced the same shape in `bridgecore.ts` (its socket) and `transferUi.ts` (its
+ * DOM): the download sink is a dependency, which is what lets a unit test see every byte that
+ * would have been downloaded, and every download that must not happen.
  *
  * `btoa` IS THE ONE CAPABILITY NOT INJECTED, deliberately: it is the convention this socket
  * already uses in the other direction (`bridgecore.ts:155` decodes the atlas with
@@ -35,57 +33,26 @@ import { MAX_TRANSFER_BYTES, ChunkReassembler, chunkBytes } from './transferChun
  * rather than through a fake.
  */
 
-/**
- * A disk-backed sink: a `FileSystemWritableFileStream`, narrowed to what this uses.
- *
- * Declared here rather than taken from `lib.dom` because the File System Access types are not in
- * the DOM lib this package compiles with (`tsconfig.json` names `DOM` and `DOM.Iterable`;
- * `FileSystemWritableFileStream` is in neither as of TypeScript 7.0). `transferBoot.ts` will cast
- * the real handle to this shape at the single point that touches `globalThis`.
- */
-export interface SaveSink {
-  write(bytes: Uint8Array): Promise<void>;
-  close(): Promise<void>;
-}
-
 export interface TransferBridgeDeps {
   /** Put one JSON text on the socket. */
   readonly send: (text: string) => void;
   /**
-   * Open a save dialog, or `undefined` when the browser has none.
+   * Download a received file: the `<a download>` route, which works in every browser.
    *
-   * `showSaveFilePicker` is Chrome/Edge/Opera desktop only -- NO Firefox, NO Safari desktop or
-   * iOS, nothing on mobile -- and needs a secure context, which a LAN gateway on plain http does
-   * not have. See the spec's *The save dialog, and where it is not available*. So `undefined` is
-   * the COMMON case for this gateway, not an edge one, which is why `saveFallback` is required
-   * and this is not.
+   * ## THE ONLY ROUTE, AND THERE IS NO `savePicker` ANY MORE (2026-11-12)
    *
-   * CONFIRMED LIVE 2026-10-22: the first real operator was in Firefox 158.0.1 over a perfectly
-   * good `https://` context, and this was `undefined` -- the FIRST live transfer took the fallback.
-   * `undefined` being the common case is now measured rather than predicted.
+   * This dep used to have a sibling, `savePicker`, wrapping `showSaveFilePicker`. It was removed
+   * with the Save button: a receive now downloads AS IT COMPLETES, and `showSaveFilePicker` needs
+   * transient user activation, which the click on Start has spent by the time `transferDone`
+   * arrives. Firefox and Safari never had a picker at all (CONFIRMED LIVE 2026-10-22: the first
+   * real operator was in Firefox over `https://` and took this route), so the browser's own
+   * download behaviour now applies everywhere: the Downloads folder, or a prompt if the operator
+   * configured one.
    *
-   * **A SAVE DIALOG DOES NOT PROVE THIS WAS A FUNCTION.** Firefox's *always ask where to save
-   * files* preference prompts on the `saveFallback` anchor click too, and that dialog was briefly
-   * recorded in `live-testing.md` as evidence of the picker. Identify the route by the BROWSER, or
-   * by instrumenting which of the two deps ran -- never by whether the operator saw a dialog.
-   *
-   * `| undefined` EXPLICITLY, AND IT IS LOAD-BEARING UNDER THIS REPO'S `tsconfig`.
-   * `tsconfig.base.json:8` sets `exactOptionalPropertyTypes: true`, under which a bare `?:`
-   * accepts the property being ABSENT but REJECTS it being present and `undefined`. That is
-   * exactly the shape this dep is designed to be handed, because the whole point is that a caller
-   * COMPUTES the feature detection and injects the result.
-   *
-   * MEASURED 2026-10-07: without the annotation, the documented pattern --
-   * `savePicker: 'showSaveFilePicker' in globalThis ? fn : undefined` -- fails to compile with
-   * `TS2379 ... Consider adding 'undefined' to the types of the target's properties` from a file
-   * in `packages/web/src`. Task 8's `transferBoot.ts` is such a file, so it would have been
-   * pushed into a cast at the one place this module's header says must stay cast-free.
-   *
-   * `toggleKeypad?: () => void` in `bridgecore.ts` needs no annotation because `bridge.ts` always
-   * passes a real function; the difference is that THIS dep is meant to receive `undefined`.
+   * **A SAVE DIALOG STILL DOES NOT PROVE ANYTHING ABOUT THE ROUTE.** Firefox's *always ask where
+   * to save files* preference prompts on this anchor click too, and that dialog was once recorded
+   * in `live-testing.md` as evidence of the picker.
    */
-  readonly savePicker?: ((suggestedName: string) => Promise<SaveSink>) | undefined;
-  /** A plain `Blob` download, which works everywhere. REQUIRED, for the reason just above. */
   readonly saveFallback: (name: string, bytes: Uint8Array) => void;
 }
 
@@ -124,22 +91,37 @@ export type SendResult = { readonly ok: true } | { readonly ok: false; readonly 
  */
 export type ReceiveResult = { readonly ok: true } | { readonly ok: false; readonly error: string };
 
+/** `deliver`'s answer: on success, how many bytes were handed to the download. */
+export type DeliverResult =
+  | { readonly ok: true; readonly bytes: number }
+  | { readonly ok: false; readonly error: string };
+
 export interface TransferBridge {
   sendFile(name: string, bytes: Uint8Array, keywords: readonly string[]): Promise<SendResult>;
   acceptData(seq: number, total: number, bytes: Uint8Array): ReceiveResult;
   /**
-   * Write the received file out. Reports its outcome rather than throwing.
+   * Download the received file, now. Reports its outcome rather than throwing.
    *
-   * `Promise<SendResult>` AND NOT `Promise<void>`: four things can fail here -- the picker
-   * rejecting (including the ordinary `AbortError` when the operator dismisses the dialog), the
-   * write rejecting, the close rejecting, and the fallback throwing -- and with `void` a caller
-   * could learn none of them. `SendResult` and `ReceiveResult` are both unions for exactly this
-   * reason; this method was the one surface that could not tell its caller it had failed.
+   * CALLED ONCE, BY THE COMPLETION (`endTransfer` below), and synchronous: `saveFallback` is a
+   * synchronous anchor click. It used to be `save(name): Promise<SendResult>`, reached from a Save
+   * button, because the removed `savePicker` route was async; see `TransferBridgeDeps`.
    *
-   * A FAILURE LEAVES THE BYTES RETRYABLE: `hasUnsaved()` stays true and Save works again, because
-   * the host is out of transfer mode and there is nothing to re-request.
+   * THE BYTES ARE TAKEN AND CLEARED BEFORE THE SINK RUNS, so a second call delivers nothing, and
+   * a throwing sink puts them back: `hasUnsaved()` then stays true and the overlay's close guard
+   * still asks before they are dropped. They are the only copy -- the host is out of transfer mode.
+   *
+   * NOTHING STAGED IS AN ERROR here, where it was a quiet no-op for the button: this is only
+   * called for a receive the gateway called successful, so nothing to deliver means the file did
+   * not arrive whole, and reporting `downloaded as ...` over that would be a success with no file.
    */
-  save(name: string): Promise<SendResult>;
+  deliver(name: string): DeliverResult;
+  /**
+   * Is a completed receive being held, undelivered? For the overlay's close guard ONLY.
+   *
+   * TRUE ONLY TRANSIENTLY since 2026-11-12: `endTransfer` delivers in the same turn the receive
+   * completes, so this is true between the last chunk and `transferDone`, and after a `deliver`
+   * whose sink threw. Nothing enables a control from it any more; the Save button that did is gone.
+   */
   hasUnsaved(): boolean;
   /**
    * Declare a receive finished, for the one case no chunk can announce: a ZERO-BYTE FILE.
@@ -294,51 +276,23 @@ export function createTransferBridge(deps: TransferBridgeDeps): TransferBridge {
       return { ok: true };
     },
 
-    async save(name) {
-      // READ AND CLEARED BEFORE THE FIRST `await`, which is what makes a double-save inert.
-      // MEASURED 2026-10-07: with the clear at the END, two concurrent calls against an ASYNC
-      // picker produced TWO dialogs, two writes and two closes -- one file saved twice. The
-      // sequential case was already inert and the fallback route is synchronous, so the existing
-      // guard held for the only two paths a test drove. Clearing up front closes the window; the
-      // restore below is what keeps a FAILED save retryable.
+    deliver(name) {
       const bytes = complete;
-      // NOTHING TO SAVE IS NOT AN ERROR. The overlay enables its Save button off `hasUnsaved()`,
-      // but this runs from a click handler where a throw is an unhandled rejection, and a second
-      // click that lost the race to the button's own disabling must be inert.
-      if (bytes === undefined) return { ok: true };
+      if (bytes === undefined) {
+        return { ok: false, error: `${name} did not arrive whole; nothing was downloaded` };
+      }
       complete = undefined;
       try {
-        if (deps.savePicker !== undefined) {
-          const sink = await deps.savePicker(name);
-          try {
-            await sink.write(bytes);
-          } finally {
-            // `close()` IS WHAT COMMITS IT. MDN: "No changes are written to the actual file on
-            // disk until the stream has been closed" -- the writes land in a temp file, which is
-            // what makes this sink disk-backed rather than another buffer in memory.
-            //
-            // IN A `finally` SO A FAILED WRITE STILL CLOSES. Measured 2026-10-07: without it a
-            // rejecting `write` left `close()` uncalled and leaked the picker's temp file.
-            await sink.close();
-          }
-        } else {
-          deps.saveFallback(name, bytes);
-        }
+        deps.saveFallback(name, bytes);
       } catch (err) {
-        // RESTORED, so the operator can press Save again. The bytes are still the only copy --
-        // the host is out of transfer mode and there is nothing to re-request.
+        // RESTORED: the bytes are still the only copy, so the close guard keeps asking.
         complete = bytes;
-        // AN ABORTED DIALOG IS NOT A FAILURE, and it is the COMMON path rather than an edge case:
-        // `showSaveFilePicker` rejects with `AbortError` whenever the operator dismisses it. Until
-        // this `catch` existed that surfaced as an unhandled rejection in the console. Reported as
-        // `ok` with the bytes kept, so the form says nothing alarming and Save still works.
-        if (err instanceof Error && err.name === 'AbortError') return { ok: true };
         return {
           ok: false,
-          error: `could not save ${name}: ${err instanceof Error ? err.message : String(err)}`,
+          error: `could not download ${name}: ${err instanceof Error ? err.message : String(err)}`,
         };
       }
-      return { ok: true };
+      return { ok: true, bytes: bytes.length };
     },
 
     hasUnsaved() { return complete !== undefined; },
@@ -369,11 +323,87 @@ export function createTransferBridge(deps: TransferBridgeDeps): TransferBridge {
       // THE ONLY RESET PATH, and it has to clear `inbound` as well as `complete`: without that a
       // latched refusal would make the overlay refuse every later transfer for the session, since
       // `acceptData` deliberately keeps the dead reassembler. A cancelled transfer's partial
-      // bytes are dropped on purpose -- leaving them saveable would let a Save click write a
-      // truncated download of a file the operator abandoned.
+      // bytes are dropped on purpose -- leaving them deliverable would let a later completion
+      // download a truncated copy of a file the operator abandoned.
       inbound = undefined;
       complete = undefined;
       deps.send(JSON.stringify({ kind: 'transferCancel' }));
     },
+  };
+}
+
+/** What `transferDone` said, plus the boot file's own memory of the run it ends. */
+export interface TransferEnd {
+  /** `transferDone.ok`. */
+  readonly ok: boolean;
+  /** `transferDone.error`, already coerced to text by the caller; read only when `ok` is false. */
+  readonly error: string;
+  /** `transferDone.bytes`, when it carried one. */
+  readonly bytes: number | undefined;
+  /** The direction captured at submit, or `undefined` for a `transferDone` with no run. */
+  readonly direction: 'send' | 'receive' | undefined;
+  /** A chunk this run refused, held for the ending; see `transferBoot.ts`'s `receiveError`. */
+  readonly refusal: string | undefined;
+  /** The download's name, fixed at submit from the submitted `LocalFile=`. */
+  readonly saveName: string;
+}
+
+/**
+ * How a transfer ended: what to hand `TransferUi.finished`, and the status line to put up after
+ * it, when the ending has more to say than `finished()`'s shared `done: N bytes`.
+ */
+export interface TransferEnding {
+  readonly result:
+    | { readonly ok: true; readonly bytes?: number }
+    | { readonly ok: false; readonly error: string };
+  readonly status: string | undefined;
+}
+
+/**
+ * End a transfer: on a successful receive, DOWNLOAD IT, now, under `saveName`.
+ *
+ * ## HERE, AND NOT IN `transferBoot.ts`, SO A TEST CAN SEE IT
+ *
+ * That file has no unit test by design (its header: there is no `document` under vitest), and
+ * every decision this function makes -- download or not, under which name, and what the operator
+ * is told -- is one whose mutation must fail a test. It is a function of the bridge and five
+ * values, so it lives beside the bridge, in a module the browser already loads: no new entry in
+ * `static/index.html`'s import map or `httpstatic.ts`'s served list.
+ *
+ * ## THE ORDER OF THE GUARDS IS THE ORDER THEY WERE PAID FOR
+ *
+ * - **A refused chunk beats the gateway's ok.** The gateway sends its chunks and then
+ *   `transferDone {ok:true}` regardless, so a refusal must replace the ok, or the operator reads
+ *   success over a download that does not exist. And nothing is downloaded: `deliver` is not even
+ *   called. `finishEmpty()` is not called either -- the fourth empty-file-as-success guard, see
+ *   `transferBoot.ts`'s note at its call site and this module's `finishEmpty`.
+ * - **Only a RECEIVE delivers.** A send that staged nothing is every successful upload there is,
+ *   and `finishEmpty()` on one would download an empty copy of the operator's own source.
+ * - **A failed `transferDone` delivers nothing**, and shows the gateway's error.
+ *
+ * `finishEmpty()` RUNS BEFORE `deliver` for the zero-byte receive no chunk can announce; it is
+ * inert when anything was staged, still in flight, or refused.
+ *
+ * NO ELLIPSIS IN THE STATUS TEXT: Fira Code and friends ligate `..` and `...` (`transferUi.ts`).
+ */
+export function endTransfer(bridge: TransferBridge, end: TransferEnd): TransferEnding {
+  if (!end.ok) return { result: { ok: false, error: end.error }, status: undefined };
+  if (end.refusal !== undefined) {
+    return { result: { ok: false, error: end.refusal }, status: undefined };
+  }
+  if (end.direction !== 'receive') {
+    // BUILT EXPLICITLY RATHER THAN SPREAD: `exactOptionalPropertyTypes` is on, and `bytes` is
+    // absent on a `transferDone` that carried none (`protocol.ts`).
+    return {
+      result: { ok: true, ...(end.bytes !== undefined ? { bytes: end.bytes } : {}) },
+      status: undefined,
+    };
+  }
+  bridge.finishEmpty();
+  const out = bridge.deliver(end.saveName);
+  if (!out.ok) return { result: { ok: false, error: out.error }, status: undefined };
+  return {
+    result: { ok: true, bytes: out.bytes },
+    status: `received ${out.bytes} bytes; downloaded as ${end.saveName}`,
   };
 }

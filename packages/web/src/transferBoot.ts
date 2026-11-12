@@ -2,7 +2,7 @@ import {
   caretAfterEdit, createTransferUi, type TransferUi, type UiField,
 } from '@tn3270/canvas/dist/transferUi.js';
 import type { TransferFieldId } from '@tn3270/frontend/dist/transferForm.js';
-import { createTransferBridge, type SaveSink } from './transferBridge.js';
+import { createTransferBridge, endTransfer } from './transferBridge.js';
 
 /**
  * The browser entry point for the transfer form: real elements in, a wired overlay out.
@@ -42,7 +42,7 @@ import { createTransferBridge, type SaveSink } from './transferBridge.js';
 export interface TransferBoot {
   /** Hand the three gateway transfer messages in, already parsed. */
   onMessage(msg: { kind: string } & Record<string, unknown>): void;
-  /** Does a completed receive still need saving? For the overlay's close warning. */
+  /** Is a completed receive held undelivered? For the overlay's close warning. */
   hasUnsaved(): boolean;
 }
 
@@ -58,7 +58,6 @@ export function bootTransfer(doc: Document, send: (text: string) => void): Trans
   const fileInput = need<HTMLInputElement>('transfer-file');
   const status = need('transfer-status');
   const fields = need('transfer-fields');
-  const saveButton = need<HTMLButtonElement>('transfer-save');
   const startButton = need<HTMLButtonElement>('transfer-start');
   const browseButton = need<HTMLButtonElement>('transfer-browse');
   const cancelButton = need<HTMLButtonElement>('transfer-cancel');
@@ -82,19 +81,17 @@ export function bootTransfer(doc: Document, send: (text: string) => void): Trans
    * `direction` IS LOAD-BEARING AND NOT BOOKKEEPING. `transferDone {ok:true}` is the only ending
    * for both directions, and the two need opposite treatment: a receive that staged nothing is
    * the zero-byte file `finishEmpty()` exists for, while a SEND that staged nothing is every
-   * successful upload there is. Calling `finishEmpty()` on a send would make `hasUnsaved()` true
-   * and light the Save button for a file the operator had just uploaded -- offering to download
-   * an empty copy of their own source, and warning them about discarding it on close.
+   * successful upload there is. Calling `finishEmpty()` on a send would download an empty copy
+   * of the file the operator had just uploaded. `endTransfer` reads it for that reason.
    */
-  let running: { direction: string } | undefined;
+  let running: { direction: 'send' | 'receive' } | undefined;
   /**
-   * The name the received file is offered under, which OUTLIVES THE RUN.
+   * The name the received file is downloaded under, fixed at submit.
    *
-   * Separate from `running` above, and the separation is the fix for a measured ordering trap in
-   * this file's first draft: the name lived on `running`, which `transferDone` clears -- so by the
-   * time the operator clicked the now-enabled Save button the name was gone and every download was
-   * called `download.bin`. The run's identity ends with the run; the file's name has to last as
-   * long as the bytes do, which is until the operator saves them or cancels.
+   * Separate from `running` above, which a measured ordering trap in this file's first draft
+   * taught: the name lived on `running`, which `transferDone` clears, and the Save button that
+   * read it later named every download `download.bin`. The download now happens AT
+   * `transferDone`, before `running` is cleared, but nothing gains from re-coupling the two.
    */
   let saveName = 'download.bin';
   /**
@@ -104,39 +101,17 @@ export function bootTransfer(doc: Document, send: (text: string) => void): Trans
    * then `transferDone {ok:true}` regardless (`transferGateway.ts:343-367` -- the chunks are a
    * consequence of a run that already succeeded host-side), so a refused chunk would be followed
    * by `done: N bytes` painting over the complaint. The operator would read success over a
-   * download that does not exist, with only a still-disabled Save button as the evidence. So the
-   * refusal is held and substituted for the ok at `transferDone`, which is the one report the
-   * operator is left looking at.
+   * download that does not exist. So the refusal is held and substituted for the ok at
+   * `transferDone` (`endTransfer`), which is the one report the operator is left looking at, and
+   * nothing is downloaded.
    */
   let receiveError: string | undefined;
 
-  /**
-   * FEATURE DETECTION, READ ONCE AND INJECTED. `showSaveFilePicker` is Chrome/Edge/Opera desktop
-   * only and needs a secure context, so a LAN gateway on plain http has no picker on ANY browser
-   * -- `transferBridge.ts`'s own dep comment calls `undefined` the COMMON case here rather than an
-   * edge one. Passing the result as a dependency rather than reading `globalThis` inside the
-   * bridge is what lets a unit test drive both save routes.
-   *
-   * THE CAST IS THE ONE IN THIS FILE AND IT IS NARROW. `FileSystemWritableFileStream` is in
-   * neither `DOM` nor `DOM.Iterable` as of TypeScript 7.0, which is why `SaveSink` is declared in
-   * `transferBridge.ts` at all; this is the single point that touches `globalThis` to get one.
-   */
-  const picker = 'showSaveFilePicker' in globalThis
-    ? async (suggestedName: string): Promise<SaveSink> => {
-      const handle = await (globalThis as unknown as {
-        showSaveFilePicker(o: { suggestedName: string }): Promise<{
-          createWritable(): Promise<SaveSink>;
-        }>;
-      }).showSaveFilePicker({ suggestedName });
-      return handle.createWritable();
-    }
-    : undefined;
-
   const bridge = createTransferBridge({
     send,
-    savePicker: picker,
     /**
-     * The `<a download>` route, which works in every browser.
+     * The `<a download>` route, which works in every browser, and the only one: see
+     * `TransferBridgeDeps.saveFallback` for why the `showSaveFilePicker` route was removed.
      *
      * A FRESH `Uint8Array` RATHER THAN THE ONE HANDED IN, and that is a type requirement rather
      * than a copy for safety: `BlobPart` is `ArrayBufferView<ArrayBuffer>`, while a
@@ -218,7 +193,7 @@ export function bootTransfer(doc: Document, send: (text: string) => void): Trans
     }
     // Written by `renderFields` from `UiField.id`, so the cast restates what this file's own
     // markup guarantees rather than asserting anything new. An untagged element returns above or
-    // below: the five buttons in the static row carry no `data-field`.
+    // below: the four buttons in the static row carry no `data-field`.
     const field = active.dataset['field'] as TransferFieldId | undefined;
     if (field === undefined) return undefined;
     if (active instanceof HTMLInputElement) {
@@ -329,17 +304,16 @@ export function bootTransfer(doc: Document, send: (text: string) => void): Trans
     restoreFocus(memo);
   };
 
-  /** `LocalFile=` without its keyword, which is the name a received file is offered under. */
+  /** `LocalFile=` without its keyword, which is the name a received file is downloaded under. */
   const localNameFrom = (keywords: readonly string[]): string => {
     /*
-      `LocalFile` AND NOT `HostFile`, which an earlier draft derived the download name from.
-      `LocalFile` is what the operator TYPED as the destination, and it is the better answer for
-      two reasons: it is their own choice rather than a transliteration of a CMS
-      `FILENAME FILETYPE FILEMODE` triple, and it is MANDATORY -- `transferCommand` throws
-      "missing 'LocalFile' option" (`frontend/src/transfer.ts:480`) and `formKeywords` omits empty
-      values, so a receive with the field blank is refused by the gateway before any byte moves.
-      The fallback below is therefore very nearly dead code, kept only so a `save()` reached by
-      some other route cannot be handed an empty filename.
+      READ FROM THE SUBMITTED KEYWORDS, which on a receive carry the DERIVED name: this file turns
+      on `deriveLocalFileOnReceive`, so `transferUi.ts` hides `Local file` on a receive and submits
+      `LocalFile=defaultLocalName(hostFile, host)` -- `nap.h` for VM's `NAP H A2`. Reading it
+      here, rather than deriving it a second time, keeps one rule and one place that applies it.
+      `LocalFile` is MANDATORY -- `transferCommand` throws "missing 'LocalFile' option" and
+      `defaultLocalName` never returns an empty name -- so the fallback below is very nearly dead
+      code, kept so a download can never be handed an empty filename.
     */
     const lf = keywords.find((k) => k.toLowerCase().startsWith('localfile='));
     const value = lf?.slice(lf.indexOf('=') + 1).trim();
@@ -353,14 +327,17 @@ export function bootTransfer(doc: Document, send: (text: string) => void): Trans
         cycle: (id, delta) => { ui.cycle(id, delta); },
         type: (id, text) => { ui.type(id, text); },
       });
-      // BROWSE IS MEANINGLESS ON A RECEIVE IN A BROWSER, and disabling it is the honest answer.
-      // `UiDeps.browse` takes the DIRECTION because the GUI opens an Open dialog for a send and a
-      // Save dialog for a receive; a browser has neither for a receive -- there is no path to
-      // name, and where the bytes land is the Save button's business after the transfer. An
-      // enabled button would open a file CHOOSER asking the operator to pick an existing local
-      // file to receive INTO, which is actively misleading. Read off the rendered list rather
-      // than kept as a second flag, so it cannot disagree with what is on screen.
+      // BROWSE IS MEANINGLESS ON A RECEIVE IN A BROWSER, so it is HIDDEN there, and disabled as
+      // well. `UiDeps.browse` takes the DIRECTION because the GUI opens an Open dialog for a send
+      // and a Save dialog for a receive; a browser has neither for a receive -- there is no path
+      // to name, and the bytes land wherever the browser puts downloads. An enabled button would
+      // open a file CHOOSER asking the operator to pick an existing local file to receive INTO,
+      // and a greyed one was what the operator reported as broken (2026-11-12): a receive has no
+      // Local file field to browse for any more. HIDDEN rather than only disabled because
+      // `setRunning(false)` re-enables it at the end of every run. Read off the rendered list
+      // rather than kept as a second flag, so it cannot disagree with what is on screen.
       const direction = list.find((f) => f.id === 'direction')?.value;
+      browseButton.hidden = direction !== 'send';
       browseButton.disabled = isRunning || direction !== 'send';
     },
     setStatus: (text) => { status.textContent = text; },
@@ -463,36 +440,31 @@ export function bootTransfer(doc: Document, send: (text: string) => void): Trans
       return bridge.sendFile(pending.name, pending.bytes, keywords);
     },
     cancel: () => {
-      // `bridge.cancel()` IS THE ONLY RESET for the reassembler, and the recorded refusal goes
-      // with it: a cancelled transfer's partial bytes are dropped, so its complaint must not be
-      // reported as the NEXT transfer's ending.
-      receiveError = undefined;
+      // `bridge.cancel()` IS THE ONLY RESET for the reassembler. A cancelled transfer's partial
+      // bytes are dropped, and its old complaint with them -- `submit` clears `receiveError`
+      // again, so nothing here can be reported as the NEXT transfer's ending.
+      //
+      // A CANCELLED RECEIVE HOLDS A REFUSAL OF ITS OWN, and it closes a window this file's
+      // download-on-completion opened. If the cancel lands after the last chunk but before
+      // `transferDone {ok:true}` (the gateway's ending crossing the cancel on the wire), the bytes
+      // are dropped and the bridge then sees "nothing staged, nothing refused": exactly the legal
+      // zero-byte receive, so `finishEmpty()` would DOWNLOAD A 0-BYTE FILE under the real name.
+      // Found 2026-11-12 by `transferBridge.test.ts`'s cancel case. A send's ending is left alone:
+      // an upload that completed before the cancel arrived did reach the host.
+      receiveError = running?.direction === 'receive'
+        ? 'transfer cancelled; nothing was downloaded'
+        : undefined;
       bridge.cancel();
     },
+  }, {
+    // A BROWSER HAS NO PATH TO RECEIVE INTO: the form hides `Local file` on a receive and
+    // submits the name derived from the host file, which `localNameFrom` reads back at submit.
+    deriveLocalFileOnReceive: true,
   });
 
   browseButton.addEventListener('click', () => { void ui.browseLocal(); });
   startButton.addEventListener('click', () => { void ui.start(); });
   cancelButton.addEventListener('click', () => { ui.requestCancel(); });
-  /**
-   * Save, WHICH IS A BUTTON RATHER THAN SOMETHING THE COMPLETION DOES.
-   *
-   * `showSaveFilePicker` needs TRANSIENT USER ACTIVATION, and the click that started the transfer
-   * is spent by the time `transferDone` arrives -- so the dialog cannot be opened from the
-   * completion callback at all. The operator's click on THIS button is the activation that opens
-   * it. The `<a download>` fallback has no such requirement, but routing both through one button
-   * keeps the two paths identical from the form's seat.
-   *
-   * DISABLED ONLY ON SUCCESS. `save()` reports its own failures (`transferBridge.ts`) and leaves
-   * the bytes retryable, so a dismissed dialog or a failed write must leave the button live.
-   */
-  saveButton.addEventListener('click', () => {
-    void bridge.save(saveName).then((r) => {
-      if (!r.ok) { status.textContent = r.error; return; }
-      saveButton.disabled = bridge.hasUnsaved();
-    });
-  });
-
   return {
     hasUnsaved: () => bridge.hasUnsaved(),
     /**
@@ -525,90 +497,42 @@ export function bootTransfer(doc: Document, send: (text: string) => void): Trans
         return;
       }
       if (msg.kind !== 'transferDone') return;
-      const ok = msg['ok'] === true;
-      if (ok && receiveError === undefined && running?.direction === 'receive') {
-        // THE ZERO-BYTE RECEIVE, which no chunk can announce: `chunkBytes` emits none for an empty
-        // source, and a gateway that helpfully sent one empty chunk is refused by the
-        // reassembler with `chunk 0 arrived after all 0 bytes`. `finishEmpty()` is inert when
-        // anything was staged or is still in flight, so this cannot mask a half-finished receive
-        // -- and it is guarded on the DIRECTION because a SEND that staged nothing is every
-        // successful upload there is. See `running`.
-        //
-        // `receiveError === undefined` IS THE FOURTH GUARD IN THIS FEATURE AGAINST AN EMPTY FILE
-        // REPORTED AS A SUCCESS, and `finishEmpty()`'s own inertness does NOT cover the case.
-        // It bails when `inbound` or `complete` is set, but a chunk refused by
-        // `ChunkReassembler`'s CONSTRUCTOR leaves `inbound` undefined (`transferBridge.ts:238-243`
-        // returns the error without assigning) -- so "nothing staged" looked like the legal empty
-        // receive and an empty file became saveable.
-        //
-        // REACHABLE WITH NO BAD CLIENT AND NO MALICE. `transferGateway.ts` applies NO cap to the
-        // receive direction -- it sends `total: received.length` verbatim and the file contains
-        // zero references to `MAX_TRANSFER_BYTES` -- so an 11 MB host dataset trips the cap in the
-        // BROWSER'S reassembler. MEASURED 2026-10-07 before this guard: `hasUnsaved()` true, Save
-        // enabled, and clicking it downloaded a 0-byte `REPORT.TXT` while the status line
-        // correctly said the transfer had been refused. The button contradicted the message.
-        bridge.finishEmpty();
-      }
-      if (ok && receiveError !== undefined) {
-        // A SUCCESS THE BROWSER COULD NOT RECEIVE IS NOT A SUCCESS. The run succeeded host-side,
-        // so the gateway says so; but a chunk was refused and there is no file to save, and
-        // `done: N bytes` over that is the one report the operator must not be left with.
-        ui.finished({ ok: false, error: receiveError });
-      } else {
-        // BUILT EXPLICITLY RATHER THAN SPREAD: `exactOptionalPropertyTypes` is on, and `bytes`
-        // is absent on a `transferDone` that carried none (`protocol.ts:41`).
-        const bytes = msg['bytes'];
-        ui.finished(ok
-          ? { ok: true, ...(typeof bytes === 'number' ? { bytes } : {}) }
-          : { ok: false, error: String(msg['error'] ?? 'the transfer failed') });
-      }
-      /**
-       * SAVE IS ENABLED, NAMED AND FOCUSED HERE -- ALL THREE FROM ONE READ OF ONE CONDITION.
-       *
-       * ENABLED ONLY NOW, AND THE PICKER IS NOT OPENED HERE -- see the Save handler above, which
-       * explains why the dialog needs the operator's own click.
-       *
-       * `hasUnsaved()` IS READ ONCE INTO `unsaved` AND USED FOR ALL THREE, which is the point
-       * rather than a tidy. A status line telling the operator to press Save while the button sits
-       * disabled is the button-contradicts-the-message defect this file already records fixing
-       * once: the `receiveError` arm above exists because an 11 MB receive refused by the
-       * reassembler left `hasUnsaved()` true, Save enabled, and a 0-byte file downloadable under a
-       * message that correctly said the transfer had failed. Three facts derived from one read
-       * cannot drift into that shape.
-       *
-       * ## WHY THE HINT IS APPENDED HERE AND NOT IN `transferUi.ts`'s `finished()`
-       *
-       * That module is shared by ALL THREE front ends and ONLY THIS ONE HAS A SAVE BUTTON.
-       * `gui/transfer.html` carries Cancel and Start alone -- Electron writes the file to disk
-       * itself -- and the TUI likewise. Naming Save in the shared string would tell those
-       * operators to press a button that does not exist, so `done: N bytes` stays exactly as
-       * `finished()` wrote it and this file adds its own suffix.
-       *
-       * THE EXISTING TEXT IS READ RATHER THAN REBUILT, so this cannot drift from `finished()`'s
-       * format: `ui.finished(...)` a few lines above has already put `done: N bytes` (or a
-       * refusal) on the status line by the time this runs.
-       *
-       * NO ELLIPSIS IN STATUS TEXT. Fira Code and friends ligate `..` and `...`
-       * (`transferUi.ts:370`). The BUTTON's `Save…` label is a real U+2026 and is unaffected.
-       *
-       * ## TWO ORDERING FACTS, BOTH LOAD-BEARING
-       *
-       * THE FOCUS MUST FOLLOW THE `disabled` ASSIGNMENT: focusing a disabled button is a no-op, so
-       * swapping these two statements silently loses the affordance while every other assertion
-       * still passes.
-       *
-       * NO REDRAW CAN TAKE THIS FOCUS BACK, verified rather than assumed: `finished()` calls
-       * `setRunning` and `setStatus` and NEVER `redraw()` (`transferUi.ts:423-431`), and
-       * `renderFields` -- the only caller of `restoreFocus` -- runs only from `render`. IF
-       * `finished()` EVER REDRAWS, this focus call must move after that redraw or the focus memo
-       * will take it straight back.
-       */
-      const unsaved = bridge.hasUnsaved();
-      saveButton.disabled = !unsaved;
-      if (unsaved) {
-        status.textContent = `${status.textContent ?? ''} — press Save to keep it`;
-        saveButton.focus();
-      }
+      /*
+        THE RECEIVE DOWNLOADS HERE, AS IT COMPLETES, and every decision about it -- download or
+        not, under which name, and what the status line says -- is `endTransfer`'s, beside the
+        bridge, where a unit test can see it. What stays here is the DOM.
+
+        THE GUARDS IT CARRIES, so they are not re-derived here:
+
+        - `finishEmpty()` for THE ZERO-BYTE RECEIVE, which no chunk can announce: `chunkBytes`
+          emits none for an empty source, and a gateway that helpfully sent one empty chunk is
+          refused by the reassembler with `chunk 0 arrived after all 0 bytes`.
+        - `refusal` (`receiveError`) IS THE FOURTH GUARD IN THIS FEATURE AGAINST AN EMPTY FILE
+          REPORTED AS A SUCCESS, and `finishEmpty()`'s own inertness does NOT cover the case alone:
+          a chunk refused by `ChunkReassembler`'s CONSTRUCTOR leaves `inbound` undefined, so
+          "nothing staged" looked like the legal empty receive. REACHABLE WITH NO BAD CLIENT: the
+          gateway applies no cap to the receive direction, so an 11 MB host dataset trips the cap
+          in the BROWSER'S reassembler. MEASURED 2026-10-07 before the guard: a 0-byte
+          `REPORT.TXT` was downloadable while the status line said the transfer had been refused.
+        - the DIRECTION, because a SEND that staged nothing is every successful upload there is.
+          See `running`.
+
+        `ui.finished` FIRST, THEN THE STATUS: `finished()` writes the shared `done: N bytes`, which
+        the GUI and the TUI show as is; only this front end downloads, so only it says so.
+        `finished()` calls `setRunning` and `setStatus` and never `redraw()`, so nothing repaints
+        over the line written after it.
+      */
+      const bytes = msg['bytes'];
+      const ending = endTransfer(bridge, {
+        ok: msg['ok'] === true,
+        error: String(msg['error'] ?? 'the transfer failed'),
+        bytes: typeof bytes === 'number' ? bytes : undefined,
+        direction: running?.direction,
+        refusal: receiveError,
+        saveName,
+      });
+      ui.finished(ending.result);
+      if (ending.status !== undefined) status.textContent = ending.status;
       running = undefined;
     },
   };
