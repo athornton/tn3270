@@ -760,7 +760,7 @@ async function probeWin(ctx, dir) {
     const alias = found.status === 0 ? (/^alias=(.+?)\s*$/m.exec(found.stdout)?.[1] ?? null) : null;
     if (alias === null) throw new Setup(`the app execution alias tn3270-gui.exe is not on PATH after Add-AppxPackage (exit ${found.status}): ${head(found.text)}`);
 
-    const route = winRoute(io, { alias, installLocation });
+    const route = winRoute(io, { alias: resolve(dir, 'win-unpacked', 'TN3270.exe'), installLocation }); // MUTATION 3: the non-packaged exe
     const confined = await phase('confine', async () => {
       const l = await confinementLaunch(ctx, route, switches(win32.join(work, 'confine-user-data')),
         (pid) => { const r = ps(psPackageOfPid(pid)); return r.status === 0 ? parsePackageFullName(r.stdout) : `query failed (exit ${r.status}): ${head(r.text)}`; });
