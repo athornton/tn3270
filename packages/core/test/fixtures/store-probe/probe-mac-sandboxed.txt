@@ -1,0 +1,4 @@
+# Captured: CI run 43115293433 (store-probe spike round 4), 2026-11-11, macos-latest, variant D "golden" launch,
+# exit 0 ("D golden: exited rc=0"). The launch's whole stdout+stderr (cat of D-golden.out; xtrace removed).
+probe: sandbox=io.github.athornton.tn3270 windowsStore=false
+shot: /Users/runner/Library/Containers/io.github.athornton.tn3270/Data/shot.png 720x350

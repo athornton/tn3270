@@ -1,0 +1,4 @@
+# Captured: CI run 43114227702 (store-probe spike round 3), 2026-11-11, macos-latest, variant D, exit 1
+# ("SPIKE: D codesign --verify --deep --strict rc=1"): its login helper was never signed.
+# codesign --verify --deep --strict --verbose=2 <scratch>/D/TN3270.app
+/Users/runner/work/_temp/spike/D/TN3270.app: code object is not signed at all

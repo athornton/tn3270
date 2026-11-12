@@ -1,0 +1,4 @@
+# Captured: CI run 43112504521 (store-probe spike round 2), 2026-11-11, windows-latest, after Add-AppxPackage of the
+# default package. Exit status NOT recorded (a cmdlet inside the spike script; it printed this line).
+# Get-AppxPackage TN3270.Probe | ConvertTo-Json -Compress
+{"Name":"TN3270.Probe","Publisher":"CN=TN3270 Store Probe","PublisherId":"5j71tdef09jdy","Architecture":9,"ResourceId":"","Version":"0.1.4.0","PackageFamilyName":"TN3270.Probe_5j71tdef09jdy","PackageFullName":"TN3270.Probe_0.1.4.0_x64__5j71tdef09jdy","InstallLocation":"C:\\Program Files\\WindowsApps\\TN3270.Probe_0.1.4.0_x64__5j71tdef09jdy","IsFramework":false,"PackageUserInformation":[],"IsResourcePackage":false,"IsBundle":false,"IsDevelopmentMode":false,"NonRemovable":false,"Dependencies":[],"IsPartiallyStaged":false,"SignatureKind":1,"Status":0}

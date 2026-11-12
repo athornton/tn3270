@@ -1,0 +1,4 @@
+# Captured: CI run 43112504521 (store-probe spike round 2), 2026-11-11, windows-latest, "default-alias" launch:
+# GetPackageFullName of the pid Start-Process returned (828), through the spike's SpikePkg.Of, sampled while it ran.
+# The value after "package of started pid 828: ". Exit status: n/a (an in-process call).
+TN3270.Probe_0.1.4.0_x64__5j71tdef09jdy

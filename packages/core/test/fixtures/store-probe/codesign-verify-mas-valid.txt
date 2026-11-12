@@ -1,0 +1,17 @@
+# Captured: CI run 43115293433 (store-probe spike round 4), 2026-11-11, macos-latest, variant D, exit 0
+# ("SPIKE: D codesign --verify --deep --strict rc=0"). Lines interleaved with bash xtrace in the log; the trace removed.
+# codesign --verify --deep --strict --verbose=2 <scratch>/D/TN3270.app
+--prepared:/Users/runner/work/_temp/spike/D/TN3270.app/Contents/Library/LoginItems/TN3270 Login Helper.app
+--validated:/Users/runner/work/_temp/spike/D/TN3270.app/Contents/Library/LoginItems/TN3270 Login Helper.app
+--prepared:/Users/runner/work/_temp/spike/D/TN3270.app/Contents/Frameworks/TN3270 Helper (Renderer).app
+--validated:/Users/runner/work/_temp/spike/D/TN3270.app/Contents/Frameworks/TN3270 Helper (Renderer).app
+--prepared:/Users/runner/work/_temp/spike/D/TN3270.app/Contents/Frameworks/Electron Framework.framework/Versions/Current/.
+--validated:/Users/runner/work/_temp/spike/D/TN3270.app/Contents/Frameworks/Electron Framework.framework/Versions/Current/.
+--prepared:/Users/runner/work/_temp/spike/D/TN3270.app/Contents/Frameworks/TN3270 Helper.app
+--prepared:/Users/runner/work/_temp/spike/D/TN3270.app/Contents/Frameworks/TN3270 Helper (GPU).app
+--prepared:/Users/runner/work/_temp/spike/D/TN3270.app/Contents/Frameworks/TN3270 Helper (Plugin).app
+--validated:/Users/runner/work/_temp/spike/D/TN3270.app/Contents/Frameworks/TN3270 Helper.app
+--validated:/Users/runner/work/_temp/spike/D/TN3270.app/Contents/Frameworks/TN3270 Helper (GPU).app
+--validated:/Users/runner/work/_temp/spike/D/TN3270.app/Contents/Frameworks/TN3270 Helper (Plugin).app
+/Users/runner/work/_temp/spike/D/TN3270.app: valid on disk
+/Users/runner/work/_temp/spike/D/TN3270.app: satisfies its Designated Requirement

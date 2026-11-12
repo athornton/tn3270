@@ -1,0 +1,4 @@
+# Captured: CI run 43112504521 (store-probe spike round 2), 2026-11-11, windows-latest, "default-alias" launch
+# (tn3270-gui.exe, the app execution alias), exit 0 ("default-alias exit code: 0"). Its stdout.
+probe: sandbox=none windowsStore=true
+shot: D:\a\_temp\spike\default-alias\shot.png 720x350

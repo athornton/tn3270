@@ -1,0 +1,5 @@
+# Captured: CI run 43112504521 (store-probe spike round 2), 2026-11-11, windows-latest, exit 0
+# ("signtool sign (default) TN3270-0.1.4-win-x64.appx: rc=0"), Windows SDK 10.0.26100.0 signtool.
+# signtool sign /fd SHA256 /f <probe.pfx> /p <password> <appx>
+Done Adding Additional Store
+Successfully signed: D:\a\tn3270\tn3270\artifacts\gui\TN3270-0.1.4-win-x64.appx
