@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -258,5 +258,15 @@ describe('package.yml release wiring', () => {
 
   it('wires no Azure signing: no azure/login, no AZURE_* variable', () => {
     expect(packageCode()).not.toMatch(/azure\/login|AZURE_/);
+  });
+  it('the GUI harness loop runs every harness in packages/gui/scripts (a new one cannot be left out)', () => {
+    // Harnesses are the .mjs scripts there that launch the app, minus the build tools. seam-errors
+    // was added on 2026-11-12 with the replay-hang fix and was not in the loop until this test.
+    const NOT_HARNESSES = new Set(['bundle', 'bundleVerify', 'render-icon', 'xvfb']);
+    const dir = fileURLToPath(new URL('../../gui/scripts/', import.meta.url));
+    const harnesses = readdirSync(dir).filter((f) => f.endsWith('.mjs')).map((f) => f.slice(0, -4)).filter((n) => !NOT_HARNESSES.has(n)).sort();
+    const loop = /for h in ([a-z -]+); do/.exec(jobBlock('package'));
+    expect(loop, 'no `for h in ...; do` harness loop in the package job').not.toBeNull();
+    expect(loop![1]!.trim().split(/\s+/).sort()).toEqual(harnesses);
   });
 });

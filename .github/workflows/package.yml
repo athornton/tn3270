@@ -199,7 +199,7 @@ jobs:
       - if: matrix.parity
         name: GUI harnesses on dist/ and on the bundle
         run: |
-          for h in shot keys clicks select transfer connect; do
+          for h in shot keys clicks select transfer connect seam-errors; do
             echo "::group::$h on dist"
             ${{ matrix.xvfb }} node "packages/gui/scripts/$h.mjs"
             echo "::endgroup::"
