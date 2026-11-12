@@ -40,7 +40,9 @@ Task 0 is DONE: four rounds, runs 43110403997, 43112504521, 43114227702 and 4311
 "Amendment 2026-11-12" has the table of what each run settled. The spike scripts are
 `scripts/spike/mac-sandbox.sh` (variant D is the working recipe) and `scripts/spike/win-appx.ps1`
 (the alias and SDK-signtool route). **The drivers in Task 5 are a port of those two scripts' working
-paths.** Read them first; they are the specification.
+paths.** Read them first; they are the specification. (Task 8 removed `scripts/spike/`; the run IDs
+above and the spec Amendment are the record, and the scripts are in git at bcdb031, the last commit
+that has them.)
 
 - **Task 3 overrides.**
   - THREE entitlements files: `entitlements.mas.plist`, `entitlements.mas.inherit.plist` and

@@ -1,5 +1,5 @@
 # Captured: CI run 43115293433 (store-probe spike round 4), 2026-11-11, macos-latest, variant D (the MAS build,
-# signed as scripts/spike/mac-sandbox.sh prepare() does). Exit status NOT recorded: the spike ran it `|| true`.
+# signed as the spike's mac-sandbox.sh prepare() does; in git at bcdb031). Exit status NOT recorded: the spike ran it `|| true`.
 # codesign -d --entitlements :- <scratch>/D/TN3270.app
 Executable=/Users/runner/work/_temp/spike/D/TN3270.app/Contents/MacOS/TN3270
 warning: Specifying ':' in the path is deprecated and will not work in a future release

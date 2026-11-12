@@ -12,9 +12,11 @@
  * Sandbox, then given the two checks with every input staged inside its container. Windows: the
  * one `TN3270-*-win-x64.appx` is copied into scratch, signed with a throwaway self-signed
  * certificate by the newest Windows SDK signtool, installed, launched through its app execution
- * alias to prove package identity, then given the two checks. Both are ports of the spike scripts'
- * proven paths (scripts/spike/mac-sandbox.sh variant D, run 43115293433; scripts/spike/win-appx.ps1,
- * run 43112504521); see the drivers below.
+ * alias to prove package identity, then given the two checks. Both are ports of the CI spike's
+ * proven paths (mac variant D, run 43115293433; Windows, run 43112504521; the spec's Amendment
+ * 2026-11-12 has what each spike run settled). The spike scripts, scripts/spike/mac-sandbox.sh and
+ * scripts/spike/win-appx.ps1, were removed in store-probe plan Task 8; read them at bcdb031, the
+ * last commit that has them. See the drivers below.
  *
  * Output: `ok <route>: <what>` / `FAIL <route>: <why>`, and `time <phase>: <s>s` for the cost
  * figure. Exit 0: confined and both checks passed. 1: any FAIL (a cleanup failure included). 2: a
@@ -406,8 +408,8 @@ export function signInsideOut(app, ent, { run, fs }) {
 }
 
 /**
- * macOS: a port of scripts/spike/mac-sandbox.sh's variant D (`prepare D ... teamid`, then the
- * first of `launches D`), run 43115293433. Steps, in the spike's order:
+ * macOS: a port of the spike's mac-sandbox.sh variant D (`prepare D ... teamid`, then the
+ * first of `launches D`), run 43115293433; the script is in git at bcdb031. Steps, in the spike's order:
  *   0. REFUSE (exit 2) if the container already exists, unless on a GitHub-hosted runner or
  *      STORE_PROBE_FORCE=1 (mayReplace): elsewhere it may be a real user's TN3270 data, and the
  *      cleanup removes it;
@@ -667,8 +669,8 @@ export function psRemoveCert(store, thumbprint, sinceIso) {
 }
 
 /**
- * Windows: a port of scripts/spike/win-appx.ps1's working path (the default package), run
- * 43112504521. Steps:
+ * Windows: a port of the spike's win-appx.ps1 working path (the default package), run
+ * 43112504521; the script is in git at bcdb031. Steps:
  *   0. REFUSE (exit 2) if a TN3270.Probe package is already installed, unless on a GitHub-hosted
  *      runner or STORE_PROBE_FORCE=1 (mayReplace; then those exact packages are removed first, by
  *      full name);

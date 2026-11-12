@@ -200,6 +200,22 @@ describe('package.yml release wiring', () => {
     expect(body).toContain('default: false');
   });
 
+  it('workflow_dispatch has exactly one input, sign (the store-probe spike input is gone)', () => {
+    // The input names: the lines indented exactly six spaces under `    inputs:`, up to `env:`.
+    const m = /\n  workflow_dispatch:\n    inputs:\n((?:      .*\n|        .*\n)+)/.exec(wf);
+    expect(m, 'workflow_dispatch inputs').not.toBeNull();
+    const names = m![1]!.split('\n').filter((l) => /^      \S/.test(l)).map((l) => l.trim());
+    expect(names).toEqual(['sign:']);
+    expect(wf).not.toMatch(/\binputs\.spike\b/);
+  });
+
+  it('has no spike job, and nothing names scripts/spike/ (store-probe plan Task 8)', () => {
+    const jobs = wf.slice(wf.indexOf('\njobs:\n')).split('\n').filter((l) => /^  [\w-]+:\s*$/.test(l)).map((l) => l.trim());
+    expect(jobs).toContain('package:'); // the scan reads job names at all
+    expect(jobs).not.toContain('spike:');
+    expect(wf).not.toMatch(/scripts\/spike\//);
+  });
+
   it('every "this run signs" expression is the one expression, verbatim', () => {
     const block = jobBlock('package');
     // Up to the first `))`, which is where SIGNS ends; a lazy match to ` &&` would stop inside it.

@@ -151,9 +151,10 @@ module.exports = {
     description implies: AppxTarget.js:344 resolves it with `path.resolve(appInfo.appDir, ...)`,
     and `appDir` is the bundle directory `packages/gui/app`, not `resources/` -- a relative path
     here would be read from the wrong directory. The alias file declares the
-    `windows.appExecutionAlias` extension for `tn3270-gui.exe` (proven by
-    scripts/spike/appx-extensions.xml, run 43110403997: makeappx accepted the inline uap5
-    namespace).
+    `windows.appExecutionAlias` extension for `tn3270-gui.exe`, with the content the CI spike
+    proved (run 43110403997: makeappx accepted the inline uap5 namespace; store-probe spec
+    Amendment 2026-11-12; the spike's copy, scripts/spike/appx-extensions.xml, is in git at
+    bcdb031).
 
     `minVersion`: the manifest's `uap5` element is documented from Windows build 16299
     (store-probe spec Amendment 2026-11-12); 10.0.17763.0 is comfortably above that and installed
