@@ -1,6 +1,7 @@
 # Store stand-ins as an early warning ("store probe") — design
 
-Date: 2026-11-11. Status: approved in conversation, awaiting written-spec review.
+Date: 2026-11-11. Status: approved. **Amended 2026-11-12 after the CI spike (see the Amendment at
+the end), which supersedes the parts it names.**
 
 ## Where this sits
 
@@ -53,6 +54,9 @@ The stand-ins are never uploaded or released.
 ## Design
 
 ### 1. What gets built
+
+(macOS and Windows signing details superseded by the Amendment.)
+
 
 - **macOS (`macos-latest`, every run).** After `package:gui`, `scripts/store-probe.mjs` copies
   `TN3270.app` from the universal zip and ad-hoc re-signs the copy with
@@ -162,7 +166,8 @@ capability it needs, or says why it needs none.
   - the NSIS and mac artifact uploads are unchanged.
 - **`electron-builder.cjs` tests:** `win.target` holds both `nsis` and `appx`; the appx identity
   values are the named placeholders; the `customExtensionsPath` file exists and declares the alias.
-- **Mutation, once each, in CI** (run IDs recorded in the docs):
+- **Mutation, once each, in CI** (run IDs recorded in the docs; the list is superseded by the
+  Amendment):
   - re-sign the macOS copy **without** `app-sandbox`, and the probe must FAIL on the missing
     container;
   - launch the Windows exe from its install directory instead of through the alias, and the
@@ -188,3 +193,68 @@ capability it needs, or says why it needs none.
   stated in section 2.
 - The Windows job grows by an `appx` build, a sign, an install and two launches. The cost is
   measured and reported (section 3).
+
+## Amendment 2026-11-12: what the CI spike measured
+
+The spike ran four rounds on branch `store-probe`. Each run's log answers its questions as
+`SPIKE:` lines.
+
+| Run | What it settled |
+|---|---|
+| 43110403997 | mac: the sandbox is enforced on an ad-hoc copy launched from the shell (the container appears, the kernel logs denials). Windows: makeappx accepts the inline-namespaced `uap5` alias; electron-builder's winCodeSign-2.6.0 `signtool` cannot sign an appx ("A required function is not present") |
+| 43112504521 | Windows works end to end with the **Windows SDK** signtool (10.0.26100.0): install, alias on PATH, args and env passed, `windowsStore=true`, golden MATCH. A **direct** launch of the installed exe also has package identity. The default MinVersion 10.0.14316 installs, and so does 10.0.17763. mac: ordinary Electron dies at `mach_port_rendezvous_mac.cc:159` (`bootstrap_check_in ... Permission denied`) on every launch; the `mas` target builds with a null identity |
+| 43114227702 | mac: ordinary Electron, properly sandboxed WITH `application-groups`, still dies there, so ordinary Electron is ruled out. The MAS build has `Contents/Library/LoginItems/TN3270 Login Helper.app`, which must be signed too |
+| 43115293433 | mac: **the MAS build works** with Electron's entitlement split: `probe: sandbox=io.github.athornton.tn3270`, golden MATCH with inputs staged in the container, and the outside read DENIED (`EPERM` in the app, and kernel `deny(1) file-read-data <trace>`). Putting `application-groups` on the helpers as well crashes with `GPU process isn't usable` |
+
+### macOS, superseding section 1's re-sign of the Developer ID app
+
+- The stand-in is a **separate electron-builder build**:
+  `npm run package:gui -- --mac mas --universal -c.mac.identity=null`. This uses Electron's MAS
+  build (no Squirrel, Mantle or ReactiveObjC), and with a null identity it leaves an unsigned
+  `artifacts/gui/mas-universal/TN3270.app` and no `.pkg`. Measured: 23 s with the mas Electron
+  zips cached.
+- Before signing, `Info.plist` gets `ElectronTeamID` = `H68TN685J4`. Electron's MAS guide
+  requires it. electron-builder doesn't set it for an unsigned build, and the Team ID is in every
+  signature we ship, so it isn't secret.
+- Ad-hoc signing goes inside out:
+  1. every nested Mach-O, and frameworks with `--deep`;
+  2. the helper apps in `Contents/Frameworks` with the **inherit** file;
+  3. `Contents/Library/LoginItems/*.app` with the **login-helper** file;
+  4. the app with the **main** file.
+
+  Then `codesign --verify --deep --strict` must pass.
+- Three entitlements files in `packages/gui/resources/`. They follow Electron's
+  `mac-app-store-submission-guide.md`: v8.0.0 for the login helper, main for the rest.
+  - `entitlements.mas.plist` (main): `app-sandbox`, `network.client`,
+    `files.user-selected.read-write`, `cs.allow-jit`, `cs.allow-unsigned-executable-memory`, and
+    `application-groups` = [`H68TN685J4.io.github.athornton.tn3270`];
+  - `entitlements.mas.inherit.plist`: `app-sandbox`, `inherit`. **No** `application-groups`
+    (run 43115293433, variant C);
+  - `entitlements.mas.loginhelper.plist`: `app-sandbox`.
+- The **confinement proof** is the app's own `probe:` line, `sandbox=io.github.athornton.tn3270`
+  (Task 1's seam), together with the container directory existing.
+
+### Windows, superseding section 1's signing details
+
+- Sign with the newest Windows SDK `signtool.exe`, under
+  `C:\Program Files (x86)\Windows Kits\10\bin\<version>\x64\`, chosen by version number. Never use
+  electron-builder's winCodeSign signtool.
+- `appx.minVersion` is `10.0.17763.0`, because the manifest uses a `uap5` element that Microsoft
+  documents from build 16299. The default 10.0.14316 installs on the runner, but Store
+  certification may check.
+
+### Mutations, superseding the list in Testing
+
+1. The mac MAS copy signed **without** `app-sandbox`: the probe line says `sandbox=none`, and the
+   probe FAILs.
+2. The mac MAS copy with `application-groups` added to the inherit file: the app crashes with
+   `GPU process isn't usable`, and the probe FAILs.
+3. Windows launches the **NSIS-installed** `TN3270.exe` instead of the package: `windowsStore`
+   is false, and the probe FAILs. This replaces the direct-exe mutation, which run 43112504521
+   showed would pass, since a direct launch inside the package has identity.
+4. `network.client` removed from the mac main file: check 2 (Connect) FAILs.
+
+### Found by the spike, fixed separately
+
+The GUI's replay seam hung on an unreadable trace (unhandled `EPERM`, no exit). It is fixed on
+this branch, so a denied input fails fast and doesn't wait out a timeout.

@@ -34,6 +34,79 @@ Generated with AI
 Co-Authored-By: SLAC AI
 ```
 
+## SPIKE RESULTS AND TASK OVERRIDES (2026-11-12). Read this before any task; it beats the task text.
+
+Task 0 is DONE: four rounds, runs 43110403997, 43112504521, 43114227702 and 43115293433. The spec's
+"Amendment 2026-11-12" has the table of what each run settled. The spike scripts are
+`scripts/spike/mac-sandbox.sh` (variant D is the working recipe) and `scripts/spike/win-appx.ps1`
+(the alias and SDK-signtool route). **The drivers in Task 5 are a port of those two scripts' working
+paths.** Read them first; they are the specification.
+
+- **Task 3 overrides.**
+  - THREE entitlements files: `entitlements.mas.plist`, `entitlements.mas.inherit.plist` and
+    `entitlements.mas.loginhelper.plist`, contents as in the spec amendment.
+    `application-groups` = [`H68TN685J4.io.github.athornton.tn3270`] is in the MAIN file ONLY.
+  - Add `appx.minVersion: '10.0.17763.0'`. The alias file is `packages/gui/resources/appx-extensions.xml`,
+    with the same content as `scripts/spike/appx-extensions.xml` (proven).
+  - Tests:
+    - inherit has NO application-groups (variant C crashed);
+    - the login-helper file has app-sandbox only;
+    - main has the group with the team-prefixed bundle id;
+    - minVersion is >= 10.0.16299.
+  - The mac stand-in is NOT an electron-builder.cjs target. It's built by a separate command (Task 6),
+    so `mac.target` stays dmg+zip.
+- **Task 4 overrides.** `judgeMacConfinement({ entitlements, containerExists, probe }, bundleId)` stays,
+  but the decisive input is `probe.sandbox === bundleId`, and the container is the second witness.
+  Add `judgeSignatureVerify(text, rc)` for the `codesign --verify --deep --strict` result: it fails on
+  any "In subcomponent" / "not signed at all".
+- **Task 5 overrides (mac driver).** The input is `artifacts/gui/mas-universal/TN3270.app`, which
+  Task 6 builds, copied into scratch. It is NOT the Developer ID zip. The steps:
+  1. `plutil -replace ElectronTeamID -string H68TN685J4 Contents/Info.plist` (or `-insert` when
+     absent, as the spike does);
+  2. sign inside out, exactly as variant D: nested Mach-O and dylibs, frameworks `--deep`, helper
+     apps with inherit, LoginItems with loginhelper, the app with main;
+  3. `codesign --verify --deep --strict`;
+  4. confinement: the probe launch, then the container;
+  5. the checks;
+  6. cleanup.
+
+  The negative outside-read check is NOT part of the probe; it's covered by mutation 1.
+- **Task 5 overrides (win driver).** signtool = the newest
+  `C:\Program Files (x86)\Windows Kits\10\bin\<ver>\x64\signtool.exe`, chosen by parsed version
+  (port the spike's chooser). Exit 2 if none is found. Never use electron-builder's winCodeSign one.
+  The identity check is `probe.windowsStore === true` AND the started process's package full name
+  (the spike's `GetPackageFullName` route) equal to the installed `PackageFullName`.
+- **Task 6 overrides.** On `macos-latest`, add a step BEFORE the probe:
+  `npm run package:gui -- --mac mas --universal -c.mac.identity=null`. electron-builder only turns
+  the string `null` into a real null under `mac`, not `mas`. Put it AFTER the existing artifact
+  verification so it can't disturb the uploaded dmg/zip, and assert in workflow.test.ts that no
+  upload path matches `mas-universal`. **Check** that the `gui-macos-latest` upload's `*.zip` / `*.dmg`
+  globs can't pick anything up from `mas-universal/` (it holds only an app directory; verify that
+  from the round-4 log `mas build outputs` line).
+- **Task 7 overrides.** The mutations are the spec amendment's four: mac without app-sandbox; mac
+  with the group in inherit (expect the GPU crash); Windows launching the NSIS-installed exe; mac
+  without network.client.
+- **Not part of this work, but on this branch:** a separate commit fixes the GUI replay seam hanging
+  on an unreadable trace. Task 2's `drawsGolden` gains nothing from it, except that a denied trace now
+  fails fast.
+
+### Spike results (one line per question)
+
+- mac, ad-hoc copy sandboxed when launched from the shell: YES. The container appears, and the
+  kernel logs denials (43110403997).
+- mac, ordinary Electron under the sandbox: always FATAL at `mach_port_rendezvous_mac.cc:159`, with or
+  without application-groups (43112504521, 43114227702).
+- mac, MAS build (variant D): sandboxed per the probe line; golden MATCH with inputs in the container;
+  outside read DENIED; `mas` build 23 s cached; the whole script 55 s for two variants (43115293433).
+- mac, group in inherit too (variant C): `GPU process isn't usable` crash (43115293433).
+- win, makeappx with the inline uap5 alias: accepted (43110403997).
+- win, winCodeSign signtool on an appx: fails. Windows SDK 10.0.26100.0 signtool: works (43112504521).
+- win, alias on PATH after install: YES; it is removed on uninstall (43112504521).
+- win, alias launch: args and env pass, `windowsStore=true`, package full name matches, golden MATCH (43112504521).
+- win, direct launch of the installed exe: ALSO `windowsStore=true` (43112504521).
+- win, default MinVersion 14316 and the 17763 variant: both install (43112504521).
+- win, the whole script ~60 s for two packages (43112504521).
+
 ## Facts already measured (2026-11-11)
 
 - `AppxTarget.js:344` resolves `customExtensionsPath` against `appInfo.appDir`, which is the bundle
