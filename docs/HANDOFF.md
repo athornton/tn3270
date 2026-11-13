@@ -1,4 +1,4 @@
-# Handoff — state as of 2026-11-12 (0.1.4 RELEASED: npm by the tag workflow with provenance, and the first GitHub release with the seven installers, SHA256SUMS and scriv notes; macOS CODE SIGNING MERGED (`db5a93d`; released installers up to 0.1.4 are UNSIGNED), Windows CI signing DROPPED for the Microsoft Store; STORE PROBE MERGED (`559ea78`); next: the x3270 parity checklist, the store gate)
+# Handoff — state as of 2026-11-13 (0.1.4 RELEASED: npm by the tag workflow with provenance, and the first GitHub release with the seven installers, SHA256SUMS and scriv notes; macOS CODE SIGNING MERGED (`db5a93d`; released installers up to 0.1.4 are UNSIGNED), Windows CI signing DROPPED for the Microsoft Store; STORE PROBE MERGED (`559ea78`); README AUDIT + FIXES MERGED (`ae8724f`); WEB RECEIVE DOWNLOADS ON COMPLETION (`4a940fe`, live-verified); `Exist` PER DIRECTION (`f533bff`); next: the x3270 parity checklist, the store gate)
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
@@ -7,7 +7,31 @@ latest START HERE entry names. Each finished feature has its own pair under `doc
 
 ## START HERE — LATEST FIRST; NEXT IS THE x3270 PARITY CHECKLIST, THEN README *Remaining* 15-22
 
-**2026-11-12, LATEST: THE STORE PROBE IS MERGED to `main` `--no-ff` as `559ea78`** (tree identical
+**2026-11-13, LATEST: NEXT IS THE x3270 PARITY CHECKLIST** (piece 2 of the store plan below; the
+user will start it in a new session; brainstorm it first, no spec yet). Merged since the store probe,
+all `--no-ff`, each with CI green on the branch and on `main`, and `main` is the only branch:
+- `ae8724f`: the README audited claim by claim (history moved verbatim to `docs/readme-history.md`);
+  x3270's BSD-3-Clause notice beside its five redistributed test traces
+  (`packages/fixtures/x3270/LICENSE-x3270.md`); TLS no longer reports an unreachable host as a stalled
+  handshake; the TUI keypad overlay shows every bound chord; a transfer that never started says
+  `transfer did not start within 30s` and quotes the host (option A; option B, ending early on a fresh
+  `READY`, needs the TK5 capture written up in `docs/live-testing.md`); CHANGELOG marks 0.1.2 not
+  released.
+- `4a940fe`: a browser receive has no Local file/Browse/Save; Start fetches and the browser downloads
+  the file named by `defaultLocalName` (VM `fn ft fm` -> `fn.ft`; TSO quotes stripped, lowercased,
+  literal: `'SYS1.PROCLIB(ASMHC)'` -> `sys1.proclib(asmhc)`). The GUI's receive dialog suggests the
+  same name. LIVE-VERIFIED by the user 2026-11-13.
+- `f533bff`: a send's `Exist` is Replace (default) or Append in every form (Keep never kept anything
+  on a send: IND$FILE replaced the host file); every direction change resets `Exist` to its default,
+  so a fresh receive still refuses to overwrite a local file; the browser hides `Exist` on a receive.
+  The CLI keyword parser is unchanged.
+
+Still open, small: three hang-shaped paths (the transfer-window load, `capturePage()`, a readable but
+malformed trace); TLS words an unknown socket error differently from plaintext; the web transfer form
+needs CSS (milestone B, item 15). GOCA is back on the roadmap after Programmed Symbols: the user has
+found a GDDM-licensed host (details not yet given).
+
+**2026-11-12, PREVIOUS: THE STORE PROBE IS MERGED to `main` `--no-ff` as `559ea78`** (tree identical
 to the gated branch head `8b7f7ee`; CI on the merge, run 43161861526, green 6/6; branch deleted,
 `main` is the only branch). Spec `docs/superpowers/specs/2026-11-11-store-probe-design.md` (read its *Amendment
 2026-11-12*), plan `docs/superpowers/plans/2026-11-11-store-probe.md` (Tasks 0-8 done). Every CI run, tags included, builds and launches a confined
