@@ -4898,8 +4898,9 @@ Chromium key event.
    has nobody to click it and would stall the run, not fail it). Check that `Browse…` on a
    `Direction=send` offers an **Open** panel and on a `receive` offers a **Save** panel
    (`gui/src/main.ts`'s `openDialog`/`saveDialog`, chosen by direction in `transferUi.ts`'s
-   `browseLocal`). **The panel must NOT set `Exist`**: pick `replace` in the form and confirm the
-   transfer overwrites, then `keep` and confirm it refuses *locally*, without telling the host.
+   `browseLocal`). **The panel must NOT set `Exist`**: on a receive, pick `replace` in the form and
+   confirm the transfer overwrites, then `keep` and confirm it refuses *locally*, without telling
+   the host. (A send offers only `replace` and `append` since 2026-11-13.)
    Confirm too that **canceling the panel leaves the Local file field as it was** rather than
    blanking it — the `canceled` check exists for that, and a Save panel returns `''` where an Open
    panel returns an empty array.

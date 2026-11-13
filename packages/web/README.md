@@ -167,7 +167,7 @@ with the picker.
 
 **`Ctrl-T`, or the keypad's `Xfer`, opens the transfer form as an overlay** — the GUI's fields:
 direction, host (`tso` or `vm`), local file (omitted on a receive — see below), host file, mode,
-exist, cr, recfm, lrecl, blksize. Both directions. The bytes travel over the WebSocket in
+exist (omitted on a receive — see below), cr, recfm, lrecl, blksize. Both directions. The bytes travel over the WebSocket in
 4096-byte chunks, so the local file is on the **browser's** machine; the gateway holds the file in
 memory and never touches its own disk.
 
@@ -178,6 +178,11 @@ memory and never touches its own disk.
   reattaches never inherits a half-sent upload.
 - **The host chooses CUT or DFT.** DDM is advertised by default; `-ddm off` forces CUT, which
   needs a 24x80 screen.
+- **`Exist` is `replace` (the default) or `append` on a send, and absent on a receive
+  (2026-11-13).** Only `append` reaches the host; anything else replaces the host file, so a send
+  no longer offers a `keep` that kept nothing. A receive's name clash is the browser's to handle
+  (Firefox asks, Chrome appends ` (1)`), and the gateway ignores `Exist` there. The GUI and the
+  TUI keep all three on a receive, where `keep` refuses to overwrite a local file.
 - **A receive has no Local file field, no Browse and no Save step (2026-11-12).** Start fetches
   the file and, on success, the browser downloads it on its own through a plain `<a download>`
   link — the only route, in every browser; the Chromium `showSaveFilePicker` route was removed

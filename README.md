@@ -494,9 +494,17 @@ cancels — Electron fires the child's `closed` **without** its `close`, so the 
 that path and a separate hook does the cancelling. **If the session drops underneath**, the transfer
 is cancelled too, so the window does not sit refusing every close on a dead session.
 
+**`Exist` offers what each direction does (2026-11-13).** On a send it is `replace` (the default)
+or `append`: only `append` reaches the host, as `IND$FILE`'s `APPEND`, and anything else replaces
+the host file, so the form no longer offers a `keep` that kept nothing. On a receive it is `keep`,
+`replace` or `append`, and `keep` really does refuse to overwrite an existing local file, before
+the host is told anything. A switch to send turns a `keep` into `replace`; `replace` and `append`
+survive a switch either way. A scripted `Transfer(...)` still accepts `Exist=keep` on a send, as
+x3270 does, and it still means `replace` there. The TUI's form follows the same rules.
+
 `Exist` is yours to set and the Save panel deliberately does not set it: `append` has no equivalent
-in a file chooser, so the three-way choice (`keep`/`replace`/`append`) stays explicit. Canceling
-either panel leaves whatever you had typed in the Local file field alone.
+in a file chooser, so the choice stays explicit. Canceling either panel leaves whatever you had
+typed in the Local file field alone.
 
 **Live-verified on both hosts and both engines (2026-10-02):** VM/CMS over CUT and TSO over DFT,
 249 bytes byte-identical both ways (`packages/gui/scripts/live-transfer.py vm|tso`). On VM a 200 KB
@@ -614,7 +622,8 @@ fields possible at all**: a printable byte is data typed at the host everywhere 
 could not be entered without the interception. The two overlays are **mutually exclusive** — either
 key closes the other — because two things owning the keyboard is a state the operator cannot read.
 **Inapplicable fields are not drawn**: `Recfm` only on a send, `Lrecl` only once `Recfm` is set,
-`Blksize` not on VM, `Cr` only in ascii mode — and a value that becomes inapplicable is **cleared**
+`Blksize` not on VM, `Cr` only in ascii mode. `Exist` cycles through `replace` (the default) and
+`append` on a send, and `keep`/`replace`/`append` on a receive, as in the GUI — and a value that becomes inapplicable is **cleared**
 rather than kept invisibly, since a hidden value that breaks a later submit names a keyword the
 operator never typed. **The form never validates.** It collects strings and hands them to the same
 `parseTransferKeywords` the CLI uses, so a refusal shows the validator's own message with the form
@@ -1116,6 +1125,11 @@ directions. The file's bytes travel over the WebSocket, so "local file" is the b
 and the gateway never touches its own disk. The options are the CLI's `Transfer()` keywords (the
 form omits `BufferSize`); the cap is 10 MB each way, staged in memory; one transfer runs per
 session at a time. The host chooses CUT or DFT, as in every front end; `-ddm off` forces CUT.
+
+**`Exist` is `replace` (the default) or `append` on a send, and absent on a receive (2026-11-13).**
+A send's `keep` replaced the host file anyway, so it is not offered. A receive's download is the
+browser's: its own download handling decides what happens to a name that's already taken
+(Firefox asks, Chrome appends ` (1)`), and the gateway ignores `Exist` there.
 
 **A receive has no Local file field, no Browse and no Save step (2026-11-12).** Start fetches the
 file and, on success, the browser downloads it on its own, through a plain `<a download>` link —
