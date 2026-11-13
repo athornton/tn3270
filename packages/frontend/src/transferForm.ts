@@ -41,7 +41,7 @@ export interface TransferField {
    *
    * `recfm`'s list here is the TSO one; `cycleField` drops `undefined` for VM. That
    * asymmetry lives in the cycle function rather than in two tables, so the VM rule has
-   * one home.
+   * one home. `exist`'s list is the receive one; a send drops `keep` the same way.
    */
   readonly values: readonly string[];
   /** Visible width for a text or numeric field. */
@@ -167,12 +167,19 @@ export interface TransferFormState {
  * to. The TUI's box height is computed from the applicable count, so this is a layout change
  * there, not merely a value change. 27 tests across four files asserted the old default; each had
  * its SETUP updated rather than its assertion weakened.
+ *
+ * ## `exist` OPENS ON `replace`, BECAUSE THE FORM OPENS ON A SEND (2026-11-13)
+ *
+ * A send offers only `replace` and `append` (see `valuesFor`). It used to open on `keep`, which
+ * reads as "don't overwrite" and did overwrite: only `append` reaches the host, and IND$FILE
+ * replaced the file. A receive's default is still `keep`. Every direction change resets `exist`
+ * to the new direction's default (`EXIST_DEFAULT`, applied in `cycleField`).
  */
 export function newTransferForm(): TransferFormState {
   return {
     values: {
       direction: 'send', host: 'tso', localFile: '', hostFile: '',
-      mode: 'binary', exist: 'keep', cr: '', recfm: '', lrecl: '', blksize: '',
+      mode: 'binary', exist: 'replace', cr: '', recfm: '', lrecl: '', blksize: '',
     },
     selected: 0,
   };
@@ -181,9 +188,16 @@ export function newTransferForm(): TransferFormState {
 /**
  * The values a cycle field offers, given the rest of the form.
  *
- * The ONE state-dependent case is `recfm` on VM: `transfer.ts` records that "CMS supports
- * fixed and variable", so `undefined` is not offered there. Kept here rather than as a
- * second table so the rule has one home.
+ * TWO state-dependent cases, kept here rather than as second tables so each rule has one home:
+ *
+ * - `recfm` on VM: `transfer.ts` records that "CMS supports fixed and variable", so
+ *   `undefined` is not offered there.
+ * - `exist` on a send: only `replace` and `append` (and `cycleField` resets it on a direction
+ *   change, so a send never holds `keep`). Only `append` reaches the host, as
+ *   IND$FILE's `APPEND` (`transfer.ts`'s `transferCommand`); `keep` and `replace` both send
+ *   nothing, and IND$FILE then REPLACES the host file. Offering `keep` there offered a
+ *   protection that didn't exist (spec 2026-11-13). The keyword parser still accepts
+ *   `Exist=keep` on a send, as x3270 does; only the form stops offering it.
  */
 function valuesFor(id: TransferFieldId, values: TransferValues): readonly string[] {
   const field = FIELD_BY_ID.get(id);
@@ -191,11 +205,29 @@ function valuesFor(id: TransferFieldId, values: TransferValues): readonly string
   if (id === 'recfm' && values.host === 'vm') {
     return field.values.filter((v) => v !== 'undefined');
   }
+  if (id === 'exist' && values.direction === 'send') {
+    return field.values.filter((v) => v !== 'keep');
+  }
   return field.values;
 }
 
 /**
+ * `exist`'s default for each direction, which every direction change resets it to.
+ *
+ * ## RESET, NOT CARRIED ACROSS (amended 2026-11-13)
+ *
+ * The first version kept any value both directions offer, so a fresh form (a send, on `replace`)
+ * switched to receive kept `replace` -- and a receive that used to refuse to overwrite a local file
+ * (`keep`, `transferRun.ts`) silently overwrote it. Nothing is carried, not even `append`: each
+ * direction starts from its own safe default, and the operator picks anything else on purpose.
+ */
+const EXIST_DEFAULT: Readonly<Record<string, string>> = { send: 'replace', receive: 'keep' };
+
+/**
  * Move a cycle field by `delta`, wrapping, and clear anything the move made inapplicable.
+ *
+ * A move that CHANGES the direction also resets `exist` to that direction's `EXIST_DEFAULT`. This
+ * is the one place a direction change is visible: `clearInapplicable` sees only the new state.
  *
  * A no-op on a text or numeric field, so a caller may route left/right unconditionally.
  */
@@ -210,11 +242,11 @@ export function cycleField(
   // reads as index -1, and `(-1 + 1) % n` is 0 -- so it lands on the first option
   // rather than throwing. That is the same repair `clearInapplicable` performs.
   const next = options[(((at + delta) % options.length) + options.length) % options.length];
-  return clearInapplicable({
-    ...state,
-    values: { ...state.values, [id]: next ?? '' },
-    error: undefined,
-  });
+  const values = { ...state.values, [id]: next ?? '' };
+  if (id === 'direction' && values.direction !== state.values.direction) {
+    values.exist = EXIST_DEFAULT[values.direction] ?? values.exist;
+  }
+  return clearInapplicable({ ...state, values, error: undefined });
 }
 
 /** Replace a text or numeric field's contents. A no-op on a cycle field. */

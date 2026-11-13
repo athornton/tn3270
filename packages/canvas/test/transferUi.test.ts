@@ -312,16 +312,17 @@ describe('createTransferUi', () => {
 });
 
 /**
- * `deriveLocalFileOnReceive`: the web gateway's receive has no Local file field, and the name comes
- * from the host file (web receive spec, 2026-11-12). The GUI leaves it off and keeps its field.
+ * `browserReceive`: the web gateway's receive has no Local file field, and the name comes
+ * from the host file (web receive spec, 2026-11-12). It has no Exist field either (spec
+ * 2026-11-13). The GUI leaves it off and keeps both fields.
  */
-describe('createTransferUi with deriveLocalFileOnReceive', () => {
+describe('createTransferUi with browserReceive', () => {
   const lastIds = (deps: ReturnType<typeof fakeDeps>): string[] =>
     deps.rendered[deps.rendered.length - 1]!.map((f) => f.id);
 
   it('omits Local file on a receive and shows it on a send', () => {
     const deps = fakeDeps();
-    const ui = createTransferUi(deps, { deriveLocalFileOnReceive: true });
+    const ui = createTransferUi(deps, { browserReceive: true });
     expect(lastIds(deps), 'the form opens on send').toContain('localFile');
     ui.cycle('direction', 1);                 // receive
     expect(ui.values().direction).toBe('receive');
@@ -331,7 +332,7 @@ describe('createTransferUi with deriveLocalFileOnReceive', () => {
   });
 
   it('still shows Local file on a receive when the option is off, which is the GUI', () => {
-    for (const opts of [undefined, {}, { deriveLocalFileOnReceive: false }]) {
+    for (const opts of [undefined, {}, { browserReceive: false }]) {
       const deps = fakeDeps();
       const ui = createTransferUi(deps, opts);
       ui.cycle('direction', 1);               // receive
@@ -341,7 +342,7 @@ describe('createTransferUi with deriveLocalFileOnReceive', () => {
 
   it('submits the derived LocalFile without writing it into the form', async () => {
     const deps = fakeDeps();
-    const ui = createTransferUi(deps, { deriveLocalFileOnReceive: true });
+    const ui = createTransferUi(deps, { browserReceive: true });
     ui.cycle('direction', 1);                 // receive
     ui.cycle('host', 1);                      // vm
     ui.type('hostFile', 'NAP H A2');
@@ -354,7 +355,7 @@ describe('createTransferUi with deriveLocalFileOnReceive', () => {
 
   it('derives over a Local file typed before the switch to receive, and keeps the typed one', async () => {
     const deps = fakeDeps();
-    const ui = createTransferUi(deps, { deriveLocalFileOnReceive: true });
+    const ui = createTransferUi(deps, { browserReceive: true });
     ui.type('localFile', 'mine.txt');         // on send
     ui.cycle('direction', 1);                 // receive: the field is hidden
     ui.type('hostFile', "'SYS1.PROCLIB(ASMHC)'");
@@ -377,7 +378,7 @@ describe('createTransferUi with deriveLocalFileOnReceive', () => {
         return { ok: false as const, error: (err as Error).message };
       }
     });
-    const ui = createTransferUi(deps, { deriveLocalFileOnReceive: true });
+    const ui = createTransferUi(deps, { browserReceive: true });
     ui.cycle('direction', 1);                 // receive
     ui.type('hostFile', 'NAP.H');
     await ui.start();
@@ -388,7 +389,7 @@ describe('createTransferUi with deriveLocalFileOnReceive', () => {
 
   it('falls back to download.bin when the host file is empty', async () => {
     const deps = fakeDeps();
-    const ui = createTransferUi(deps, { deriveLocalFileOnReceive: true });
+    const ui = createTransferUi(deps, { browserReceive: true });
     ui.cycle('direction', 1);                 // receive
     await ui.start();
     expect(deps.submitted[0]).toContain('LocalFile=download.bin');
@@ -396,7 +397,7 @@ describe('createTransferUi with deriveLocalFileOnReceive', () => {
 
   it('leaves a send alone: the typed Local file is what is submitted', async () => {
     const deps = fakeDeps();
-    const ui = createTransferUi(deps, { deriveLocalFileOnReceive: true });
+    const ui = createTransferUi(deps, { browserReceive: true });
     ui.type('localFile', 'up.txt');
     ui.type('hostFile', 'NAP H A2');
     await ui.start();
@@ -413,9 +414,37 @@ describe('createTransferUi with deriveLocalFileOnReceive', () => {
     expect(deps.submitted[0]).toContain('LocalFile=/tmp/here');
   });
 
+  it('omits Exist on a receive, and offers exactly Replace and Append on a send', () => {
+    // The browser's own download handling decides about a name clash (Firefox prompts, Chrome
+    // appends ` (1)`), and the gateway ignores `Exist` on a receive, so the control was dead.
+    const deps = fakeDeps();
+    const ui = createTransferUi(deps, { browserReceive: true });
+    const exist = (): UiField | undefined =>
+      deps.rendered[deps.rendered.length - 1]!.find((f) => f.id === 'exist');
+    expect(exist()?.options, 'the form opens on send').toEqual(['replace', 'append']);
+    expect(exist()?.value).toBe('replace');
+    ui.cycle('direction', 1);                 // receive
+    expect(ui.values().direction).toBe('receive');
+    expect(lastIds(deps)).not.toContain('exist');
+    ui.cycle('direction', 1);                 // back to send
+    expect(exist()?.options).toEqual(['replace', 'append']);
+  });
+
+  it('offers all three Exist values on a receive when the option is off, as the GUI', () => {
+    // The TUI draws its own view from the same model and shows Exist on a receive too; this is the
+    // canvas view the GUI uses.
+    for (const opts of [undefined, {}, { browserReceive: false }]) {
+      const deps = fakeDeps();
+      const ui = createTransferUi(deps, opts);
+      ui.cycle('direction', 1);               // receive
+      const exist = deps.rendered[deps.rendered.length - 1]!.find((f) => f.id === 'exist');
+      expect(exist?.options, JSON.stringify(opts)).toEqual(['keep', 'replace', 'append']);
+    }
+  });
+
   it('does not ask for a local file in the help on a derived receive', () => {
     const deps = fakeDeps();
-    const ui = createTransferUi(deps, { deriveLocalFileOnReceive: true });
+    const ui = createTransferUi(deps, { browserReceive: true });
     ui.cycle('direction', 1);                 // receive
     const said = vi.mocked(deps.setStatus).mock.calls.map((c) => c[0]);
     expect(said[said.length - 1]).toBe('Name the host file, then Start.');
@@ -424,7 +453,7 @@ describe('createTransferUi with deriveLocalFileOnReceive', () => {
 
 describe('browseLocal suggests a received file\'s name', () => {
   it('passes defaultLocalName on a receive, whatever the option', async () => {
-    for (const opts of [undefined, { deriveLocalFileOnReceive: true }]) {
+    for (const opts of [undefined, { browserReceive: true }]) {
       const deps = fakeDeps();
       const ui = createTransferUi(deps, opts);
       ui.cycle('direction', 1);               // receive (host is tso)

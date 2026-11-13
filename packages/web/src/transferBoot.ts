@@ -18,7 +18,7 @@ import { createTransferBridge, endTransfer } from './transferBridge.js';
  * (`packages/web/scripts/browser-clicks.mjs`), the same split `renderer.ts` has against `blit.ts`.
  *
  * ONE THIN UNIT TEST EXISTS SINCE 2026-11-12, `transferBoot.test.ts`, over a fake document. It
- * pins the two inputs this file hands the download: the `deriveLocalFileOnReceive` option and
+ * pins the two inputs this file hands the download: the `browserReceive` option and
  * the `saveName` given to `endTransfer`. Deleting either left every unit test green, and the
  * harness is run by hand.
  *
@@ -313,10 +313,10 @@ export function bootTransfer(doc: Document, send: (text: string) => void): Trans
   const localNameFrom = (keywords: readonly string[]): string => {
     /*
       READ FROM THE SUBMITTED KEYWORDS, which on a receive carry the DERIVED name: this file turns
-      on `deriveLocalFileOnReceive`, so `transferUi.ts` hides `Local file` on a receive and submits
-      `LocalFile=defaultLocalName(hostFile, host)` -- `nap.h` for VM's `NAP H A2`. Reading it
-      here, rather than deriving it a second time, keeps one rule and one place that applies it.
-      `LocalFile` is MANDATORY -- `transferCommand` throws "missing 'LocalFile' option" and
+      on `browserReceive`, so `transferUi.ts` hides `Local file` (and `Exist`) on a receive and
+      submits `LocalFile=defaultLocalName(hostFile, host)` -- `nap.h` for VM's `NAP H A2`.
+      Reading it here, rather than deriving it a second time, keeps one rule and one place that
+      applies it. `LocalFile` is MANDATORY -- `transferCommand` throws "missing 'LocalFile' option" and
       `defaultLocalName` never returns an empty name -- so the fallback below is very nearly dead
       code, kept so a download can never be handed an empty filename.
     */
@@ -464,7 +464,8 @@ export function bootTransfer(doc: Document, send: (text: string) => void): Trans
   }, {
     // A BROWSER HAS NO PATH TO RECEIVE INTO: the form hides `Local file` on a receive and
     // submits the name derived from the host file, which `localNameFrom` reads back at submit.
-    deriveLocalFileOnReceive: true,
+    // It hides `Exist` on a receive too: the browser's download handling decides about a clash.
+    browserReceive: true,
   });
 
   browseButton.addEventListener('click', () => { void ui.browseLocal(); });
