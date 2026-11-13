@@ -299,7 +299,8 @@ for (const pkg of ['gui', 'canvas', 'web', 'frontend']) {
 
   So the browser half can be driven end to end and the server half only as far as that refusal:
 
-   - `overlay`, `viewport`, `noSave`, `localFileByDirection`, `noFile` and `browseCancel` are
+   - `overlay`, `viewport`, `noSave`, `localFileByDirection`, `existByDirection`, `noFile` and
+     `browseCancel` are
      ENTIRELY REAL. Real keystrokes, real clicks, a real file chooser opened by Chromium, real DOM
      read back. Nothing is injected and nothing is stubbed.
    - `liveRefusal` is REAL IN BOTH DIRECTIONS: the browser's own `transferStart` crosses the
@@ -413,9 +414,19 @@ const TRANSFER_CHECKS = [
     kind: 'live',
     what: 'on a SEND the Local file input and Browse are drawn and visible; on a RECEIVE the Local '
       + 'file input is not in the field list and Browse is hidden',
-    mutant: 'transferBoot.ts  deriveLocalFileOnReceive: false (MEASURED 2026-11-12: build 0, '
+    mutant: 'transferBoot.ts  browserReceive: false (then named deriveLocalFileOnReceive; '
+      + 'MEASURED 2026-11-12: build 0, '
       + '20/23 -- this check sees Local file drawn on the receive, and progress and download '
       + 'follow from it, because the receive then downloads under the TYPED `typed.txt`)',
+  },
+  {
+    name: 'existByDirection',
+    kind: 'live',
+    what: 'on a SEND the Exist select is drawn and offers exactly replace and append (Replace '
+      + 'selected); on a RECEIVE it is not in the field list, since the browser\'s own download '
+      + 'handling decides about a name clash',
+    mutant: 'transferUi.ts  `exist` no longer hidden under `browserReceive` (MEASURED 2026-11-13: '
+      + 'build 0, 23/24, this check only)',
   },
   {
     name: 'noFile',
@@ -1520,13 +1531,20 @@ async function runTransferPhase(url) {
     // ASSERTED with the receive half once `liveRefusal` below has switched to a receive -- one
     // check, because "absent on a receive" means nothing unless the same page draws them on a send.
     // VISIBLE, not merely present: `offsetParent` is null for a `hidden` or `display:none` element.
+    //
+    // `exist` IS READ IN THE SAME SNAPSHOT, for `existByDirection`: the `<select>`'s option VALUES
+    // (what is submitted) and its selected value, or `absent` when the field isn't drawn.
     const fieldsShown = () => cdp.eval(`(() => {
       const lf = document.getElementById('transfer-localFile');
       const br = document.getElementById('transfer-browse');
+      const ex = document.getElementById('transfer-exist');
       return {
         direction: document.getElementById('transfer-direction').value,
         localFile: lf === null ? 'absent' : (lf.offsetParent === null ? 'invisible' : 'shown'),
         browse: br === null ? 'absent' : (br.hidden || br.offsetParent === null ? 'hidden' : 'shown'),
+        exist: ex === null ? 'absent' : (ex.offsetParent === null ? 'invisible' : 'shown'),
+        existOptions: ex === null ? [] : [...ex.options].map((o) => o.value),
+        existValue: ex === null ? null : ex.value,
       };
     })()`);
     const onSend = await fieldsShown();
@@ -1649,7 +1667,7 @@ async function runTransferPhase(url) {
     // ===== localFileByDirection, the RECEIVE half, asserted with the send half read above =====
     //
     // A RECEIVE HAS NO LOCAL FILE in a browser: `transferBoot.ts` turns on
-    // `deriveLocalFileOnReceive`, so `transferUi.ts` leaves `localFile` out of the field list and
+    // `browserReceive`, so `transferUi.ts` leaves `localFile` out of the field list and
     // submits the name derived from the host file; and Browse is HIDDEN, not just disabled.
     const onReceive = await fieldsShown();
     if (onSend.direction === 'send' && onSend.localFile === 'shown' && onSend.browse === 'shown'
@@ -1662,6 +1680,26 @@ async function runTransferPhase(url) {
       no(check('localFileByDirection'), 'Local file / Browse do not follow the direction',
         `send: ${JSON.stringify(onSend)}, receive: ${JSON.stringify(onReceive)} `
         + '(want localFile and browse "shown" on the send; "absent" and "hidden" on the receive)');
+    }
+
+    // ===== existByDirection: the same two snapshots, for the Exist select ===================
+    //
+    // A SEND OFFERS REPLACE OR APPEND ONLY (spec 2026-11-13): `keep` never reached the host, and
+    // IND$FILE replaced the file. A browser's RECEIVE has no Exist at all: `browserReceive`
+    // hides it, because the browser's download handling decides about a name clash and the
+    // gateway ignores the keyword. Exact equality on the option list, in table order.
+    if (onSend.direction === 'send' && onSend.exist === 'shown'
+      && JSON.stringify(onSend.existOptions) === JSON.stringify(['replace', 'append'])
+      && onSend.existValue === 'replace'
+      && onReceive.direction === 'receive' && onReceive.exist === 'absent') {
+      ok(check('existByDirection'),
+        'on a send Exist offers exactly replace and append, with replace selected; on a receive '
+        + 'Exist is absent from the field list');
+    } else {
+      no(check('existByDirection'), 'Exist does not follow the direction',
+        `send: ${JSON.stringify(onSend)}, receive: ${JSON.stringify(onReceive)} (want exist `
+        + '"shown" with ["replace","append"] and replace selected on the send; "absent" on the '
+        + 'receive)');
     }
     const sentBeforeLive = await cdp.eval('JSON.stringify(window.__tn3270Probe.sent)');
     // READ BEFORE THE CLICK AND REPORTED ON FAILURE, so a status line this check never changed

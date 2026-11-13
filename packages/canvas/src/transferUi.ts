@@ -228,22 +228,33 @@ const HELP_DERIVED = 'Name the host file, then Start.';
 /** How one front end differs from another in what this form shows and submits. */
 export interface TransferUiOptions {
   /**
-   * On a receive, don't show `localFile`, and submit `defaultLocalName(hostFile, host)` as
-   * `LocalFile`. The web gateway turns this on: a browser has no path to receive into, and the
-   * download is named from the keywords submitted. Off by default, which is the GUI, whose receive
-   * writes a real path the operator chooses.
+   * A browser's receive, where the browser's download handling owns the local side. On a receive:
+   *
+   * - don't show `localFile`, and submit `defaultLocalName(hostFile, host)` as `LocalFile`. A
+   *   browser has no path to receive into, and the download is named from the keywords
+   *   submitted (web receive spec, 2026-11-12);
+   * - don't show `exist`. The browser decides about a name clash itself (Firefox prompts,
+   *   Chrome appends ` (1)`), and the gateway ignores `Exist` on a receive, so the control did
+   *   nothing (spec 2026-11-13). The model's value is still submitted, `keep` or whatever it
+   *   holds, and is ignored.
+   *
+   * The web gateway turns this on. Off by default, which is the GUI, whose receive writes a real
+   * path the operator chooses and whose `Exist=keep` really refuses to overwrite it.
+   *
+   * RENAMED 2026-11-13 from `deriveLocalFileOnReceive`, when it started hiding `exist` too.
    *
    * ## WHY HERE AND NOT IN `applicable`
    *
    * `applicable` is the one rule every front end shares, and the TUI and the GUI need `localFile`
-   * on a receive. This is a front end's presentation choice, so it is an option of the view.
+   * and `exist` on a receive. This is a front end's presentation choice, so it is an option of the
+   * view.
    *
    * ## THE DERIVED NAME NEVER ENTERS THE FORM STATE
    *
    * `start()` submits the keywords of a COPY. Written into `state`, it would replace whatever the
    * operator had typed for a send, and a switch back to send would show a name they never chose.
    */
-  readonly deriveLocalFileOnReceive?: boolean;
+  readonly browserReceive?: boolean;
 }
 
 /**
@@ -253,10 +264,13 @@ export interface TransferUiOptions {
 export function createTransferUi(deps: UiDeps, opts: TransferUiOptions = {}): TransferUi {
   let state: TransferFormState = newTransferForm();
   let isRunning = false;
-  const derive = opts.deriveLocalFileOnReceive === true;
+  const browser = opts.browserReceive === true;
 
-  /** Is `localFile` derived from the host file, rather than typed, for this form right now? */
-  const derivedLocal = (): boolean => derive && state.values.direction === 'receive';
+  /**
+   * Is this a browser's receive right now? Then `localFile` is derived from the host file rather
+   * than typed, and neither it nor `exist` is shown.
+   */
+  const derivedLocal = (): boolean => browser && state.values.direction === 'receive';
 
   /**
    * The state whose keywords are submitted: `state` itself, or on a derived receive a copy whose
@@ -281,7 +295,7 @@ export function createTransferUi(deps: UiDeps, opts: TransferUiOptions = {}): Tr
       if (!applicable(f.id, state.values)) continue;
       // Shown-or-not only: the value stays in `state`, and `submitted()` replaces it on the way
       // out. `applicable` is not changed for this, because the GUI and the TUI share it.
-      if (f.id === 'localFile' && derivedLocal()) continue;
+      if ((f.id === 'localFile' || f.id === 'exist') && derivedLocal()) continue;
       // The VM/Recfm asymmetry lives in the model's own cycle logic, so the options offered
       // here are derived by asking it rather than by re-filtering the table.
       const options = f.kind === 'cycle' ? offered(f.id) : [];
@@ -367,7 +381,7 @@ export function createTransferUi(deps: UiDeps, opts: TransferUiOptions = {}): Tr
       // main: a send must choose an existing file (Open) and a receive names a destination
       // (Save). The dialog deliberately does NOT set `Exist` -- see the spec.
       //
-      // A RECEIVE ALSO GETS A SUGGESTED NAME, whatever `deriveLocalFileOnReceive` says: the GUI's
+      // A RECEIVE ALSO GETS A SUGGESTED NAME, whatever `browserReceive` says: the GUI's
       // Save dialog offers it, so the operator needn't retype what the host file already says.
       // None when the host file is blank, so the dialog opens on its own default rather than on
       // `download.bin`.

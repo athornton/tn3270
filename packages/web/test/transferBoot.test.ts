@@ -5,7 +5,7 @@ import { bootTransfer } from '../src/transferBoot.js';
  * `bootTransfer` driven end to end through a FAKE DOCUMENT, for the two decisions only it makes.
  *
  * `endTransfer` (`transferBridge.test.ts`) owns every choice about the download, but two inputs
- * to it are made HERE, in the one file that had no unit test: the `deriveLocalFileOnReceive`
+ * to it are made HERE, in the one file that had no unit test: the `browserReceive`
  * option handed to `createTransferUi`, and the `saveName` handed to `endTransfer`. MEASURED
  * 2026-11-12: deleting the option, or passing `saveName: 'download.bin'`, left all 3644 tests
  * green. The real-browser harness would catch both, but it is run by hand.
