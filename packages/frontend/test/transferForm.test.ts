@@ -20,7 +20,7 @@ describe('TRANSFER_FIELDS', () => {
 });
 
 describe('newTransferForm', () => {
-  it('starts at SEND, tso, binary, keep, with Cr and Recfm UNSET', () => {
+  it('starts at SEND, tso, binary, replace, with Cr and Recfm UNSET', () => {
     // `send` RATHER THAN `receive`, changed 2026-10-22 and this test renamed with it: until VM
     // has a TCP/IP stack this client is mostly used to get software ONTO these systems, so upload
     // is the common case. `newTransferForm`'s docstring carries the full reasoning.
@@ -32,7 +32,9 @@ describe('newTransferForm', () => {
     expect(s.values.direction).toBe('send');
     expect(s.values.host).toBe('tso');
     expect(s.values.mode).toBe('binary');
-    expect(s.values.exist).toBe('keep');
+    // `replace`, NOT `keep`, since 2026-11-13: the form opens on a send, and a send never did
+    // anything with `keep` -- only `append` reaches the host, and IND$FILE replaced the file.
+    expect(s.values.exist).toBe('replace');
     // UNSET is a distinct intention from any value: it emits no keyword at all and
     // lets the host choose, which is the CLI behavior that works on both hosts.
     expect(s.values.cr).toBe('');
@@ -232,6 +234,95 @@ describe('clearing on transition', () => {
     s = cycleField(s, 'host', 1);              // vm: U is unexpressible
     expect(s.values.recfm).toBe('');
     expect(s.values.lrecl).toBe('');
+  });
+});
+
+/**
+ * `Exist` per direction (spec 2026-11-13). A send offers Replace or Append, because only `append`
+ * reaches the host (`transfer.ts`'s APPEND) and `keep` behaved as `replace`. A receive keeps all
+ * three, because the GUI's and TUI's `keep` really refuses to overwrite a local file.
+ */
+describe('Exist per direction', () => {
+  /** Every value `exist` visits when cycled forwards from `s`, starting with the current one. */
+  const visits = (s: TransferFormState): string[] => {
+    const seen: string[] = [];
+    let probe = s;
+    for (let i = 0; i < 6; i++) {
+      if (seen.includes(probe.values.exist)) break;
+      seen.push(probe.values.exist);
+      probe = cycleField(probe, 'exist', 1);
+    }
+    return seen;
+  };
+
+  it('a send cycles through exactly replace and append', () => {
+    const s = newTransferForm();
+    expect(s.values.direction).toBe('send');
+    expect(visits(s)).toEqual(['replace', 'append']);
+    // Backwards too, and it wraps.
+    expect(cycleField(s, 'exist', -1).values.exist).toBe('append');
+    expect(cycleField(cycleField(s, 'exist', -1), 'exist', -1).values.exist).toBe('replace');
+  });
+
+  it('a receive cycles through keep, replace and append', () => {
+    let s = cycleField(newTransferForm(), 'direction', 1);
+    expect(s.values.direction).toBe('receive');
+    // A receive's own default is `keep`; reach it the way an operator would.
+    while (s.values.exist !== 'keep') s = cycleField(s, 'exist', 1);
+    expect(visits(s)).toEqual(['keep', 'replace', 'append']);
+  });
+
+  it('send with replace, switched to receive, keeps replace', () => {
+    const s = cycleField(newTransferForm(), 'direction', 1);
+    expect(s.values.direction).toBe('receive');
+    expect(s.values.exist).toBe('replace');
+  });
+
+  it('receive with keep, switched to send, becomes replace', () => {
+    let s = cycleField(newTransferForm(), 'direction', 1);
+    while (s.values.exist !== 'keep') s = cycleField(s, 'exist', 1);
+    s = cycleField(s, 'direction', 1);
+    expect(s.values.direction).toBe('send');
+    expect(s.values.exist).toBe('replace');
+  });
+
+  it('receive with append, switched to send, keeps append', () => {
+    let s = cycleField(newTransferForm(), 'direction', 1);
+    while (s.values.exist !== 'append') s = cycleField(s, 'exist', 1);
+    s = cycleField(s, 'direction', 1);
+    expect(s.values.direction).toBe('send');
+    expect(s.values.exist).toBe('append');
+  });
+
+  it('no reachable send ever emits Exist=keep', () => {
+    // DRIVEN, NOT CONSTRUCTED: a breadth-first walk over every state reachable from a new form
+    // by cycling any cycle field either way, plus the text fields typed. A hand-built state could
+    // hold `keep` on a send, but no operator could reach it.
+    const key = (s: TransferFormState): string => JSON.stringify(s.values);
+    const start = setFieldText(setFieldText(newTransferForm(), 'localFile', '/tmp/a'), 'hostFile', 'A');
+    const seen = new Map<string, TransferFormState>([[key(start), start]]);
+    const queue = [start];
+    while (queue.length > 0) {
+      const s = queue.shift() as TransferFormState;
+      const next = [setFieldText(s, 'lrecl', '80'), setFieldText(s, 'blksize', '6160')];
+      for (const f of TRANSFER_FIELDS) {
+        if (f.kind !== 'cycle') continue;
+        next.push(cycleField(s, f.id, 1), cycleField(s, f.id, -1));
+      }
+      for (const n of next) {
+        if (seen.has(key(n))) continue;
+        seen.set(key(n), n);
+        queue.push(n);
+      }
+    }
+    const sends = [...seen.values()].filter((s) => s.values.direction === 'send');
+    // A walk that never reached a send, or reached only a handful, would prove nothing.
+    expect(sends.length).toBeGreaterThan(50);
+    expect([...seen.values()].some((s) => s.values.direction === 'receive' && s.values.exist === 'keep')).toBe(true);
+    for (const s of sends) {
+      expect(formKeywords(s)).not.toContain('Exist=keep');
+      expect(formKeywords(s).some((k) => k.startsWith('Exist='))).toBe(true);
+    }
   });
 });
 

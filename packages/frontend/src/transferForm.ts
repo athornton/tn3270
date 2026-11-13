@@ -41,7 +41,7 @@ export interface TransferField {
    *
    * `recfm`'s list here is the TSO one; `cycleField` drops `undefined` for VM. That
    * asymmetry lives in the cycle function rather than in two tables, so the VM rule has
-   * one home.
+   * one home. `exist`'s list is the receive one; a send drops `keep` the same way.
    */
   readonly values: readonly string[];
   /** Visible width for a text or numeric field. */
@@ -167,12 +167,19 @@ export interface TransferFormState {
  * to. The TUI's box height is computed from the applicable count, so this is a layout change
  * there, not merely a value change. 27 tests across four files asserted the old default; each had
  * its SETUP updated rather than its assertion weakened.
+ *
+ * ## `exist` OPENS ON `replace`, BECAUSE THE FORM OPENS ON A SEND (2026-11-13)
+ *
+ * A send offers only `replace` and `append` (see `valuesFor`). It used to open on `keep`, which
+ * reads as "don't overwrite" and did overwrite: only `append` reaches the host, and IND$FILE
+ * replaced the file. A receive's default is still `keep`; `clearInapplicable` gives a send's
+ * `keep` that default when the direction changes.
  */
 export function newTransferForm(): TransferFormState {
   return {
     values: {
       direction: 'send', host: 'tso', localFile: '', hostFile: '',
-      mode: 'binary', exist: 'keep', cr: '', recfm: '', lrecl: '', blksize: '',
+      mode: 'binary', exist: 'replace', cr: '', recfm: '', lrecl: '', blksize: '',
     },
     selected: 0,
   };
@@ -181,15 +188,24 @@ export function newTransferForm(): TransferFormState {
 /**
  * The values a cycle field offers, given the rest of the form.
  *
- * The ONE state-dependent case is `recfm` on VM: `transfer.ts` records that "CMS supports
- * fixed and variable", so `undefined` is not offered there. Kept here rather than as a
- * second table so the rule has one home.
+ * TWO state-dependent cases, kept here rather than as second tables so each rule has one home:
+ *
+ * - `recfm` on VM: `transfer.ts` records that "CMS supports fixed and variable", so
+ *   `undefined` is not offered there.
+ * - `exist` on a send: only `replace` and `append`. Only `append` reaches the host, as
+ *   IND$FILE's `APPEND` (`transfer.ts`'s `transferCommand`); `keep` and `replace` both send
+ *   nothing, and IND$FILE then REPLACES the host file. Offering `keep` there offered a
+ *   protection that didn't exist (spec 2026-11-13). The keyword parser still accepts
+ *   `Exist=keep` on a send, as x3270 does; only the form stops offering it.
  */
 function valuesFor(id: TransferFieldId, values: TransferValues): readonly string[] {
   const field = FIELD_BY_ID.get(id);
   if (field === undefined) return [];
   if (id === 'recfm' && values.host === 'vm') {
     return field.values.filter((v) => v !== 'undefined');
+  }
+  if (id === 'exist' && values.direction === 'send') {
+    return field.values.filter((v) => v !== 'keep');
   }
   return field.values;
 }
@@ -290,6 +306,13 @@ function clearInapplicable(state: TransferFormState): TransferFormState {
     // Inside the loop because clearing it can cascade to Lrecl on the next pass.
     if (values.host === 'vm' && values.recfm === 'undefined') {
       values.recfm = '';
+      changed = true;
+    }
+    // The same kind of repair for `Exist=keep` on a flip to send, which `valuesFor` doesn't
+    // offer there. It becomes `replace`, a send's default. A value both directions offer
+    // (`replace`, `append`) is kept, and a flip to receive needs nothing: it offers all three.
+    if (values.direction === 'send' && values.exist === 'keep') {
+      values.exist = 'replace';
       changed = true;
     }
   }
