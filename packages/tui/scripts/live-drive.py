@@ -289,11 +289,10 @@ def flow_vm_transfer(pw, user):
 
     ## WHY `ERASE` FIRST
 
-    The host file is erased before the send so a leftover from a previous run cannot
-    make the upload look successful, and the local download target is removed by the
-    caller for the same reason. (Since 2026-11-13 the form opens on `Exist=replace`,
-    which a switch to receive keeps, so a leftover local file would be overwritten
-    rather than refused; `keep` is a receive-only choice that has to be picked.)
+    `Exist=keep` is the default and the engine refuses a receive onto a file that
+    exists -- correctly. The host file is erased before the send so a leftover from a
+    previous run cannot make the upload look successful, and the local download target
+    is removed by the caller for the same reason.
     """
     host_file = os.environ.get("TN3270_HOSTFILE", "FORM TEST A")
     src = os.environ.get("TN3270_SRC", "/tmp/form-src.bin")
@@ -342,8 +341,8 @@ def flow_vm_transfer(pw, user):
         # ---- THE RECEIVE, through the form ----
         ("at a prompt for the receive", None, CTRL_T),
         # Direction stays `receive`, so Tab once to Host and cycle it to vm, then the
-        # two names. Exist is left as the form has it (`replace` since 2026-11-13); the
-        # caller deletes the local file first, so a leftover cannot pass for the download.
+        # two names. Exist stays `keep`; the caller deletes the local file first, which
+        # is what makes the engine's own refusal a real check rather than a nuisance.
         ("form open for the receive", ["File Transfer", "Direction"], TAB + RIGHT),
         ("host is vm again", None, TAB + back.encode() + TAB + host_file.encode()),
         ("both names typed again", None, CR),
@@ -390,7 +389,8 @@ def flow_tso_transfer(pw, user):
 
     ## DELETE FIRST, AND WHY IT IS NOT OPTIONAL
 
-    The HOST dataset is deleted before the send so a leftover from an
+    `Exist=keep` is the default and the engine refuses a receive onto an existing local
+    file -- correctly. The HOST dataset is deleted before the send so a leftover from an
     earlier run cannot make a failed upload look successful. TSO's DELETE wants the quoted
     form to be unambiguous about the userid.
     """

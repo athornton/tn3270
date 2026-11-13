@@ -498,9 +498,11 @@ is cancelled too, so the window does not sit refusing every close on a dead sess
 or `append`: only `append` reaches the host, as `IND$FILE`'s `APPEND`, and anything else replaces
 the host file, so the form no longer offers a `keep` that kept nothing. On a receive it is `keep`,
 `replace` or `append`, and `keep` really does refuse to overwrite an existing local file, before
-the host is told anything. A switch to send turns a `keep` into `replace`; `replace` and `append`
-survive a switch either way. A scripted `Transfer(...)` still accepts `Exist=keep` on a send, as
-x3270 does, and it still means `replace` there. The TUI's form follows the same rules.
+the host is told anything. **Changing the direction resets `Exist` to that direction's default**,
+`replace` for a send and `keep` for a receive, so a fresh form switched to receive still refuses
+to overwrite a local file; nothing is carried across, not even `append`. A scripted
+`Transfer(...)` still accepts `Exist=keep` on a send, as x3270 does, and it still means `replace`
+there. The TUI's form follows the same rules.
 
 `Exist` is yours to set and the Save panel deliberately does not set it: `append` has no equivalent
 in a file chooser, so the choice stays explicit. Canceling either panel leaves whatever you had

@@ -272,25 +272,59 @@ describe('Exist per direction', () => {
     expect(visits(s)).toEqual(['keep', 'replace', 'append']);
   });
 
-  it('send with replace, switched to receive, keeps replace', () => {
-    const s = cycleField(newTransferForm(), 'direction', 1);
+  // EVERY DIRECTION CHANGE RESETS `exist` TO THE NEW DIRECTION'S DEFAULT (amended 2026-11-13).
+  // Carrying `replace` across made a fresh form's receive overwrite a local file that `keep`
+  // would have refused, so nothing is carried, not even `append`.
+  const toReceive = (s: TransferFormState): TransferFormState => {
+    expect(s.values.direction).toBe('send');
+    return cycleField(s, 'direction', 1);
+  };
+  const receiveWith = (exist: string): TransferFormState => {
+    let s = cycleField(newTransferForm(), 'direction', 1);
+    while (s.values.exist !== exist) s = cycleField(s, 'exist', 1);
+    return s;
+  };
+
+  it('send with replace, switched to receive, becomes keep', () => {
+    const s = toReceive(newTransferForm());
     expect(s.values.direction).toBe('receive');
-    expect(s.values.exist).toBe('replace');
+    expect(s.values.exist).toBe('keep');
+  });
+
+  it('send with append, switched to receive, becomes keep', () => {
+    const send = cycleField(newTransferForm(), 'exist', 1);
+    expect(send.values.exist).toBe('append');
+    const s = toReceive(send);
+    expect(s.values.direction).toBe('receive');
+    expect(s.values.exist).toBe('keep');
   });
 
   it('receive with keep, switched to send, becomes replace', () => {
-    let s = cycleField(newTransferForm(), 'direction', 1);
-    while (s.values.exist !== 'keep') s = cycleField(s, 'exist', 1);
-    s = cycleField(s, 'direction', 1);
+    const s = cycleField(receiveWith('keep'), 'direction', 1);
     expect(s.values.direction).toBe('send');
     expect(s.values.exist).toBe('replace');
   });
 
-  it('receive with append, switched to send, keeps append', () => {
-    let s = cycleField(newTransferForm(), 'direction', 1);
-    while (s.values.exist !== 'append') s = cycleField(s, 'exist', 1);
-    s = cycleField(s, 'direction', 1);
+  it('receive with append, switched to send, becomes replace', () => {
+    const s = cycleField(receiveWith('append'), 'direction', 1);
     expect(s.values.direction).toBe('send');
+    expect(s.values.exist).toBe('replace');
+  });
+
+  it('receive with replace, switched to send, becomes replace', () => {
+    const s = cycleField(receiveWith('replace'), 'direction', 1);
+    expect(s.values.direction).toBe('send');
+    expect(s.values.exist).toBe('replace');
+  });
+
+  it('a move that leaves the direction alone leaves exist alone', () => {
+    // The reset is for a direction CHANGE, not for any cycle: an operator's `append` must survive
+    // a change of host or mode.
+    let s = cycleField(newTransferForm(), 'exist', 1);          // append, on a send
+    s = cycleField(s, 'host', 1);
+    s = cycleField(s, 'mode', 1);
+    expect(s.values.exist).toBe('append');
+    s = cycleField(receiveWith('append'), 'host', 1);
     expect(s.values.exist).toBe('append');
   });
 

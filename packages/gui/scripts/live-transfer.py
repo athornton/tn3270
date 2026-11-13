@@ -431,9 +431,8 @@ def main():
     Path(log).write_text("")
     payload = big_payload() if big else PAYLOAD
     src.write_bytes(payload)
-    # The receive target must NOT exist, so a leftover cannot pass for the download. (Until
-    # 2026-11-13 the form's `Exist=keep` made the engine refuse it; the form now opens on
-    # `replace`, which a switch to receive keeps, so it would be overwritten instead.)
+    # The receive target must NOT exist: `Exist=keep` is the default and the engine correctly
+    # refuses a receive onto an existing file. Removing it here is what makes the run repeatable.
     back.unlink(missing_ok=True)
 
     print(f"-- {which}: {cfg['target']} as {user}, engine expected: {cfg['engine']}")

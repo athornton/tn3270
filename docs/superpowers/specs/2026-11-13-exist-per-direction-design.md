@@ -21,8 +21,14 @@ Date: 2026-11-13. Status: approved in conversation.
 
    It lives in `transferForm.ts`'s `valuesFor`, beside the existing VM `Recfm` rule, so all three
    forms get it.
-2. **On a direction change,** a value the new direction doesn't offer becomes that direction's
-   default. A value both directions offer is kept.
+2. **On a direction change, `exist` resets to the new direction's default:** send → `replace`,
+   receive → `keep`. Nothing is carried across, not even `append`.
+
+   *Amended 2026-11-13, during implementation.* The first rule ("a value the new direction
+   doesn't offer becomes that direction's default; a value both directions offer is kept") made
+   a fresh receive overwrite local files: the form opens on a send, which now defaults to
+   `replace`, so a switch to receive kept `replace`, and a GUI or TUI receive that used to refuse
+   to overwrite an existing local file under `keep` silently overwrote it.
 3. **The browser hides `Exist` on a receive,** under the same browser-only option that hides
    Local file (`deriveLocalFileOnReceive` in `canvas/src/transferUi.ts`; the plan decides whether
    to rename it). The submitted value is whatever the model holds (`keep` by default); the gateway
@@ -38,7 +44,8 @@ Date: 2026-11-13. Status: approved in conversation.
 - **The form model:**
   - the offered values per direction;
   - a new send defaults to `replace`;
-  - switching send to receive and back normalises `keep` and leaves `append` alone;
+  - every direction change resets `exist` to the new direction's default (`replace`/`keep`),
+    `append` included (amended 2026-11-13, see Decision 2);
   - `formKeywords` for a send never carries `Exist=keep`.
 - **The browser view:** no `exist` on a receive; present on a send.
 - **The GUI and TUI views:** `exist` present on a receive, with all three values.
