@@ -1,4 +1,4 @@
-# Handoff — state as of 2026-11-17 (x3270 PARITY CHECKLIST BUILT on branch `parity-checklist` (`8693176`..`6c61196`, not merged): 413 x3270 names, 158 checklist rows, `parity.mjs gate` FAIL 156 blocking; 0.1.4 RELEASED: npm by the tag workflow with provenance, and the first GitHub release with the seven installers, SHA256SUMS and scriv notes; macOS CODE SIGNING MERGED (`db5a93d`; released installers up to 0.1.4 are UNSIGNED), Windows CI signing DROPPED for the Microsoft Store; STORE PROBE MERGED (`559ea78`); README AUDIT + FIXES MERGED (`ae8724f`); WEB RECEIVE DOWNLOADS ON COMPLETION (`4a940fe`, live-verified); `Exist` PER DIRECTION (`f533bff`); next: the user triages the parity checklist's proposed-* and unwitnessed `ours` rows, then the store roadmap)
+# Handoff — state as of 2026-11-17 (x3270 PARITY CHECKLIST BUILT on branch `parity-checklist` (from `8693176`, not merged): 413 x3270 names, 158 checklist rows, `parity.mjs gate` FAIL 157 blocking; 0.1.4 RELEASED: npm by the tag workflow with provenance, and the first GitHub release with the seven installers, SHA256SUMS and scriv notes; macOS CODE SIGNING MERGED (`db5a93d`; released installers up to 0.1.4 are UNSIGNED), Windows CI signing DROPPED for the Microsoft Store; STORE PROBE MERGED (`559ea78`); README AUDIT + FIXES MERGED (`ae8724f`); WEB RECEIVE DOWNLOADS ON COMPLETION (`4a940fe`, live-verified); `Exist` PER DIRECTION (`f533bff`); next: the user triages the parity checklist's proposed-* and unwitnessed `ours` rows, then the store roadmap)
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
@@ -8,30 +8,34 @@ latest START HERE entry names. Each finished feature has its own pair under `doc
 ## START HERE — LATEST FIRST; NEXT: TRIAGE THE PARITY CHECKLIST'S proposed-* AND unwitnessed `ours` ROWS, THEN THE STORE ROADMAP (REPLACES README *Remaining* 15-22)
 
 **2026-11-17, LATEST: THE x3270 PARITY CHECKLIST IS BUILT, NOT YET MERGED** (piece 2 of the
-three-piece store plan below; branch `parity-checklist`, commits `8693176`..`6c61196`, 38 commits;
+three-piece store plan below; branch `parity-checklist`, commits from `8693176` (`git log --oneline main..parity-checklist`);
 spec `docs/superpowers/specs/2026-11-17-x3270-parity-checklist-design.md`, plan
-`docs/superpowers/plans/2026-11-17-x3270-parity-checklist.md`, Tasks 1-14 done). `scripts/parity-extract.mjs`
+`docs/superpowers/plans/2026-11-17-x3270-parity-checklist.md`, Tasks 0-14 done). `scripts/parity-extract.mjs`
 reads the x3270 source tree as text only (never built: `make`/`configure` are never run on it, and
 it is never a cwd) and writes a name inventory to `docs/parity/x3270-names.json`, as `--dir <tree>`,
 `--tag <tag>` (downloads that GitHub tag's tarball) or `--upstream <committed.json>` (checks the
-committed tag against x3270's newest tagged GA); exit 0 current/success, 1 newer GA found upstream,
-2 usage error, 3 other error. Against x3270 **4.5ga6** that is **413 names**: 100 actions, 65 menu
+committed tag against x3270's newest tagged GA and, if it is current, that re-extracting it gives
+exactly the committed file); exit 0 current/success, 1 newer GA found upstream (or its linkage
+changed, or the committed file doesn't match its own tag), 2 usage error, 3 other error. Against x3270 **4.5ga6** that is **413 names**: 100 actions, 65 menu
 items, 69 options, 134 resources, 24 toggles, 21 xactions. `scripts/parity.mjs` (`check` / `render`
 / `uncovered` / `gate`) checks the 158 hand-written rows of `docs/parity/checklist.yaml` against
 that inventory and renders `docs/parity.md`: **8 ours, 37 partial, 84 missing, 3 proposed-deferred,
 26 proposed-skipped, 0 deferred, 0 skipped.** `node scripts/parity.mjs gate` is currently **FAIL,
-156 blocking** — from here that count is the store gate (*Store probe*/*the parity gate*,
+157 blocking** — from here that count is the store gate (*Store probe*/*the parity gate*,
 `docs/releasing.md`). Tests: `packages/core/test/parityExtract.test.ts` and
-`packages/core/test/parity.test.ts`, each with a completeness check against the committed files.
+`packages/core/test/parity.test.ts`. The latter checks the committed checklist (no problems, every
+name covered, `docs/parity.md` exactly as rendered); the former checks that the committed
+`x3270-names.json` is in canonical form (what `renderInventory` writes) with sorted, unique ids --
+not that it is complete against a tree, which is `--upstream`'s weekly content check.
 `.github/workflows/parity-upstream.yml` runs weekly but only from the default branch, so it does
 nothing until this is merged. README now points at `docs/parity.md` from *What is not
 implemented*'s opening paragraph; `docs/releasing.md`'s *Store probe* section gained a paragraph on
 the gate and how to regenerate on a new GA.
 
 **Next, in order:** (1) the user triages the 29 `proposed-*` rows (26 `proposed-skipped`, 3
-`proposed-deferred`) area by area; (2) the user accepts or rejects the 6 `ours` rows whose only
-evidence is `live: unwitnessed` — `reconnect`, `devname`, `bind-limit`, `sysreq`, `dup`,
-`field-mark`; (3) whatever is still `missing`/`partial` after that is the store roadmap, which
+`proposed-deferred`) area by area; (2) the user accepts or rejects the 7 `ours` rows whose only
+evidence is `live: unwitnessed` — `reconnect`, `devname`, `bind-limit`, `tls-verify`, `sysreq`,
+`dup`, `field-mark`; (3) whatever is still `missing`/`partial` after that is the store roadmap, which
 replaces README *Remaining* 15-22 (separate work, no spec yet).
 
 ### FOUND, NOT FIXED
@@ -115,8 +119,11 @@ check, and its PR names the entitlement or capability.** The identity values (`T
   feature parity with x3270; the 026 punch is optional for parity.
 - **The three-piece store plan:**
   1. **the probe: DONE** (merged `559ea78`);
-  2. **the parity checklist: NEXT.** Each x3270 feature marked ours, missing or deliberately
-     skipped; it is the store gate. Its own spec, not yet written;
+  2. **the parity checklist: BUILT** (branch `parity-checklist`; spec
+     `docs/superpowers/specs/2026-11-17-x3270-parity-checklist-design.md`). Each x3270 feature is a
+     row in `docs/parity/checklist.yaml`, rendered to `docs/parity.md`, and
+     `node scripts/parity.mjs gate` is the store gate; see START HERE for its state and the triage
+     that comes next;
   3. **submission: at parity.** Name reservation, the real identities, the `mas` target's
      certificates and provisioning profile, listings. The tag run builds the store packages and
      the user uploads them by hand; the stores get a chosen subset of the GitHub releases, not

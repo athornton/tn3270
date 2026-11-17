@@ -13,10 +13,10 @@ missing features. Each gap gets its own spec → plan → build afterwards.
 ## Decisions (the user, 2026-11-16/17)
 
 1. **Comparator: x3270, the X11 application, against our GUI.** The stores ship the GUI, so
-   only GUI rows gate. Each row carries an informational browser note, and TUI/CLI/pr3287
+   only GUI rows gate. Each row may carry an informational browser note, and TUI/CLI/pr3287
    equivalents are recorded where obvious; they never gate.
 2. **A row is one user-visible feature, plus a coverage index.** Rows are judged per feature
-   (~50-80 of them). Every name in x3270's tables must be listed under exactly one row, and a test
+   (the first population produced 158 rows). Every name in x3270's tables must be listed under exactly one row, and a test
    enforces that against an extracted name list.
 3. **A `deferred` status exists.** It means planned but not in the first store release, with a
    reason and the user's sign-off. The gate passes deferred rows and blocks missing ones.
@@ -49,7 +49,7 @@ x3270 source tree and writes `docs/parity/x3270-names.json`.
     under `resource`. So a row lists `OptProxy`, not `ResProxy` (as `option:-proxy`; see the
     amendment), and "exactly once" stays well defined;
   - `resource`: `#define Res*` in `include/resources.h` that a linked source uses and no option
-    sets (≤248);
+    or toggle sets (≤248; a resource set by a toggle is named by its `toggle:` id instead);
   - `toggle`: `toggle_names[]` in `Common/toggles.c` (24);
   - `menu`: widget names passed to `add_menu_itemv`, `toggle_init` and
     `XtVaCreateManagedWidget` in `x3270/menubar.c` and the other linked x3270 popups (~45; spacers
@@ -62,10 +62,14 @@ x3270 source tree and writes `docs/parity/x3270-names.json`.
 ### Keeping up with upstream
 
 `.github/workflows/parity-upstream.yml`, a weekly schedule plus `workflow_dispatch`:
-lists `pmattes/x3270` tags, picks the newest matching `ga`, and compares it with the tag
-recorded in `x3270-names.json`. If newer, it runs `parity-extract.mjs --tag <new>` and fails
-with the difference: names added, names removed, names whose `file:line` moved. A failure here
-is a notification and does not break `main`. Updating means committing the regenerated file, and
+runs `parity-extract.mjs --upstream docs/parity/x3270-names.json`, which lists `pmattes/x3270`
+tags, picks the newest matching `ga`, and compares it with the tag recorded in
+`x3270-names.json`. If newer, it extracts the new tag (as `--tag <new>` would, without writing
+the file) and fails with the difference: names added, names removed, names whose `file:line`
+moved; a newer tag whose linkage no longer matches `LIBS` (Amendment 7) fails naming that
+instead. If the recorded tag is current, it re-extracts that tag and fails, with the
+difference, unless the result is byte-for-byte the committed file: a content check, not just a
+tag check. A failure here is a notification and does not break `main`. Updating means committing the regenerated file, and
 the coverage test then fails on every new name until a row covers it. `workflow.test.ts` gains
 assertions for the new workflow (schedule present, GA-only tag selection, no write
 permissions).
@@ -137,9 +141,12 @@ a flag or a persistent preference is enough.
 **Not mechanically provable:** that a cited test exercises the feature *through the GUI*. That
 is for review, and the `gui` field states the claim so a reviewer can check it.
 
-`scripts/parity.mjs` (with `.d.mts`) has two modes:
-- `render`: writes `docs/parity.md`, a header with generated counts per status, then one table
-  per area, with the note (the reason or gap) as the third column, after id and status;
+`scripts/parity.mjs` (with `.d.mts`) has four modes:
+- `render`: writes `docs/parity.md`, a header with generated counts per status and how many rows
+  pass the gate, then one table per area, with the note (the reason or gap, or `unwitnessed, not
+  accepted` for a blocked `ours` row) as the third column, after id and status;
+- `uncovered`: lists the x3270 names no row covers, with their sites;
+- `check`: reports problems with the rows (shape and citations), but not uncovered names;
 - `gate`: exits 0 only when no row is `missing`, `partial`, `proposed-*`, or `unwitnessed` without
   acceptance; otherwise it prints one line per blocking row, id and reason first, and exits 1.
 
@@ -199,7 +206,7 @@ workflow; re-pinning the README's existing x3270 citations.
    `x3270.man` in 4.5ga6 is a 24-line stub pointing there. The wiki tracks 4.6, so names newer than
    the recorded GA are expected differences. (Found by the other thread's prototype, which
    measured 129 sources and 470 names; the counts are not to be hard-coded.)
-4. **Linkage is read from `x3270/x3270_files.mk` (`X3270_OBJECTS`) and
+4. *(Superseded by 7.)* **Linkage is read from `x3270/x3270_files.mk` (`X3270_OBJECTS`) and
    `Common/lib3270_files.mk`, `lib3270i_files.mk` and `lib32xx_files.mk`**, which x3270's
    link line names (`x3270/Makefile.obj.in`: `$(LD3270) $(LD3270I) $(LD32XX) $(LD3270STUBS)`).
    `lib3270stubs` is excluded, as is the X widget library (`Cme*`, `CmplxMenu`, `Husk`). An object
