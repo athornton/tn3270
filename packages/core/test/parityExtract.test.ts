@@ -469,6 +469,16 @@ describe('main --upstream', () => {
     });
   });
 
+  it('exits 3 with a clear error, not a crash, when the committed JSON has no string tag', async () => {
+    await withCommitted({ names: [] }, async (path) => {
+      const out = io();
+      const code = await main(['--upstream', path], out, { tags: async () => ['4.5ga6'] });
+      expect(code).toBe(3);
+      expect(out.err).toHaveBeenCalledWith(expect.stringContaining(`${path}: no tag recorded`));
+      expect(out.log).not.toHaveBeenCalled();
+    });
+  });
+
   it("exits 3 with an error when the recorded tag is newer than upstream's newest GA", async () => {
     await withCommitted({ tag: '4.5ga6', names: [] }, async (path) => {
       const out = io();

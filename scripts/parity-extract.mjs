@@ -615,6 +615,7 @@ export async function main(argv, io = { log: console.log, err: console.error }, 
   try {
     if (mode === '--upstream' && arg && rest.length === 0) {
       const committed = JSON.parse(readFileSync(arg, 'utf8'));
+      if (typeof committed.tag !== 'string') throw new Error(`${arg}: no tag recorded`);
       const ga = newestGa(await getTags());
       if (!ga) throw new Error('no GA tag upstream');
       const cmp = compareGa(ga, committed.tag);
