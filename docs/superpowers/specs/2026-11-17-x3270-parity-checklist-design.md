@@ -2,192 +2,175 @@
 
 Date: 2026-11-17. Status: approved in conversation, section by section.
 
-This replaces an earlier version of this file (`729bdaf`), written in a divergent resumed copy of
-the same session. The user chose this design over it (2026-11-17).
-
 ## Problem
 
 Nothing goes into the Mac App Store or the Microsoft Store before feature parity with x3270
 (the user, 2026-11-11; HANDOFF, *the three-piece store plan*, piece 2). "Parity" has no
 definition yet, so there is no gate to pass. This spec defines it: a checklist, the rules for
-its rows, a test that keeps it honest, and a gate verdict. It does **not** build any missing
-feature. Each gap gets its own spec → plan → build afterwards.
+its rows, the checks that keep it honest, and a gate command. It does **not** build any of the
+missing features. Each gap gets its own spec → plan → build afterwards.
 
 ## Decisions (the user, 2026-11-16/17)
 
-1. **Comparator: x3270, the X11 application, as of suite3270 4.5** (`~/src/suite3270-4.5`, the
-   tree every other x3270 citation in this project uses). **Only the GUI column gates.** The
-   browser, TUI and CLI columns are recorded for information; they never gate.
-2. **The user can hold the gate** for any row, gating or not, with a `wanted` override (below).
-3. **A row is one user-facing feature.** Each row lists the x3270 names it covers, and a test
-   checks that every name in an extracted inventory lands in exactly one row or in the
-   not-applicable list.
-4. **`ours` needs a citation**: a test that drives the feature, or a recorded live witness. Code
-   that exists with nothing proving it is `unverified`, which blocks like `missing`.
-5. **Approach: a hand-edited Markdown checklist, a committed inventory, and a vitest test**
-   (approach 1 of 3; YAML-generated Markdown and an unenforced script were rejected).
+1. **Comparator: x3270, the X11 application, against our GUI.** The stores ship the GUI, so
+   only GUI rows gate. Each row carries an informational browser note, and TUI/CLI/pr3287
+   equivalents are recorded where obvious; they never gate.
+2. **A row is one user-visible feature, plus a coverage index.** Rows are judged per feature
+   (~50-80 of them). Every name in x3270's tables must be listed under exactly one row, and a test
+   enforces that against an extracted name list.
+3. **A `deferred` status exists.** It means planned but not in the first store release, with a
+   reason and the user's sign-off. The gate passes deferred rows and blocks missing ones.
+4. **`ours` needs evidence and equivalent reach.** It needs a code citation, a test, and a live
+   witness for wire behaviour (or an explicit acceptance of `unwitnessed`), and x3270's way of
+   reaching the feature must have an equivalent in our GUI. A menu-reachable x3270 feature that
+   we offer only by a flag is `partial`, which blocks.
+5. **Data file + generated document + coverage test** (approach 1 of 3; a parsed markdown table
+   and TypeScript rows were rejected).
+6. **The comparator is the newest released (GA) x3270, kept up automatically.** Today that is
+   **4.5ga6**: GitHub `pmattes/x3270` tags include `4.6alpha1` and `4.5ga6`, and alphas and
+   betas never count. `~/src/suite3270-4.5` is exactly 4.5ga6 (`Common/version.txt`).
 
-## 1. Files
+## 1. The name inventory
 
-- `scripts/x3270-inventory.mjs` (with `x3270-inventory.d.mts`, as for the other scripts) takes
-  the x3270 tree's path as an argument and writes `docs/parity/x3270-inventory.txt`. It reads the
-  tree as text only and never builds or runs it. It is run by hand, only when the x3270 version is
-  moved; the output is committed, and CI never needs the tree.
-- `docs/parity/x3270-checklist.md`: the checklist itself, edited by hand.
-- `scripts/parity.mjs` (with `parity.d.mts`): the parser, and a `--gate` mode that prints the
-  verdict.
-- `packages/core/test/parity.test.ts`: the enforcement, beside `releaseNotes.test.ts`, which
-  already tests a script in `scripts/`. It runs in every CI run.
+`scripts/parity-extract.mjs` (with `parity-extract.d.mts`, as for the other scripts) scans an
+x3270 source tree and writes `docs/parity/x3270-names.json`.
 
-### The inventory
+- **Input:** `--dir <suite3270-tree>` or `--tag <x3270-tag>`. `--tag` downloads that tag's source
+  archive from GitHub into a new empty temporary directory. The tree is only read as text and
+  never built or executed, and the extractor runs with no cwd inside it.
+- **Scope: only what the x3270 binary links.** The object list comes from
+  `x3270/Makefile.obj.in`, and only the matching `.c` files in `Common/` and `x3270/` are scanned.
+  `c3270`-, `s3270`- and `b3270`-only code and the `*_stubs*.c` files are therefore out. The
+  extractor re-reads this list for every tag, because a new release may change it.
+- **Five kinds of name, each with `file:line`:**
+  - `action`: `An*` entries in `action_table_t` arrays (~98 in 4.5ga6);
+  - `option`: entries of the `opts[]` table, each paired with the `Res*` it sets (~88). The pair
+    is **one** entry, named by the option, and a resource that has an option is not listed again
+    under `resource`. So a row lists `OptProxy`, not `ResProxy`, and "exactly once" stays
+    well defined;
+  - `resource`: `#define Res*` in `include/resources.h` that a linked source uses and no option
+    sets (≤248);
+  - `toggle`: `toggle_names[]` in `Common/toggles.c` (24);
+  - `menu`: widget names passed to `add_menu_itemv`, `toggle_init` and
+    `XtVaCreateManagedWidget` in `x3270/menubar.c` and the other linked x3270 popups (~45; spacers
+    such as `"space"` excluded).
+- **Output:** sorted and stable (identical input gives identical bytes), with the tag recorded at
+  the top. It is committed, and CI never runs the extractor against a local tree.
+- **Counts above are estimates** from a first grep (2026-11-16). The extractor's output is the
+  measurement, and the plan must not hard-code these numbers.
 
-One name per line, `kind:name`, sorted, so identical input gives identical bytes. The first line
-records the source version (from the tree's `Common/version.txt`). Kinds:
+### Keeping up with upstream
 
-- `action:` — every `An*` entry in an `action_table_t` array in a source file the x3270 binary
-  links (`Common/`, `x3270/`). A first grep found 108.
-- `resource:` — every `Res*` resource those sources use. A first grep found 190.
-- `option:` — every command-line option in x3270's option table.
-- `menu:` — every menu item and toggle in `x3270/menubar.c`, as `menu:<menu>/<item>`.
+`.github/workflows/parity-upstream.yml`, a weekly schedule plus `workflow_dispatch`:
+lists `pmattes/x3270` tags, picks the newest matching `ga`, and compares it with the tag
+recorded in `x3270-names.json`. If newer, it runs `parity-extract.mjs --tag <new>` and fails
+with the difference: names added, names removed, names whose `file:line` moved. A failure here
+is a notification and does not break `main`. Updating means committing the regenerated file, and
+the coverage test then fails on every new name until a row covers it. `workflow.test.ts` gains
+assertions for the new workflow (schedule present, GA-only tag selection, no write
+permissions).
 
-The counts are estimates from a first grep (2026-11-16). The extractor's output is the
-measurement, and the plan must not hard-code them. **`x3270.man` is the cross-check:** after a
-run, every action, option and resource the man page documents must be in the inventory. A name
-it misses means the extractor is wrong. Fix the extractor; never hand-add the name to the file.
+The README's existing x3270 citations (`kybd.c:978` and the like) stay pinned to 4.5. They are
+measurements, not the gate.
 
-## 2. The checklist
+## 2. Rows
 
-### One row
+`docs/parity/checklist.yaml`, parsed with the `yaml` package (new root devDependency; zero
+runtime dependencies of its own).
 
-| Feature | x3270 names | GUI | Browser | TUI | CLI | Evidence | Gate | Override |
-|---|---|---|---|---|---|---|---|---|
-| Crosshair cursor | `action:ToggleCrosshair` … | missing | missing | – | skipped | | yes | |
+```yaml
+- id: proxy                       # unique, kebab-case
+  title: Connect through a proxy (HTTP, SOCKS4/4a, SOCKS5/5d, telnet, passthru)
+  covers: [OptProxy, proxyOption]   # names from x3270-names.json
+  x3270: "Options menu → Proxy…; -proxy"      # how x3270 reaches it
+  gui: "flag only: -proxy"                    # how ours does
+  status: partial
+  gap: "no dialog or preference"              # partial only
+  evidence:
+    code: [packages/core/src/proxy.ts:40]
+    tests: [packages/core/test/proxy.test.ts]
+    live: unwitnessed            # a docs/live-testing.md heading | unwitnessed | n/a
+  browser: "n/a: the gateway connects, not the browser"
+  others: {tui: "-proxy", cli: "-proxy"}      # optional, informational
+```
 
-(Illustrative, not a finding.)
+(The example's paths and status are illustrative, not a finding.)
 
-- **x3270 names**: the inventory names this row covers, each in backticks.
-- **Front-end cells**: one status each (below), or `–` where the feature cannot apply to that
-  front end.
-- **Evidence**: repo-relative paths, separated by `<br>`: a test file, or
-  `docs/live-testing.md#<anchor>`. Required for `ours` and `unverified`.
-- **Gate**: `yes` or `no`. `yes` by default for anything a GUI user would reach for; `no` for
-  what only matters to someone scripting x3270, which the CLI column already records.
-- **Override**: empty, `waived <XX> YYYY-MM-DD` or `wanted <XX> YYYY-MM-DD`, where `<XX>` is the
-  user's initials (2–3 capitals). Only the user writes an override.
-- **Skipped reasons** go in a footnote under the area's table, keyed by feature name.
+### Statuses and what each requires
 
-### Statuses
-
-| status | meaning | requires |
+| status | requires | gate |
 |---|---|---|
-| `ours` | we have it, and it is proven | evidence |
-| `unverified` | code exists, nothing proves it | evidence (the code path) |
-| `missing` | we do not have it | — |
-| `skipped` | deliberately not done | footnote reason |
+| `ours` | `evidence.code`, `evidence.tests` (files exist), `gui` equivalent to `x3270` (below), `evidence.live` a heading or `n/a` | passes |
+| `ours` + `live: unwitnessed` | as above, plus `accept-unwitnessed: <reason>` | passes only with that field |
+| `partial` | `gap` | blocks |
+| `missing` | none | blocks |
+| `proposed-deferred` / `proposed-skipped` | `reason` | blocks |
+| `deferred` | `reason`, `decided: "<YYYY-MM-DD>, user"` | passes |
+| `skipped` | `category` (`x11-only` / `obsolete` / `declined` / `n/a`), `reason`, `decided` | passes |
 
-**Every `ours` claim is checked by opening the cited test** and confirming it drives *this*
-feature, not something nearby. The parser can only confirm that a path exists. If relevance
-cannot be confirmed, the row is `unverified`.
+**Equivalent reach.** If x3270 offers the feature from a menu item or dialog, the GUI needs a
+menu item, dialog or preference. If x3270 offers it only by a command-line option or resource,
+a flag or a persistent preference is enough.
 
-### Overrides
+**Sign-off.** Only the user sets `decided`. An agent or a session proposes; it writes
+`proposed-deferred` / `proposed-skipped` with a draft reason, never `decided`.
 
-- **waived**: a gating row the user does not need for this release.
-- **wanted**: a non-gating row, or any row, that the user wants before the release. It holds
-  the gate until the row's GUI cell is `ours`.
+## 3. Checks and the gate
 
-### Areas, one table each, in this order
+`packages/core/test/parity.test.ts`, beside `releaseNotes.test.ts`, which already tests a script in
+`scripts/`. It runs in every CI run.
 
-1. connection and TLS
-2. telnet and TN3270E negotiation
-3. screen models and oversize
-4. display: fonts, colours, cursor, crosshair, status line
-5. keyboard and keymaps
-6. keypad
-7. mouse: selection, cursor placement, light pen
-8. copy and paste
-9. code pages and DBCS
-10. file transfer
-11. printing: screen print, printer sessions (pr3287)
-12. scripting and macros: actions, `-script`, the HTTP and socket interfaces
-13. tracing
-14. preferences and session files (`.x3270pro`, saved sessions)
-15. menus and dialogs
-16. **not applicable**: X11-only names (Xt resources, `-geometry`, `-iconic`, bitmap font paths
-    and the like), as a list, each with a one-line reason, so the inventory still closes.
+1. **Coverage.** Every name in `x3270-names.json` is covered by exactly one row. Every `covers`
+   entry exists there, so stale names fail.
+2. **Shape.** Each row has what its status requires (table above); ids are unique; `decided`
+   appears only on `deferred` / `skipped`; `accept-unwitnessed` only on `ours` with
+   `live: unwitnessed`.
+3. **Citations resolve.** Cited files exist; a `file:line`'s line is within the file; a `live`
+   heading exists in `docs/live-testing.md`.
+4. **`docs/parity.md` is current.** Re-rendering gives exactly the committed bytes. Its header counts
+   are generated, never hand-typed.
+5. **The checker is tested on bad fixtures.** An uncovered name, a double cover, `ours` without
+   tests, `deferred` without `decided`, and a dead citation each fail with a reason naming the
+   row.
 
-### The gate opens when
+**Not mechanically provable:** that a cited test exercises the feature *through the GUI*. That
+is for review, and the `gui` field states the claim so a reviewer can check it.
 
-- every `Gate: yes` row's GUI cell is `ours` or `skipped`, or the row is `waived`; and
-- every `wanted` row's GUI cell is `ours`.
+`scripts/parity.mjs` (with `.d.mts`) has two modes:
+- `render`: writes `docs/parity.md`, a header with generated counts per status, then one table
+  per area with the reason or gap leading in each row;
+- `gate`: exits 0 only when no row is `missing`, `partial`, `proposed-*`, or `unwitnessed` without
+  acceptance; otherwise it prints one line per blocking row, id and reason first, and exits 1.
 
-## 3. The test and the gate command
+**The gate is not wired into the tag workflow.** GitHub and npm releases ship as now. Piece 3
+(submission) will make the store-package step call `parity.mjs gate`.
 
-`parity.test.ts` asserts:
+## 4. Populating it, and what follows
 
-1. Every inventory name appears in exactly one row or the not-applicable list: no orphans, no
-   double claims, and no row names something absent from the inventory.
-2. Every front-end cell holds a valid status or `–`.
-3. Every `ours` or `unverified` row has evidence, every path exists in the repo, and every
-   `#anchor` matches a heading in the cited file.
-4. Every row with a `skipped` cell has a footnote with that feature name.
-5. Every override matches `^(waived|wanted) [A-Z]{2,3} \d{4}-\d{2}-\d{2}$`.
-6. `parity.mjs --gate` on a small fixture checklist prints a golden verdict: `gate: open`, or
-   `gate: closed` and one line per blocking row, with the feature first and the reason (`missing`,
-   `unverified`, `wanted`) after it.
+**In this spec's plan:** the extractor, `x3270-names.json` for 4.5ga6, `parity.test.ts`,
+`parity.mjs`, `parity-upstream.yml`, and **a complete first `checklist.yaml`**, meaning the
+coverage test passes with every name in some row.
 
-Each assertion gets a mutation check, recorded in the plan with its FAIL line: break the fixture,
-watch the test fail, revert.
+**How the first rows are written.** Read-only agents sweep x3270 by area, then propose rows
+against our repo:
+connection (host, telnet, TN3270E, TLS, proxy); keyboard and actions; display (fonts, colours,
+code pages, models, cursor); file, print, trace, screen trace and save/restore; scripting and
+the remainder. Rules:
+- **Unsure means `missing`.** `ours` only with citations in hand, and each claim is checked
+  against the repo before it is written; the source wins over a sweep's report.
+- **No agent writes `decided`.** Likely skips and deferrals are `proposed-*` with a draft reason.
+- **One writer.** Sweep agents return proposals, and one session edits `checklist.yaml`.
 
-**Not mechanically provable:** that a cited test exercises the feature through the GUI. That is
-for review (section 2).
+**The user's triage** follows: the `proposed-*` rows, reviewed area by area. That review
+decides the scope of the first store release. Whatever is still `missing` / `partial` afterwards
+is the store roadmap.
 
-**The verdict does not gate CI or releases.** CI prints it in the job summary. GitHub and npm
-releases ship as now. Piece 3 (submission) decides how the store upload uses it.
-
-## 4. Filling it, and what follows
-
-**In this spec's plan**, three steps, each a commit:
-
-1. the extractor and the committed inventory for 4.5, cross-checked against `x3270.man`;
-2. the parser, the test and its fixtures, with the mutation checks;
-3. the first complete checklist, area by area: each row cites x3270's behaviour by `file:line` in
-   suite3270 4.5 and our status by its evidence. Unsure means `missing` or `unverified`, never
-   `ours`. One writer edits the checklist; any sweep agents return proposals only.
-
-Then **the user reviews** it, sets `wanted` and `waived`, and `--gate` gives the first real
-verdict. Its blocking rows are the store backlog.
-
-**Afterwards (separate work, recorded so it is not lost):** each blocking row, or cluster of
-rows, gets its own spec in the order the user sets. README *Remaining* 15-22 is rewritten to
-point at checklist rows, so there is one backlog. HANDOFF's store plan points at the checklist.
+**Afterwards (separate work, recorded here so it is not lost):** the ordered gap list replaces
+README *Remaining* 15-22, with each existing item mapped to row ids; each gap gets its own
+spec; README *What is not implemented* keeps its prose and links its rows; HANDOFF's store plan
+points at `docs/parity.md`.
 
 ## Out of scope
 
 Building any feature; the store submission (piece 3); any change to `package.yml` or the tag
-workflow beyond printing the verdict; moving the pinned x3270 version.
-
-## Amendment 2026-11-17: what measuring 4.5ga6 changed
-
-Measured with a prototype extractor while writing the plan:
-
-- **`x3270.man` cannot be the cross-check.** In 4.5ga6 it is a 24-line stub that points to the
-  x3270 Wiki (https://x3270.miraheze.org). The wiki is the cross-check instead, run by hand when
-  the inventory is generated: its command-line options page and `Category:Actions`. Each
-  difference is explained in `docs/parity/x3270-inventory-crosscheck.md` (committed). The wiki
-  tracks 4.6, so names newer than 4.5 are expected differences, not extractor errors.
-- **x3270's options are `base_options[]` and `option_help[]` in `x3270/x3270.c`.** In x3270,
-  `register_opts()` is a no-op (`x3270/x3270.c:1356`), so the `opt_t` tables other modules register
-  do not reach it. The Xt toolkit options (`-geometry`, `-display`, `-fg`, …) are libXt's, not
-  x3270's. They are in no x3270 table, so the crosscheck file lists them as X11-only. They are not
-  inventory names.
-- **A fifth kind, `xaction:`**: the pure Xt actions in `x3270/xactions.c` (`Cut`,
-  `insert-selection`, `select-start`, …). They are bindable in keymaps, so a user can reach them.
-  x3270's private `PA-` actions are left out.
-- **`action:` leaves out `ACTION_HIDDEN` entries**, which x3270 itself hides from its action
-  list. Action names are resolved through `include/names.h` and the few `#define`s a source makes
-  for itself (`Common/task.c`).
-- **The linked sources** are the objects in `x3270/x3270_files.mk` and in `Common/`'s
-  `lib3270_files.mk`, `lib3270i_files.mk` and `lib32xx_files.mk`, resolved to `x3270/*.c` or
-  `Common/*.c`. The stubs library is left out. `favicon.o` is generated and has no source.
-- **Measured: 129 sources, 470 names**: 100 `action`, 21 `xaction`, 67 `option`, 209 `resource`
-  and 73 `menu`. The plan and the tests must not hard-code these counts.
+workflow; re-pinning the README's existing x3270 citations.
