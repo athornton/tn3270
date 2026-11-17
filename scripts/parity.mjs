@@ -10,6 +10,15 @@ export const AREAS = ['connection', 'keyboard', 'display', 'files', 'scripting',
 export const STATUSES = ['ours', 'partial', 'missing', 'proposed-deferred', 'proposed-skipped', 'deferred', 'skipped'];
 export const CATEGORIES = ['x11-only', 'obsolete', 'declined', 'n/a'];
 const KEBAB = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+// The spec's row fields (section 2), and evidence's. Anything else is a problem, so a misspelt
+// key (`accept-unwitnesed`, `evidence.test`) is reported instead of silently meaning nothing.
+const ROW_KEYS = new Set([
+  'id', 'area', 'title', 'covers', 'x3270', 'gui', 'status', 'gap', 'reason', 'category', 'decided',
+  'evidence', 'accept-unwitnessed', 'browser', 'others',
+]);
+const EVIDENCE_KEYS = new Set(['code', 'tests', 'live']);
+/** Orders rows by id, in code-unit order; 0 for equal ids, so a sort keeps them as given. */
+const byId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 const DECIDED = /^(\d{4})-(\d{2})-(\d{2}), user$/;
 
 /** True for a real calendar date in "YYYY-MM-DD, user" (month 01-12, day valid for that
@@ -128,7 +137,9 @@ export function check({ rows, names, root }) {
 
     if (ids.has(row.id)) say('duplicate id');
     ids.add(row.id);
-    if (!KEBAB.test(row.id ?? '')) say('id is not kebab-case');
+    if (typeof row.id !== 'string') say('id must be a string');
+    else if (!KEBAB.test(row.id)) say('id is not kebab-case');
+    for (const k of Object.keys(row)) if (!ROW_KEYS.has(k)) say(`unknown key ${k}`);
     for (const f of ['title', 'x3270', 'gui']) if (!isNonBlankString(row[f])) say(`needs ${f}`);
     if (!AREAS.includes(row.area)) say(`area must be one of ${AREAS.join(', ')}`);
     if (!STATUSES.includes(row.status)) say(`status must be one of ${STATUSES.join(', ')}`);
@@ -142,6 +153,7 @@ export function check({ rows, names, root }) {
     }
 
     const ev = (row.evidence !== null && typeof row.evidence === 'object' && !Array.isArray(row.evidence)) ? row.evidence : {};
+    for (const k of Object.keys(ev)) if (!EVIDENCE_KEYS.has(k)) say(`unknown key evidence.${k}`);
     const code = asList(say, ev, 'code', 'evidence.code');
     const tests = asList(say, ev, 'tests', 'evidence.tests');
     if (row.status === 'ours') {
@@ -174,8 +186,8 @@ export function check({ rows, names, root }) {
       if (!['deferred', 'skipped'].includes(row.status)) say('decided only on deferred or skipped');
       else if (!validDecided(row.decided)) say('decided must read "YYYY-MM-DD, user"');
     }
-    if (row.status === 'skipped') {
-      if (!row.category) say('skipped needs category');
+    if (row.status === 'skipped' || row.status === 'proposed-skipped') {
+      if (!row.category) say(`${row.status} needs category`);
       else if (!CATEGORIES.includes(row.category)) say(`category must be one of ${CATEGORIES.join(', ')}`);
     }
   });
@@ -215,7 +227,7 @@ const rowList = (rows) => (Array.isArray(rows) ? rows.filter(isMapping) : []);
  * (a typo, a future addition) blocks by default rather than silently passing the gate.
  */
 export function blocking(rows) {
-  return rowList(rows).sort((a, b) => (a.id < b.id ? -1 : 1)).flatMap((r) => {
+  return rowList(rows).sort(byId).flatMap((r) => {
     if (r.status === 'ours') {
       const live = r.evidence?.live;
       if (live === 'unwitnessed') return r['accept-unwitnessed'] ? [] : [`${r.id}: ours but unwitnessed, not accepted`];
@@ -251,7 +263,7 @@ export function render(rows, names) {
     '',
   ];
   for (const area of AREAS) {
-    const these = list.filter((r) => r.area === area).sort((a, b) => (a.id < b.id ? -1 : 1));
+    const these = list.filter((r) => r.area === area).sort(byId);
     if (!these.length) continue;
     out.push(`## ${area}`, '', '| id | status | note | feature | our GUI | x3270 |', '|---|---|---|---|---|---|');
     for (const r of these) {

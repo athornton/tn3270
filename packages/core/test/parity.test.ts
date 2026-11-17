@@ -85,6 +85,13 @@ describe('parity check', () => {
     ['decided on a proposal', [ours({ status: 'proposed-deferred', reason: 'r', decided: '2026-11-17, user' })], 'thing: decided only on deferred or skipped'],
     ['skipped without category', [ours({ status: 'skipped', reason: 'r', decided: '2026-11-17, user' })], 'thing: skipped needs category'],
     ['a bad category', [ours({ status: 'skipped', category: 'meh' as never, reason: 'r', decided: '2026-11-17, user' })], 'thing: category must be one of'],
+    ['proposed-skipped without category', [ours({ status: 'proposed-skipped', reason: 'r' })], 'thing: proposed-skipped needs category'],
+    ['proposed-skipped with a bad category', [ours({ status: 'proposed-skipped', category: 'meh' as never, reason: 'r' })], 'thing: category must be one of'],
+    ['a non-string id', [ours({ id: 123 as never })], '123: id must be a string'],
+    ['a missing id', [ours({ id: undefined as never })], '(row 0): id must be a string'],
+    ['an unknown row key', [ours({ colour: 'red' } as never)], 'thing: unknown key colour'],
+    ['a misspelt row key', [ours({ 'accept-unwitnesed': 'x' } as never)], 'thing: unknown key accept-unwitnesed'],
+    ['an unknown evidence key', [ours({ evidence: { code: ['src/a.ts'], tests: ['src/a.test.ts'], live: 'n/a', test: [] } as never })], 'thing: unknown key evidence.test'],
     ['a missing title', [ours({ title: '' })], 'thing: needs title'],
     // decided must be a real calendar date, not just a matching pattern.
     ['a decided with the wrong word', [ours({ status: 'deferred', reason: 'r', decided: '2026-11-17, agent' })], 'thing: decided must read "YYYY-MM-DD, user"'],
@@ -134,6 +141,11 @@ describe('parity check', () => {
       { id: 'b', area: 'other', title: 'B', covers: ['option:-b'], x3270: '-b', gui: 'none', status: 'skipped', category: 'x11-only', reason: 'X only', decided: '2026-11-17, user' } as Row,
     ]).problems).toEqual([]);
     expect(run([{ id: 'm', area: 'other', title: 'M', covers: ['action:A', 'option:-b'], x3270: 'x', gui: 'none', status: 'missing' } as Row]).problems).toEqual([]);
+  });
+
+  it('accepts a proposed-skipped row with a category, and every spec field on one row', () => {
+    expect(run([ours({ status: 'proposed-skipped', category: 'x11-only', reason: 'X only' })]).problems).toEqual([]);
+    expect(run([ours({ browser: 'b', others: { tui: 't', cli: 'c' } })]).problems).toEqual([]);
   });
 
   it('accepts a real calendar date for decided', () => {
@@ -232,6 +244,20 @@ describe('render and gate', () => {
       { id: 's', area: 'other', status: 'skipped', title: 'S' } as Row,
       ours({ id: 'u', covers: [], evidence: { code: ['src/a.ts'], tests: ['src/a.test.ts'], live: 'unwitnessed' }, 'accept-unwitnessed': 'ok' }),
     ])).toEqual([]);
+  });
+
+  it('keeps rows with equal ids in their given order (the comparator says 0, not 1)', () => {
+    const lines = blocking([
+      { id: 'x', area: 'other', status: 'partial', gap: 'first', title: 'X1' } as Row,
+      { id: 'x', area: 'other', status: 'partial', gap: 'second', title: 'X2' } as Row,
+      { id: 'a', area: 'other', status: 'missing', title: 'A' } as Row,
+    ]);
+    expect(lines).toEqual(['a: missing', 'x: partial -- first', 'x: partial -- second']);
+    const md = render([
+      { id: 'x', area: 'other', status: 'partial', gap: 'first', title: 'X1' } as Row,
+      { id: 'x', area: 'other', status: 'partial', gap: 'second', title: 'X2' } as Row,
+    ], { tag: '4.5ga6', names: [] } as never);
+    expect(md.indexOf('first')).toBeLessThan(md.indexOf('second'));
   });
 
   it('never prints "-- undefined" for a partial or proposed row missing its note', () => {
