@@ -1,2 +1,275 @@
 # The x3270 parity checklist. Rules: docs/superpowers/specs/2026-11-17-x3270-parity-checklist-design.md
-[]
+# --- connection ---
+- id: connect-host
+  area: connection
+  title: Connect to a host, from the command line or a Connect dialog
+  covers: [action:Connect, action:Open, menu:otherHostOption, resource:hostname]
+  x3270: "Connect menu → Other… dialog (whenever disconnected); Connect()/Open() actions; positional host or the hostname resource"
+  gui: "positional [prefix:][LU,LU@]host[:port]; dialog: Connect, only at a launch with no host"
+  status: partial
+  gap: "the Connect dialog opens only at a launch with no host; a running or disconnected session cannot connect to a different host (no Connect menu or File → Connect… item, README *What is not implemented*), and only Enter/Clear reconnects to the same one"
+  evidence:
+    code: [packages/gui/src/connectDialog.ts:45, packages/gui/src/connectDialog.ts:84, packages/frontend/src/hostspec.ts:140]
+    tests: [packages/gui/test/connectDialog.test.ts, packages/gui/test/connectAttempt.test.ts, packages/frontend/test/hostspec.test.ts]
+    live: "Connect dialog retry and the TUI prompt — verified live 2026-11-09, branch `connect-retry`"
+  browser: "the gateway's own command line picks the host (host:port only); the page has no connect dialog"
+  others: {tui: "positional host, or the no-host connect prompt", cli: "Connect(host)"}
+- id: disconnect
+  area: connection
+  title: Disconnect from the host
+  covers: [action:Disconnect, action:Close, menu:disconnectOption]
+  x3270: "File menu → Disconnect; Disconnect()/Close() actions"
+  gui: "menu: Model → Disconnect"
+  status: partial
+  gap: "implemented and unit-tested but the GUI item has no live witness (docs/live-testing.md lists it as owed), so it can only be ours with the user's accept-unwitnessed; also absent from a --terminal-type session, which has no Model menu"
+  evidence:
+    code: [packages/gui/src/menu.ts:304, packages/gui/src/main.ts:1472, packages/core/src/session.ts:903]
+    tests: [packages/gui/test/menu.test.ts, packages/core/test/session.test.ts]
+    live: unwitnessed
+  browser: "the Alt-M picker has a Disconnect button (witnessed by the user on a Mac, 2026-11-05)"
+  others: {cli: "Disconnect()"}
+- id: reconnect
+  area: connection
+  title: Reconnect to the last host
+  covers: [action:Reconnect]
+  x3270: "Reconnect() action (keymap or script; no menu item)"
+  gui: "key: Enter or Clear while disconnected (a deliberate divergence: x3270 binds no key)"
+  status: partial
+  gap: "implemented and unit-tested, no live witness, so it can only be ours with the user's accept-unwitnessed"
+  evidence:
+    code: [packages/frontend/src/actions.ts:147, packages/core/src/session.ts:987]
+    tests: [packages/frontend/test/actions.test.ts, packages/core/test/session.test.ts]
+    live: unwitnessed
+  browser: "the same Enter/Clear reconnect, through the shared applyAction"
+  others: {tui: "Enter or Ctrl-C while disconnected", cli: "Reconnect()"}
+- id: auto-reconnect
+  area: connection
+  title: Reconnect automatically when the host disconnects, and retry a failed connect
+  covers: [option:-reconnect, menu:reconnectOption, menu:retryOption, resource:retry]
+  x3270: "Options → Toggles → Reconnect and Retry; -reconnect; retry resource"
+  gui: none
+  status: missing
+- id: once
+  area: connection
+  title: Exit when the host disconnects
+  covers: [option:-once]
+  x3270: "-once"
+  gui: none
+  status: missing
+- id: host-list
+  area: connection
+  title: Host list (ibm_hosts) in the Connect menu
+  covers: [option:-hostsfile, resource:noOther]
+  x3270: "Connect menu entries from the hosts file; -hostsfile; noOther hides Other…"
+  gui: none
+  status: missing
+- id: recent-hosts
+  area: connection
+  title: Recently used hosts
+  covers: [menu:recentOption, resource:maxRecent, resource:connectFileName]
+  x3270: "Connect menu → Recent submenu; maxRecent; connectFileName (shared across instances)"
+  gui: none
+  status: missing
+  browser: "none"
+- id: default-port
+  area: connection
+  title: Default telnet port
+  covers: [option:-port]
+  x3270: "-port"
+  gui: "host:port in the host argument or the Connect dialog; the default is fixed at 23"
+  status: partial
+  gap: "no -port flag: the default port is always 23 and another port must be written into each host argument"
+  evidence:
+    code: [packages/frontend/src/hostspec.ts:186]
+    tests: [packages/frontend/test/hostspec.test.ts]
+- id: connect-timeout
+  area: connection
+  title: Connect timeout
+  covers: [option:-connecttimeout]
+  x3270: "-connecttimeout <seconds> (no timeout by default)"
+  gui: "none: a fixed 30 s TCP deadline (CONNECT_TIMEOUT_MS) and 10 s TLS handshake deadline"
+  status: partial
+  gap: "the deadline is fixed at 30 s; there is no flag or preference to change it"
+  evidence:
+    code: [packages/frontend/src/tls.ts:72]
+    tests: [packages/frontend/test/plainConnectTimeout.test.ts, packages/frontend/test/tlsConnectTimeout.test.ts]
+- id: ip-family-preference
+  area: connection
+  title: Prefer IPv4 or IPv6 addresses
+  covers: [option:-4, option:-6]
+  x3270: "-4, -6"
+  gui: none
+  status: missing
+- id: proxy
+  area: connection
+  title: Connect through a proxy (HTTP, SOCKS4/4a, SOCKS5/5d, telnet, passthru)
+  covers: [option:-proxy]
+  x3270: "-proxy type:host[:port]"
+  gui: none
+  status: missing
+  browser: "n/a: the gateway connects, not the browser"
+- id: tls-verify
+  area: connection
+  title: Verify the host certificate, or not, against the system store or a CA file
+  covers: [option:-verifycert, option:-noverifycert, option:-cafile]
+  x3270: "-verifycert, -noverifycert, -cafile"
+  gui: "flags: -verifycert, -noverifycert (or -no-verify), -cafile; TLS itself is on by default (Connect dialog: TLS checkbox)"
+  status: ours
+  evidence:
+    code: [packages/frontend/src/tls.ts:94, packages/frontend/src/tls.ts:325]
+    tests: [packages/frontend/test/tls.test.ts, packages/cli/test/tls.test.ts]
+    live: "TLS against both hosts — verified 2026-08-25"
+  browser: "the gateway's own command line has the same TLS flags"
+  others: {tui: "same flags", cli: "same flags"}
+- id: tls-ca-dir
+  area: connection
+  title: TLS CA certificate directory
+  covers: [option:-cadir]
+  x3270: "-cadir"
+  gui: none
+  status: missing
+- id: tls-client-cert
+  area: connection
+  title: TLS client certificates and private keys
+  covers: [option:-certfile, option:-certfiletype, option:-chainfile, option:-clientcert, option:-keyfile, option:-keyfiletype, option:-keypasswd]
+  x3270: "-certfile, -certfiletype, -chainfile, -clientcert, -keyfile, -keyfiletype, -keypasswd"
+  gui: none
+  status: missing
+  browser: "none"
+- id: tls-accept-hostname
+  area: connection
+  title: Accept a different host name in the server certificate
+  covers: [option:-accepthostname]
+  x3270: "-accepthostname [DNS:]name"
+  gui: none
+  status: missing
+- id: tls-protocol-policy
+  area: connection
+  title: TLS minimum/maximum protocol version and security level
+  covers: [option:-tlsminprotocol, option:-tlsmaxprotocol, resource:tlsSecurityLevel]
+  x3270: "-tlsminprotocol, -tlsmaxprotocol; tlsSecurityLevel resource"
+  gui: none
+  status: missing
+- id: starttls
+  area: connection
+  title: Negotiated TLS (telnet START_TLS)
+  covers: [resource:startTls]
+  x3270: "startTls resource (on by default)"
+  gui: none
+  status: missing
+- id: tls-port-992
+  area: connection
+  title: Port 992 implies TLS
+  covers: [resource:tls992]
+  x3270: "tls992 resource (on by default)"
+  gui: "n/a: TLS is the default on every port"
+  status: proposed-skipped
+  category: n/a
+  reason: "TLS is already on for every port unless -insecure (or an unticked TLS box) turns it off, so port 992 needs no rule of its own; the one difference is that we honour an explicit -insecure at 992."
+- id: terminal-name
+  area: connection
+  title: Send a given string as the telnet TERMINAL-TYPE
+  covers: [option:-tn]
+  x3270: "-tn <name>"
+  gui: "flag: --terminal-type (spelled differently from x3270's -tn)"
+  status: ours
+  evidence:
+    code: [packages/core/src/termtype.ts:115, packages/gui/src/args.ts:136]
+    tests: [packages/core/test/termtype.test.ts, packages/gui/test/args.test.ts]
+    live: "2. The selector rides on the TERMINAL-TYPE string, not on an LU name"
+  browser: "the gateway does not accept --terminal-type"
+  others: {tui: "--terminal-type", cli: "--terminal-type"}
+- id: wrong-terminal-name
+  area: connection
+  title: Send the 3279 colour digit in the terminal type for models 4 and 5
+  covers: [resource:wrongTerminalName]
+  x3270: "wrongTerminalName resource"
+  gui: none
+  status: missing
+- id: devname
+  area: connection
+  title: Device name (workstation ID) over NEW-ENVIRON, with a counter template
+  covers: [option:-devname]
+  x3270: "-devname <name>"
+  gui: "flag: -devname"
+  status: ours
+  evidence:
+    code: [packages/core/src/devname.ts:16, packages/core/src/telnet.ts:445, packages/gui/src/args.ts:170]
+    tests: [packages/core/test/devname.test.ts, packages/core/test/telnet.test.ts, packages/gui/test/args.test.ts]
+    live: "`playback -b` as a reference oracle — the traces, and how to read them, 2026-09-17"
+  browser: "the gateway accepts -devname on its own command line"
+  others: {tui: "-devname", cli: "-devname"}
+- id: new-environ
+  area: connection
+  title: NEW-ENVIRON (telnet option 39) on by default
+  covers: [resource:newEnviron]
+  x3270: "newEnviron resource (on by default)"
+  gui: "on only when -devname is given"
+  status: partial
+  gap: "option 39 is refused unless -devname is given, where x3270 offers it by default; CHARSET and KBDTYPE are never sent"
+  evidence:
+    code: [packages/core/src/telnet.ts:445, packages/core/src/newenviron.ts:195]
+    tests: [packages/core/test/newenviron.test.ts, packages/core/test/telnet.test.ts]
+- id: user-name
+  area: connection
+  title: User name sent as NEW-ENVIRON USER (RFC 4777)
+  covers: [option:-user]
+  x3270: "-user <name>"
+  gui: none
+  status: partial
+  gap: "no -user flag: USER is always the local account ($USER, then $USERNAME, then UNKNOWN), and only when -devname enables option 39"
+  evidence:
+    code: [packages/core/src/session.ts:720]
+- id: login-macro
+  area: connection
+  title: Run a macro at login
+  covers: [option:-loginmacro]
+  x3270: "-loginmacro Action(...) ..."
+  gui: none
+  status: missing
+- id: nvt-mode
+  area: connection
+  title: NVT (ANSI) mode, line and character mode, and their line-editing characters
+  covers: [option:-nvt, menu:lineModeOption, menu:characterModeOption, resource:icrnl, resource:inlcr, resource:onlcr, resource:eof, resource:erase, resource:intr, resource:kill, resource:lnext, resource:quit, resource:rprnt, resource:werase, resource:bsdTm, resource:noTelnetInputMode]
+  x3270: "Options → Toggles → Line Mode / Character Mode (NVT only); -nvt; line-mode resources; bsdTm; noTelnetInputMode (T: hosts)"
+  gui: none
+  status: missing
+  browser: "none"
+- id: telnet-nop
+  area: connection
+  title: Send telnet NOPs to keep an idle connection alive
+  covers: [resource:nopSeconds]
+  x3270: "nopSeconds resource"
+  gui: none
+  status: missing
+- id: bind-limit
+  area: connection
+  title: Range-check a TN3270E BIND's screen size against the model
+  covers: [resource:bindLimit]
+  x3270: "bindLimit resource (on by default)"
+  gui: "flag: -bind-limit on|off"
+  status: partial
+  gap: "implemented and unit-tested, no live witness (no reachable host completes TN3270E), so it can only be ours with the user's accept-unwitnessed"
+  evidence:
+    code: [packages/core/src/bind.ts:269, packages/gui/src/args.ts:161]
+    tests: [packages/core/test/bind.test.ts, packages/core/test/tn3270e-session.test.ts, packages/gui/test/args.test.ts]
+    live: unwitnessed
+  others: {tui: "-bind-limit", cli: "-bind-limit"}
+- id: bind-unlock
+  area: connection
+  title: Unlock the keyboard on a TN3270E BIND
+  covers: [resource:bindUnlock]
+  x3270: "bindUnlock resource (off by default)"
+  gui: none
+  status: missing
+- id: contention-resolution
+  area: connection
+  title: Turn off the TN3270E CONTENTION-RESOLUTION request
+  covers: [resource:contentionResolution]
+  x3270: "contentionResolution resource (on by default)"
+  gui: "none: always requested"
+  status: partial
+  gap: "always requested, as x3270's default does; no flag or preference turns it off"
+  evidence:
+    code: [packages/core/src/tn3270e.ts:124]
+    tests: [packages/core/test/tn3270e.test.ts]
