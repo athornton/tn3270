@@ -15,6 +15,23 @@ export const STATUSES: Status[];
 export const CATEGORIES: string[];
 export function check(args: { rows: Row[]; names: Pick<Inventory, 'names'>; root: string }): { problems: string[]; uncovered: string[] };
 export function loadRows(text: string): Row[];
+export function cell(s: unknown): string;
 export function blocking(rows: Row[]): string[];
 export function render(rows: Row[], names: Pick<Inventory, 'tag' | 'names'>): string;
-export function main(argv: string[], io?: { log: (s: string) => void; err: (s: string) => void }): number;
+/** Lets a caller inject the checklist, the inventory and the repo root (or alternate file
+ * paths), and how `render` writes its output, so `main` is testable without touching the real
+ * committed files. */
+export interface MainDeps {
+  root?: string;
+  names?: Pick<Inventory, 'tag' | 'names'>;
+  rows?: Row[];
+  namesFile?: string;
+  rowsFile?: string;
+  mdFile?: string;
+  writeFile?: (path: string, data: string) => void;
+}
+export function main(
+  argv: string[],
+  io?: { log: (s: string) => void; err: (s: string) => void },
+  deps?: MainDeps,
+): number;
