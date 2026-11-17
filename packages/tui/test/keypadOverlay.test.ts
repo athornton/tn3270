@@ -3,7 +3,7 @@ import {
   KEYPAD_KEYS, lookup, PARTIAL, TERMINAL_BINDINGS, type Action,
 } from '@tn3270/frontend';
 import {
-  moveSelection, overlayFits, overlayLines, selectedAction, OVERLAY_MIN,
+  moveSelection, overlayFits, overlayLines, selectedAction, OVERLAY_MIN, OVERLAY_KEYS,
 } from '../src/keypadOverlay.js';
 
 /**
@@ -72,7 +72,9 @@ describe('overlayLines', () => {
     expect(KEYPAD_KEYS.length).toBeGreaterThan(0);
 
     const lines = overlayLines(0);
-    expect(lines).toHaveLength(KEYPAD_KEYS.length);
+    // Every keypad key, then the TUI's own Quit line (see 'the Quit line' below).
+    expect(lines).toHaveLength(OVERLAY_KEYS.length);
+    expect(OVERLAY_KEYS).toHaveLength(KEYPAD_KEYS.length + 1);
     // Position, not `toContain` over the joined text: `toContain('PF1')` is satisfied by the PF13
     // line, and by a single line holding all 48 names, and by any order at all.
     KEYPAD_KEYS.forEach((k, i) => {
@@ -229,15 +231,15 @@ describe('moveSelection', () => {
     // key you were aiming at, which is worse than stopping.
     expect(moveSelection(0, -1)).toBe(0);
     expect(moveSelection(0, 1)).toBe(1);
-    expect(moveSelection(KEYPAD_KEYS.length - 1, 1)).toBe(KEYPAD_KEYS.length - 1);
-    expect(moveSelection(KEYPAD_KEYS.length - 1, -1)).toBe(KEYPAD_KEYS.length - 2);
+    expect(moveSelection(OVERLAY_KEYS.length - 1, 1)).toBe(OVERLAY_KEYS.length - 1);
+    expect(moveSelection(OVERLAY_KEYS.length - 1, -1)).toBe(OVERLAY_KEYS.length - 2);
   });
 
   it('clamps a page-sized jump to the ends rather than taking it modulo', () => {
     // A modulo would land mid-list here, which is the mistake this distinguishes from a clamp.
     expect(moveSelection(2, -10)).toBe(0);
-    expect(moveSelection(KEYPAD_KEYS.length - 3, 10)).toBe(KEYPAD_KEYS.length - 1);
-    expect(moveSelection(0, KEYPAD_KEYS.length * 3)).toBe(KEYPAD_KEYS.length - 1);
+    expect(moveSelection(OVERLAY_KEYS.length - 3, 10)).toBe(OVERLAY_KEYS.length - 1);
+    expect(moveSelection(0, OVERLAY_KEYS.length * 3)).toBe(OVERLAY_KEYS.length - 1);
   });
 });
 
@@ -282,7 +284,30 @@ describe('selectedAction', () => {
     // `noUncheckedIndexedAccess` would let a missing clamp hand the caller `undefined` and crash
     // `applyAction` on a keystroke.
     expect(selectedAction(-5)).toBe(KEYPAD_KEYS[0]!.action);
-    expect(selectedAction(KEYPAD_KEYS.length + 5))
-      .toBe(KEYPAD_KEYS[KEYPAD_KEYS.length - 1]!.action);
+    expect(selectedAction(OVERLAY_KEYS.length + 5))
+      .toBe(OVERLAY_KEYS[OVERLAY_KEYS.length - 1]!.action);
+  });
+});
+
+/**
+ * QUIT IS THE LIST'S LAST LINE, and only the list's: `KEYPAD_KEYS` is shared with the GUI and web
+ * keypads, whose buttons go through `applyAction`, which throws on `quit`. So the TUI appends it.
+ * Selecting a line needs no chord, so this is the way out on a keyboard that cannot type Ctrl-].
+ */
+describe('the Quit line', () => {
+  it('ends the list, after every keypad key, with its chord', () => {
+    const lines = overlayLines(-1);
+    expect(lines).toHaveLength(KEYPAD_KEYS.length + 1);
+    expect(lines.at(-1)!.trim()).toMatch(/^Quit\s+Ctrl-\]$/);
+  });
+
+  it('fires quit, and the selection can reach it and stops there', () => {
+    expect(selectedAction(KEYPAD_KEYS.length)).toEqual({ kind: 'quit' });
+    expect(moveSelection(KEYPAD_KEYS.length - 1, 1)).toBe(KEYPAD_KEYS.length);
+    expect(moveSelection(KEYPAD_KEYS.length, 1)).toBe(KEYPAD_KEYS.length);
+  });
+
+  it('is not in the shared keypad table, which must never hold quit', () => {
+    expect(KEYPAD_KEYS.some((k) => k.action.kind === 'quit')).toBe(false);
   });
 });

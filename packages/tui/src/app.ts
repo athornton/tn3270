@@ -940,6 +940,9 @@ export class App {
     // key: with the list down, Return is the Enter AID again.
     this.overlayShown = false;
     this.clearOverlayTimer();
+    // The list's last line is Quit, which `applyAction` THROWS on: it goes through `apply`, whose
+    // quit arm restores the terminal and exits, exactly as Ctrl-] and Ctrl-Q do.
+    if (action.kind === 'quit') { this.apply(action); return; }
     applyAction(this.session, action);
     this.draw();
   }

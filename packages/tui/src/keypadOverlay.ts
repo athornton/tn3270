@@ -72,8 +72,21 @@ import type { Geometry } from './render.js';
  */
 export const OVERLAY_MIN: Geometry = { rows: 12, cols: 29 };
 
-/** Longest name in the table, for column alignment. Computed, never hardcoded. */
-const NAME_WIDTH = Math.max(...KEYPAD_KEYS.map((k) => k.name.length));
+/**
+ * The list's lines: every keypad key, then QUIT, which only this list has.
+ *
+ * `KEYPAD_KEYS` is shared with the GUI and web keypads, whose buttons go through `applyAction` --
+ * which throws on `quit` -- so it must never hold one. The TUI's list fires `quit` through its own
+ * quit path instead (`app.ts`, `fireOverlay`). Selecting a line needs no chord, so this is the way
+ * out on a keyboard that cannot type Ctrl-].
+ */
+export const OVERLAY_KEYS: readonly { readonly name: string; readonly action: Action }[] = Object.freeze([
+  ...KEYPAD_KEYS.map((k) => ({ name: k.name, action: k.action })),
+  { name: 'Quit', action: { kind: 'quit' } },
+]);
+
+/** Longest name in the list, for column alignment. Computed, never hardcoded. */
+const NAME_WIDTH = Math.max(...OVERLAY_KEYS.map((k) => k.name.length));
 
 /**
  * Do these describe the same action?
@@ -139,7 +152,7 @@ const LINE_WIDTH = 2 + NAME_WIDTH + 2 + CHORD_WIDTH;
  * fragment, which is what a selection in a list should look like anyway.
  */
 export function overlayLines(selected: number): readonly string[] {
-  return KEYPAD_KEYS.map((k, i) => {
+  return OVERLAY_KEYS.map((k, i) => {
     const mark = i === selected ? '>' : ' ';
     return `${mark} ${k.name.padEnd(NAME_WIDTH)}  ${chordFor(k.action)}`.padEnd(LINE_WIDTH);
   });
@@ -147,7 +160,7 @@ export function overlayLines(selected: number): readonly string[] {
 
 /** Clamped, never wrapped: see the test for why. */
 export function moveSelection(selected: number, delta: number): number {
-  return Math.min(KEYPAD_KEYS.length - 1, Math.max(0, selected + delta));
+  return Math.min(OVERLAY_KEYS.length - 1, Math.max(0, selected + delta));
 }
 
 export function overlayFits(terminal: Geometry): boolean {
@@ -161,5 +174,5 @@ export function overlayFits(terminal: Geometry): boolean {
  * `undefined` and crash `applyAction` on a keystroke.
  */
 export function selectedAction(selected: number): Action {
-  return KEYPAD_KEYS[Math.min(KEYPAD_KEYS.length - 1, Math.max(0, selected))]!.action;
+  return OVERLAY_KEYS[Math.min(OVERLAY_KEYS.length - 1, Math.max(0, selected))]!.action;
 }

@@ -121,6 +121,10 @@ describe('the AIDs that are not function keys', () => {
     expect(one('\x03')).toEqual({ kind: 'clear' });
   });
 
+  it('maps Ctrl-Q to quit too: a letter chord every keyboard layout can type', () => {
+    expect(one('\x11')).toEqual({ kind: 'quit' });
+  });
+
   it('maps Ctrl-] to quit, which is the documented escape hatch', () => {
     expect(one('\x1d')).toEqual({ kind: 'quit' });
   });

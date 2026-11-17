@@ -8,7 +8,7 @@ import {
 } from '@tn3270/frontend';
 import { App, type HostProcess, type InputStream, type OutputStream } from '../src/app.js';
 import { measureTerminal } from '../src/render.js';
-import { overlayLines } from '../src/keypadOverlay.js';
+import { OVERLAY_KEYS, overlayLines } from '../src/keypadOverlay.js';
 
 /**
  * A real `Session`, never a mock, with a fake socket.
@@ -332,6 +332,29 @@ describe('raw mode is restored on EVERY exit path', () => {
 });
 
 describe('quitting', () => {
+  it('Ctrl-Q restores the terminal and exits 0: the quit every keyboard layout can type', () => {
+    // Ctrl-] needs AltGr on German and French layouts, and whether a terminal then sends 0x1d is
+    // the terminal's business. 0x11 is a letter chord; raw mode turns IXON off, so it arrives.
+    const h = harness();
+    h.app.start();
+    h.app.onInput(Uint8Array.from([0x11]));
+    expect(h.stdin.raw).toBe(false);
+    expect(h.stdout.all).toContain(ALT_OFF);
+    expect(h.host.exits).toEqual([0]);
+  });
+
+  it("the Ctrl-K list's last line, Quit, restores the terminal and exits 0", () => {
+    // Through the TUI's own quit path: `applyAction` THROWS on `quit`, so firing it the way the
+    // other list lines fire would crash on the keystroke instead of quitting.
+    const h = harness();
+    h.app.start();
+    h.app.onInput(Uint8Array.from([0x0b]));
+    for (let i = 0; i < 80; i++) h.app.onInput(Uint8Array.from([0x1b, 0x5b, 0x42])); // Down, clamped at the end
+    h.app.onInput(Uint8Array.from([0x0d]));
+    expect(h.stdin.raw).toBe(false);
+    expect(h.host.exits).toEqual([0]);
+  });
+
   it('Ctrl-] restores the terminal and exits 0', () => {
     const h = harness();
     h.app.start();
@@ -586,7 +609,7 @@ describe('the overlay\'s chord column, driven through the real input decoder', (
     overlayLines(-1).forEach((line, i) => {
       const chord = line.slice(chordCol).trim();
       if (chord === '') return;
-      const key = KEYPAD_KEYS[i]!;
+      const key = OVERLAY_KEYS[i]!;
       const seqs = TERMINAL_BINDINGS.filter((b) => b.chord === chord).map((b) => b.sequence);
       expect(seqs.length, `${key.name}: no sequence is named ${chord}`).toBeGreaterThan(0);
       for (const seq of seqs) {
@@ -601,8 +624,9 @@ describe('the overlay\'s chord column, driven through the real input decoder', (
       }
     });
     // 46 keys have a chord; the four arrows and Home have two encodings each (CSI and SS3), and
-    // every encoding is pressed. Exact, so a sweep that silently skipped lines cannot pass.
-    expect(pressed).toBe(46 + 5);
+    // every encoding is pressed; the Quit line adds one (Ctrl-]). Exact, so a sweep that silently
+    // skipped lines cannot pass.
+    expect(pressed).toBe(46 + 5 + 1);
   });
 });
 

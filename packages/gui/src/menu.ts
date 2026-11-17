@@ -41,7 +41,7 @@ export type Platform = 'darwin' | 'linux' | 'win32' | string;
  * cast in main. Naming only the role we actually use keeps that honest AND documents the
  * dependency; adding a role here is a one-word change.
  */
-export type MenuRole = 'appMenu';
+export type MenuRole = 'appMenu' | 'quit';
 
 export interface MenuItemTemplate {
   readonly label?: string;
@@ -415,5 +415,11 @@ export function buildMenuTemplate(
   // THE MODEL MENU ONLY WITH A GEOMETRY, so a caller that passes none gets exactly the old
   // template. `main.ts` passes none for a `--terminal-type` session, which has no model to switch.
   const menus = geometry !== undefined ? [edit, view, modelMenu(geometry, handlers?.onGeometry, handlers?.onDisconnect)] : [edit, view];
-  return platform === 'darwin' ? [{ role: 'appMenu' }, ...menus] : menus;
+  // QUIT, ON A MENU AND ON A KEY EVERY LAYOUT HAS. macOS's app menu carries Quit (Cmd-Q). Linux and
+  // Windows had no Quit item at all, and Ctrl-] needs AltGr on German and French layouts, so they
+  // get File -> Quit on Ctrl+Q. `quitChord.ts` ALSO quits on Ctrl-Q in every window's
+  // before-input-event, which covers the Connect dialog (shown before this menu is installed) and
+  // is what the key harness can drive; this item is what a user sees.
+  const file: MenuItemTemplate = { label: 'File', submenu: [{ label: 'Quit', id: 'quit', role: 'quit', accelerator: 'Ctrl+Q' }] };
+  return platform === 'darwin' ? [{ role: 'appMenu' }, ...menus] : [file, ...menus];
 }

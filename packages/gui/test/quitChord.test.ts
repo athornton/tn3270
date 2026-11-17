@@ -5,11 +5,18 @@ import { isQuitChord, quitOnChord } from '../src/quitChord.js';
 
 /** Electron's `before-input-event` Input, the fields `isQuitChord` reads. */
 const key = (over: Partial<Parameters<typeof isQuitChord>[0]> = {}) =>
-  ({ type: 'keyDown', key: ']', control: true, alt: false, meta: false, shift: false, ...over });
+  ({ type: 'keyDown', key: ']', control: true, alt: false, meta: false, ...over });
 
 describe('isQuitChord', () => {
   it('is Ctrl-] on key down, the renderer rule (canvas/src/keys.ts CTRL table)', () => {
     expect(isQuitChord(key())).toBe(true);
+  });
+
+  it('is Ctrl-Q too, which every keyboard layout can type (Ctrl-] needs AltGr on German and French)', () => {
+    expect(isQuitChord(key({ key: 'q' }))).toBe(true);
+    expect(isQuitChord(key({ key: 'Q' }))).toBe(true); // Ctrl-Shift-Q
+    expect(isQuitChord(key({ key: 'q', alt: true }))).toBe(false);
+    expect(isQuitChord(key({ key: 'q', control: false }))).toBe(false);
   });
 
   it('ignores key up, other keys, and Ctrl-] with Alt or Meta (AltGr on Windows is Ctrl+Alt)', () => {

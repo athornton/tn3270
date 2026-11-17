@@ -75,6 +75,9 @@ describe('BINDING_INTENT', () => {
     const quit = BINDING_INTENT.find((b) => b.action.kind === 'quit');
     expect(quit, 'no quit binding is documented').toBeDefined();
     expect(quit!.key).toMatch(/Ctrl-\]/);
+    // And the layout-independent one, since Ctrl-] needs AltGr on German and French keyboards.
+    const quits = BINDING_INTENT.filter((b) => b.action.kind === 'quit').map((b) => [b.key, b.terminal]);
+    expect(quits).toContainEqual(['Ctrl-Q', '\x11']);
   });
 
   it('leaves `terminal` undefined exactly where the keymap has TWO encodings', () => {

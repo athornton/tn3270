@@ -70,7 +70,7 @@ const ELECTRON_ARGV = ['--no-sandbox', '--disable-gpu', '--no-proxy-server'];
  * SPELLINGS ARE ELECTRON ACCELERATOR NAMES, never DOM code names: `Digit1` and `ArrowUp` are
  * delivered as EMPTY events, so the wrong spelling is a test that passes while proving nothing.
  *
- * `Ctrl+]` is deliberately absent. In a plain browser the bridge intercepts it and closes the
+ * `Ctrl+]` and `Ctrl+Q` are deliberately absent. In a plain browser the bridge intercepts it and closes the
  * socket, ending the session mid-sequence (tested in `bridgecore.test.ts`); when this page is loaded
  * in the GUI's URL mode, Electron's main process now quits the app on it before the page sees it
  * (gui/src/quitChord.ts). Either way it would end the run.
