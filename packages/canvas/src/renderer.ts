@@ -13,6 +13,12 @@ import { normalizeRect, movedPastThreshold, type CellAddr, type CellRect } from 
 // The same rule as `selection.js` above, and served from `BROWSER_MODULES` for the same reason.
 // `copyCache.ts`'s only import is `import type { CellRect }`, which erases.
 import { createCopyCache } from './copyCache.js';
+// The renderer's SIXTH relative import, 2026-11-17, and like `forwardKeys.js`/`copyCache.js` it is
+// INSIDE the graph: `blinker.ts` value-imports nothing (its only import is `import type { DrawList }`,
+// which erases), so it is as safe to serve as `selection.js`. Added to `BROWSER_MODULES`
+// (`assets.ts`) for the same reason those two were: an omission there 404s and the whole bundle
+// fails to evaluate, which `httpstatic.test.ts`'s graph closure over in `web` is what catches it.
+import { createBlinker } from './blinker.js';
 
 /**
  * The renderer: a canvas, key events, and nothing else.
@@ -208,9 +214,28 @@ function tintOf(color: Rgb): ImageBitmap | undefined {
   return undefined;
 }
 
+/**
+ * The 500 ms blink phase (x3270's `text_blink_it`), driven from `paint` below. `createBlinker`
+ * is pure and timer-injected (see `blinker.ts`); here it is wired to the DOM's own `setInterval`
+ * (the default) and to a repaint.
+ *
+ * THE REPAINT IS `paint(last)` AND NOTHING ELSE, matching `resize`'s listener below exactly
+ * (`window.addEventListener('resize', () => { if (last !== undefined) paint(last); });`) --
+ * which is the one other place a repaint runs with no new frame and no state change. `paint`
+ * itself never touches the selection or `errored`/`noticeOnly`; those are cleared by callers that
+ * have a real reason to (`onFrame`, `onError`, a new press), and the blink tick is not one of
+ * them, exactly as a resize is not.
+ */
+const blinker = createBlinker({ repaint: () => { if (last !== undefined) paint(last); } });
+
 function paint(list: DrawList): void {
   last = list;
   if (atlas === undefined || canvas === null) return;   // nothing to draw with yet
+
+  // Tell the blinker about this frame BEFORE blitting, so `blinker.off` reflects this frame's
+  // blink phase in the `options` built just below, and so a frame with no blinkers stops the
+  // timer before the first paint that no longer needs it.
+  blinker.frame(list);
 
   const within = { width: window.innerWidth, height: window.innerHeight };
   const scale = bestScale(list, within);
@@ -243,6 +268,7 @@ function paint(list: DrawList): void {
     offsetX: at.x,
     offsetY: at.y,
     blank,
+    blinkOff: blinker.off,
     // undefined skips the glyph this frame; tintOf repaints when the bitmap is ready.
     tinted: (color: Rgb): unknown | undefined => tintOf(color),
   };

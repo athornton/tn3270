@@ -85,7 +85,9 @@ describe('resolveAsset', () => {
     // `vitest run packages/canvas`, which cannot reach this file.
     // NINE since `copyCache.js` joined on 2026-11-02, the renderer's prefetched selection text --
     // a renderer-graph entry like `forwardKeys.js`, and the closure case below caught its removal.
-    expect(BROWSER_MODULES.length).toBe(9);
+    // TEN since `blinker.js` joined on 2026-11-17, the renderer's 500 ms blink-phase timer -- a
+    // renderer-graph entry the same way, and the same closure case below would catch its removal.
+    expect(BROWSER_MODULES.length).toBe(10);
     for (const m of BROWSER_MODULES) expect(resolveAsset(`/${m}`), `for ${m}`).toBeDefined();
   });
 

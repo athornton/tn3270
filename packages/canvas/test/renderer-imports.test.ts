@@ -60,6 +60,9 @@ describe('the renderer bundle', () => {
     // copy/paste gesture added -- is now the third thing the renderer reaches. Named for the same
     // reason as the other two: an unnamed edge is one the walker may quietly stop following.
     expect(graph.some((f) => f.endsWith('selection.js')), 'selection.js not reached').toBe(true);
+    // The fourth real edge, 2026-11-17: `blinker.ts` owns the 500 ms blink-phase timer `paint`
+    // drives. Named for the same reason as the other three.
+    expect(graph.some((f) => f.endsWith('blinker.js')), 'blinker.js not reached').toBe(true);
     const offenders: string[] = [];
     for (const file of graph) {
       const text = readFileSync(file, 'utf8');
