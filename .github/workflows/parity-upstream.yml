@@ -1,0 +1,24 @@
+# Weekly: is there an x3270 GA newer than the one docs/parity/x3270-names.json was extracted from?
+# A failure is a notification, not a broken main: regenerate with
+#   node scripts/parity-extract.mjs --tag <new>
+# and cover every new name in docs/parity/checklist.yaml (parity spec, section 1).
+# Exit codes from scripts/parity-extract.mjs --upstream (its header comment has the full list):
+#   exit 1 means a newer GA was found -- the notification above, not a broken workflow.
+#   exit 3 means the script itself errored (e.g. a GitHub API or network failure) -- that IS a
+#   broken run, worth looking at as infrastructure, not as a parity gap.
+name: parity-upstream
+on:
+  schedule:
+    - cron: '23 7 * * 1'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  upstream:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with: { node-version: '22' }
+      - run: node scripts/parity-extract.mjs --upstream docs/parity/x3270-names.json
+        env: { GITHUB_TOKEN: '${{ github.token }}' }
