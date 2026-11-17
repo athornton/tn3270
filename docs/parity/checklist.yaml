@@ -338,12 +338,12 @@
   title: Sys Req key
   covers: [action:SysReq]
   x3270: "keypad Sys Req button; the Sys_Req keysym (x3270/xkybd.c:394); SysReq() action"
-  gui: "keypad SysRq button (no chord, as c3270). The live witness was the CLI on a classic session; the TN3270E IAC AO form and the button click have no live witness"
+  gui: "keypad SysRq button (no chord, as c3270). Its only live run was the CLI on a classic session (not a GUI witness); the TN3270E IAC AO form and the button click have none"
   status: ours
   evidence:
     code: [packages/frontend/src/keypad.ts:102, packages/frontend/src/actions.ts:189, packages/core/src/session.ts:1889]
     tests: [packages/core/test/session.test.ts, packages/core/test/tn3270e-session.test.ts, packages/frontend/test/actions.test.ts, packages/canvas/test/keypadUi.test.ts]
-    live: "Sys Req and Dup against VM/370 and TK5 — DONE 2026-09-21, and the keypad button is still untried"
+    live: unwitnessed
   browser: "the keypad overlay's SysRq button"
   others: {tui: "Ctrl-K list", cli: "SysReq()"}
 - id: dup
@@ -351,12 +351,12 @@
   title: Dup key
   covers: [action:Dup]
   x3270: "keypad Dup button; Dup() action (writes 0x1c, sets MDT, tabs; Common/kybd.c:2763)"
-  gui: "key: Ctrl-D (c3270's chord); keypad Dup button. The live witness was the CLI; Dup's tab is unwitnessed (single-field panel)"
+  gui: "key: Ctrl-D (c3270's chord); keypad Dup button. Its only live run was the CLI (not a GUI witness), and Dup's tab is unwitnessed (single-field panel)"
   status: ours
   evidence:
     code: [packages/canvas/src/keys.ts:128, packages/frontend/src/keypad.ts:98, packages/core/src/keyboard.ts:126]
-    tests: [packages/core/test/keyboard.test.ts, packages/canvas/test/keys.test.ts, packages/frontend/test/actions.test.ts]
-    live: "Sys Req and Dup against VM/370 and TK5 — DONE 2026-09-21, and the keypad button is still untried"
+    tests: [packages/core/test/keyboard.test.ts, packages/canvas/test/keys.test.ts, packages/frontend/test/actions.test.ts, packages/canvas/test/keypadUi.test.ts, packages/frontend/test/keypad.test.ts]
+    live: unwitnessed
   browser: "the same Ctrl-D and keypad button"
   others: {tui: "Ctrl-D", cli: "Dup()"}
 - id: field-mark
@@ -364,12 +364,12 @@
   title: Field Mark key
   covers: [action:FieldMark]
   x3270: "keypad Field Mark button; FieldMark() action (writes 0x1e and advances; Common/kybd.c:2802)"
-  gui: "key: Ctrl-F (c3270's chord); keypad FldMk button. The live witness was the CLI"
+  gui: "key: Ctrl-F (c3270's chord); keypad FldMk button. Its only live run was the CLI (not a GUI witness)"
   status: ours
   evidence:
     code: [packages/canvas/src/keys.ts:129, packages/frontend/src/keypad.ts:107, packages/core/src/keyboard.ts:164]
-    tests: [packages/core/test/keyboard.test.ts, packages/canvas/test/keys.test.ts, packages/frontend/test/actions.test.ts]
-    live: "Field Mark and Newline against VM/370 and TK5 — DONE 2026-09-24, so all four keys are witnessed"
+    tests: [packages/core/test/keyboard.test.ts, packages/canvas/test/keys.test.ts, packages/frontend/test/actions.test.ts, packages/canvas/test/keypadUi.test.ts, packages/frontend/test/keypad.test.ts]
+    live: unwitnessed
   browser: "the same Ctrl-F and keypad button"
   others: {tui: "Ctrl-F", cli: "FieldMark()"}
 - id: reset-key
@@ -435,7 +435,7 @@
   x3270: "Alt-E (x3270/fb-x3270:314-315); keypad Erase EOF button; EraseEOF() action"
   gui: "key: End (c3270's choice); keypad ErEOF button"
   status: partial
-  gap: "does nothing on an unformatted screen, where x3270 erases to the end of the screen (Common/kybd.c:3034-3039); and erases on a host-locked keyboard, where x3270 queues it"
+  gap: "does nothing on an unformatted screen, where x3270 erases to the end of the screen (Common/kybd.c:3034-3039); erases on a host-locked keyboard, where x3270 queues it; and leaves an operator error displayed, where x3270 clears it (OERR_CLEAR_OR_ENQ, Common/kybd.c:146-157)"
   evidence:
     code: [packages/canvas/src/keys.ts:101, packages/core/src/keyboard.ts:369]
     tests: [packages/core/test/keyboard.test.ts]
@@ -449,7 +449,7 @@
   x3270: "keypad Erase Input button; EraseInput() action"
   gui: "key: Ctrl-U (c3270's chord); keypad ErInp button"
   status: partial
-  gap: "erases on a host-locked keyboard, where x3270 queues it (OERR_CLEAR_OR_ENQ in EraseInput_action, Common/kybd.c:3061)"
+  gap: "erases on a host-locked keyboard, where x3270 queues it, and leaves an operator error displayed, where x3270 clears it (OERR_CLEAR_OR_ENQ in EraseInput_action, Common/kybd.c:3061)"
   evidence:
     code: [packages/canvas/src/keys.ts:125, packages/core/src/keyboard.ts:393]
     tests: [packages/core/test/keyboard.test.ts]
@@ -501,7 +501,7 @@
   x3270: "oerrLock resource, ON by default (x3270/resources.c:340-341): an operator error locks the keyboard and drops further keys until Reset or a cursor move (operator_error, Common/kybd.c:743-756)"
   gui: "none: no flag"
   status: partial
-  gap: "an operator error is shown in the OIA but locks nothing: the next typed character goes in (core/src/keyboard.ts:57), which matches neither oerrLock setting, and no flag chooses"
+  gap: "an operator error is shown in the OIA but locks nothing: the next typed character goes in (core/src/keyboard.ts:57) while the X Protected/X Numeric indicator stays up, and Tab or any other cursor move does not clear it (only Reset or a host restore does). That matches neither oerrLock setting, and no flag chooses"
   evidence:
     code: [packages/core/src/keyboard.ts:57, packages/core/src/oia.ts:151]
     tests: [packages/core/test/keyboard.test.ts]
@@ -533,8 +533,8 @@
 - id: cursor-extras
   area: keyboard
   title: Field End, Next/Previous Word, and two-column moves
-  covers: [action:FieldEnd, action:NextWord, action:PreviousWord, action:Left2, action:Right2]
-  x3270: "End key is FieldEnd (x3270/xkybd.c:380); Alt-Left/Alt-Right are PreviousWord/NextWord (x3270/fb-x3270:296-299); Left2/Right2 from the 3270 keysyms (x3270/xkybd.c:411-414)"
+  covers: [action:End, action:FieldEnd, action:NextWord, action:PreviousWord, action:Left2, action:Right2]
+  x3270: "End key is FieldEnd, also named End() (x3270/xkybd.c:380, Common/kybd.c:224); Alt-Left/Alt-Right are PreviousWord/NextWord (x3270/fb-x3270:296-299); Left2/Right2 from the 3270 keysyms (x3270/xkybd.c:411-414)"
   gui: "none: End is Erase EOF here"
   status: missing
   browser: "none"
@@ -611,7 +611,7 @@
   gui: none
   status: proposed-skipped
   category: declined
-  reason: "the README records not reopening the keypad unbidden as a decision (The keypad: it is not remembered between runs), and Ctrl-K opens it in one keystroke."
+  reason: "x3270's -keypad opens the keypad at start-up; ours has no start-up flag, and Ctrl-K opens it in one keystroke."
 - id: keypad-layout
   area: keyboard
   title: Keypad placement, key sizes, background and shift inversion
@@ -620,7 +620,7 @@
   gui: "n/a: the keypad is its own window of native HTML buttons"
   status: proposed-skipped
   category: n/a
-  reason: "these size and place x3270's Athena widget keypad, and ours is a separate window of HTML buttons that shows all 24 PF keys at once, so there is no pixel size, attachment or shifted PF bank to set."
+  reason: "these size and place x3270's Athena widget keypad, and ours is a separate window of HTML buttons that shows all 24 PF keys at once, so there is no pixel size, attachment or shifted PF bank to set, and the background colour (keypadBackground, x3270/resources.c:254) is the platform's."
 - id: keymaps
   area: keyboard
   title: Custom keymaps

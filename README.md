@@ -315,9 +315,10 @@ page, because a tab cannot open an OS window.
 is non-modal by construction, so it can be left open beside the terminal while you work. Pressing
 `Ctrl-K` again brings the window forward rather than stacking a second one.
 
-**It is not remembered between runs.** x3270 does remember, through its `keypadOn` resource, and
-this does not: reopening is one keystroke, and a keypad that reappears unbidden costs window space
-to someone who did not want it this session. That is a decision rather than a missing feature, and
+**It is not remembered between runs.** x3270 can remember: Save Changed Options writes its
+`keypadOn` resource once the keypad has been toggled (`x3270/save.c:688-691`), as does a session
+manager's WM_SAVE_YOURSELF. This does not: reopening is one keystroke, and a keypad that
+reappears unbidden costs window space to someone who did not want it this session. That is a decision rather than a missing feature, and
 it is explicitly not on the list of things a preferences store should bring.
 
 **Every button carries a tooltip** naming what the key does, from the `BINDING_INTENT` table of
