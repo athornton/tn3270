@@ -682,23 +682,28 @@ describe('release-notes.mjs', () => {
     const HOME = process.env.HOME ?? '';
     /*
       PROBED ONCE, LAZILY, AND BOUNDED: in the first test that needs it, not at collection, each
-      candidate given 20 s (an offline uvx without scriv cached fails fast or times out there, never
-      stalling the suite). Pinned as CI pins it.
+      candidate given 60 s (an offline uvx without scriv cached fails fast or times out there, never
+      stalling the suite for long). 60 and not 20: MEASURED 2026-11-17, a cold `uv tool run` spent the
+      whole 20 s downloading scriv into an emptied cache and the tests skipped; warm, it takes 1 s. Pinned as CI pins it.
+
+      `uv tool run` LAST, because `uvx` is only its shorthand and a system `uv` can come without one:
+      on the RSP lab a user-environment reset moved `~/.local/bin` (uv's own install, with `uvx`)
+      aside, leaving `/usr/bin/uv` alone, and both tests skipped (2026-11-17).
     */
     let probed: string[] | undefined | null = null;
     const found = () => {
       if (probed === null) {
-        probed = [process.env.SCRIV, 'scriv', `${HOME}/.local/bin/uvx scriv==1.8.1`, 'uvx scriv==1.8.1']
+        probed = [process.env.SCRIV, 'scriv', `${HOME}/.local/bin/uvx scriv==1.8.1`, 'uvx scriv==1.8.1', 'uv tool run scriv==1.8.1']
           .filter((c): c is string => c !== undefined && c.trim() !== '')
           .map((c) => c.trim().split(/\s+/))
           .find(([cmd, ...pre]) => {
-            const r = spawnSync(cmd!, [...pre, '--version'], { encoding: 'utf8', timeout: 20_000 });
+            const r = spawnSync(cmd!, [...pre, '--version'], { encoding: 'utf8', timeout: 60_000 });
             return r.status === 0 && /version 1\.8\.1\b/.test(r.stdout);
           });
       }
       return probed;
     };
-    const NONE = 'no scriv 1.8.1 here (tried $SCRIV, scriv, ~/.local/bin/uvx scriv==1.8.1, uvx scriv==1.8.1): CI installs it in the release jobs only';
+    const NONE = 'no scriv 1.8.1 here (tried $SCRIV, scriv, ~/.local/bin/uvx scriv==1.8.1, uvx scriv==1.8.1, uv tool run scriv==1.8.1): CI installs it in the release jobs only';
     const scriv = (...args: string[]) => spawnSync(found()![0]!, [...found()!.slice(1), ...args], { cwd: REPO, encoding: 'utf8', timeout: 60_000 });
 
     it('extracts each seeded entry, and exits 2 for a version not there', (ctx) => {
