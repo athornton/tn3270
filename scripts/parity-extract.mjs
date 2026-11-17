@@ -4,19 +4,89 @@
 // amendment). Reads an x3270 source tree as TEXT ONLY: nothing in it is built or run.
 // No npm dependencies, so parity-upstream.yml runs this without `npm ci`.
 
-/** Value of a Makefile variable, continuation lines joined, as object basenames without `.o`. */
-export function makeVar(text, name) {
-  const joined = text.replace(/\\\r?\n/g, ' ');
-  const m = joined.match(new RegExp(`^${name}\\s*=(.*)$`, 'm'));
-  if (!m) throw new Error(`makefile has no ${name}`);
-  return m[1].trim().split(/\s+/).filter(Boolean).map((o) => o.replace(/\.o$/, ''));
+/**
+ * If `text[i]` opens a string literal (`"..."`), a character literal (`'x'`, `'\''`, `'"'`,
+ * `'{'`, ...), a C block comment (possibly multi-line), or a `//`-to-end-of-line comment, returns
+ * the index just past it (bounded by `text.length`); otherwise returns `i` unchanged.
+ *
+ * One shared lexer step, used everywhere this file scans C text character by character
+ * (`entries()`, `callArgs()`, `fields()`, and `stripComments()` below), so a quote, brace, or
+ * paren inside a literal or comment can never be mistaken for real syntax. It also fixes a hang:
+ * `String.indexOf('"', i)` (the old per-function logic) is blind to escapes, so on `"a\"b"` it
+ * found the escaped quote as if it were the closing one, under-consumed the literal, and then
+ * (closing-quote search failing, returning -1) looped forever. Every caller is bounded by
+ * `text.length` for the same reason: an unterminated literal or comment must still end the scan.
+ */
+function skipAtom(text, i) {
+  const c = text[i];
+  if (c === '"' || c === "'") {
+    let j = i + 1;
+    while (j < text.length && text[j] !== c) { if (text[j] === '\\') j++; j++; }
+    return Math.min(j + 1, text.length);
+  }
+  if (c === '/' && text[i + 1] === '*') {
+    const end = text.indexOf('*/', i + 2);
+    return end === -1 ? text.length : end + 2;
+  }
+  if (c === '/' && text[i + 1] === '/') {
+    const end = text.indexOf('\n', i + 2);
+    return end === -1 ? text.length : end + 1;
+  }
+  return i;
 }
 
-/** `#define Name <string-literal | Ident>...` -> Map(Name -> string). Non-string defines are dropped. */
+/**
+ * `text` with backslash-continued lines joined and comments removed, but with the contents of
+ * string/character literals left untouched (so e.g. `#define HTTP_PREFIX "http://"`, real text in
+ * x3270/select.c, survives: a blind `s.replace(/\/\/.*$/gm, '')` would truncate it at the `//`).
+ * A stripped `/* *‍/` becomes a single space (so tokens on either side don't glue together); a
+ * stripped `//...` keeps its line's newline, so line-oriented matching after this still works.
+ */
+function stripComments(text) {
+  const joined = text.replace(/\\\r?\n/g, ' ');
+  let out = '';
+  for (let i = 0; i < joined.length; i++) {
+    const c = joined[i];
+    if (c === '"' || c === "'") {
+      const skip = skipAtom(joined, i);
+      out += joined.slice(i, skip);
+      i = skip - 1;
+      continue;
+    }
+    if (c === '/' && joined[i + 1] === '*') {
+      out += ' ';
+      i = skipAtom(joined, i) - 1;
+      continue;
+    }
+    if (c === '/' && joined[i + 1] === '/') {
+      const nl = joined.indexOf('\n', i + 2);
+      if (nl === -1) break; // comment runs to EOF: nothing more to keep
+      i = nl - 1; // land back on the '\n' itself, which the default branch below keeps
+      continue;
+    }
+    out += c;
+  }
+  return out;
+}
+
+/** Value of a Makefile variable, continuation lines joined, as object basenames without `.o`.
+ * Both plain (`NAME = ...`) and continuation (`NAME += ...`) assignment lines are collected, in
+ * order, and their object lists concatenated. */
+export function makeVar(text, name) {
+  const joined = text.replace(/\\\r?\n/g, ' ');
+  const matches = [...joined.matchAll(new RegExp(`^${name}\\s*\\+?=(.*)$`, 'gm'))];
+  if (!matches.length) throw new Error(`makefile has no ${name}`);
+  return matches.flatMap((m) => m[1].trim().split(/\s+/).filter(Boolean).map((o) => o.replace(/\.o$/, '')));
+}
+
+/** `#define Name <string-literal | Ident>...` -> Map(Name -> string). Non-string defines are
+ * dropped. Comments (`//`, `/* *‍/`, possibly multi-line) are stripped and backslash-continued
+ * lines joined first, via `stripComments()`, so neither can swallow or split a definition. */
 export function parseDefines(text) {
+  const clean = stripComments(text);
   const raw = new Map();
-  for (const m of text.matchAll(/^#\s*define\s+(\w+)\s+(.+)$/gm)) {
-    raw.set(m[1], m[2].replace(/\/\*.*?\*\//g, '').trim());
+  for (const m of clean.matchAll(/^#\s*define\s+(\w+)\s+(.+)$/gm)) {
+    raw.set(m[1], m[2].trim());
   }
   const out = new Map();
   const value = (name, seen) => {
@@ -41,21 +111,82 @@ export function parseDefines(text) {
 }
 
 const WIDGET_OBJECTS = /^(Cme|CmeBSB|CmeLine|CmplxMenu|Husk)$/;
-const COMMON_LIBS = [
-  ['Common/lib3270_files.mk', 'LIB3270_OBJECTS'],
-  ['Common/lib3270i_files.mk', 'LIB3270I_OBJECTS'],
-  ['Common/lib32xx_files.mk', 'LIB32XX_OBJECTS'],
+
+// Each linked object group: the file(s)/variable(s) its *_OBJECTS list(s) come from, any object
+// added outside of those variables, and its VPATH (`lib/*/Makefile.in`'s, or x3270/Makefile.in's,
+// `VPATH = $(this):$(top)/Common[:.../Nodisplay]`), resolved in that order: the first VPATH
+// directory where `<obj>.c` exists wins. VPATH resolution (not a fixed directory per group)
+// matters for real reasons, not hypothetical ones: LIB3270U_OBJECTS' find_console.o and
+// print_command.o, and LIB32XXU_OBJECTS' xpopen.o, are declared under lib/ but their `.c`s live
+// in Common/; and LIB3270_OBJECTS' resources.o has no Common/resources.c at all -- only
+// Common/Nodisplay/resources.c, lib3270's third VPATH entry.
+//
+// lib3270stubs is excluded (per the original amendment) even though x3270 does link it
+// (Makefile.obj.in's LD3270STUBS): it is a stub/no-op implementation of an alternate backend,
+// contributing no feature names of its own. The X widget library (Cme*, CmplxMenu, Husk) is
+// excluded the same way it always was, via WIDGET_OBJECTS.
+//
+// x3270/Makefile.obj.in separately adds `fallbacks.o` (from a generated fallbacks.c) and
+// `version.o` (from a generated, timestamp/version-stamped xversion.c) to its link; neither is
+// read from X3270_OBJECTS (the variable this file parses), so neither ever reaches this list --
+// which is correct, since both are build-time-generated, not real feature source.
+const LIBS = [
+  {
+    objVars: [['x3270/x3270_files.mk', 'X3270_OBJECTS']],
+    extra: [],
+    vpath: ['x3270', 'Common'],
+    widgetFilter: true,
+  },
+  {
+    objVars: [['Common/lib3270_files.mk', 'LIB3270_OBJECTS'], ['lib/3270/lib3270u_files.mk', 'LIB3270U_OBJECTS']],
+    extra: [],
+    vpath: ['lib/3270', 'Common', 'Common/Nodisplay'],
+  },
+  {
+    objVars: [['Common/lib3270i_files.mk', 'LIB3270I_OBJECTS']],
+    extra: [],
+    vpath: ['lib/3270i', 'Common'],
+  },
+  {
+    objVars: [['Common/lib32xx_files.mk', 'LIB32XX_OBJECTS'], ['lib/32xx/lib32xxu_files.mk', 'LIB32XXU_OBJECTS']],
+    // The Unix GA-default TLS module (lib/configure.in:254-262): sio_openssl.o, unless
+    // --enable-mock-tls (sio_mock.o) or macOS Secure Transport (sio_secure_transport.o) was
+    // selected -- not something this text-only extractor can detect, so the GA Unix default is
+    // taken unconditionally. It is substituted into lib/32xx/Makefile.obj.in's OBJS via
+    // `@TLS_MODULES@`, not read from an *_OBJECTS variable, so it's listed here instead.
+    extra: ['sio_openssl'],
+    vpath: ['lib/32xx', 'Common'],
+  },
 ];
 
-/** The `.c` files x3270 links, relative to the tree root. `read(path)` returns file text. */
-export function linkedSources(read) {
-  const x = makeVar(read('x3270/x3270_files.mk'), 'X3270_OBJECTS')
-    .filter((o) => !WIDGET_OBJECTS.test(o)).map((o) => `x3270/${o}.c`);
-  const common = COMMON_LIBS.flatMap(([f, v]) => makeVar(read(f), v)).map((o) => `Common/${o}.c`);
-  return [...new Set([...x, ...common])].sort();
+/** True if `read(path)` succeeds; false if it throws an ENOENT-coded error; rethrows anything
+ * else (a real problem, not a "this VPATH directory doesn't have it"). */
+function existsAt(read, path) {
+  try { read(path); return true; }
+  catch (e) { if (e && e.code === 'ENOENT') return false; throw e; }
 }
 
-/** Per 0-based line, the preprocessor condition in force (joined with ` && `), or null. */
+/** The `.c` files linked, resolved through each group's VPATH, and the object basenames resolved
+ * in none of them (`missingSources`; e.g. `favicon`, generated at build time -- not an error).
+ * `read(path)` returns file text, or throws an ENOENT-coded error for a path that doesn't exist. */
+export function linkedSources(read) {
+  const sources = new Set();
+  const missingSources = new Set();
+  for (const lib of LIBS) {
+    const objs = lib.objVars.flatMap(([f, v]) => makeVar(read(f), v)).concat(lib.extra);
+    const filtered = lib.widgetFilter ? objs.filter((o) => !WIDGET_OBJECTS.test(o)) : objs;
+    for (const o of filtered) {
+      const hit = lib.vpath.map((d) => `${d}/${o}.c`).find((p) => existsAt(read, p));
+      if (hit) sources.add(hit); else missingSources.add(o);
+    }
+  }
+  return { sources: [...sources].sort(), missingSources: [...missingSources].sort() };
+}
+
+/** Per 0-based line, the preprocessor condition in force (joined with ` && `), or null.
+ * `#elif`'s condition replaces (rather than conjoins with the negation of) the branch above it,
+ * so a guard reported for an `#elif` or its `#else` is approximate: it omits the earlier
+ * branches' negation that the real preprocessor also requires. */
 export function guardsByLine(text) {
   const stack = [];
   const out = [];
@@ -80,8 +211,9 @@ function entries(text, open) {
   const out = [];
   let depth = 0, start = -1;
   for (let i = open; i < text.length; i++) {
+    const skip = skipAtom(text, i);
+    if (skip !== i) { i = skip - 1; continue; }
     const c = text[i];
-    if (c === '"') { i++; while (i < text.length && text[i] !== '"') { if (text[i] === '\\') i++; i++; } continue; }
     if (c === '{') { depth++; if (depth === 2) start = i; }
     else if (c === '}') {
       if (depth === 2) out.push({ body: text.slice(start + 1, i), line: lineOf(text, start) });
@@ -104,8 +236,9 @@ function tables(text, decl) {
 const fields = (body) => {
   const out = []; let cur = '', depth = 0;
   for (let i = 0; i < body.length; i++) {
+    const skip = skipAtom(body, i);
+    if (skip !== i) { cur += body.slice(i, skip); i = skip - 1; continue; }
     const c = body[i];
-    if (c === '"') { const j = body.indexOf('"', i + 1); cur += body.slice(i, j + 1); i = j; continue; }
     if (c === '(') depth++; else if (c === ')') depth--;
     if (c === ',' && depth === 0) { out.push(cur.trim()); cur = ''; } else cur += c;
   }
@@ -117,7 +250,8 @@ const fields = (body) => {
 function callArgs(text, open) {
   let depth = 0;
   for (let i = open; i < text.length; i++) {
-    if (text[i] === '"') { i++; while (i < text.length && text[i] !== '"') { if (text[i] === '\\') i++; i++; } continue; }
+    const skip = skipAtom(text, i);
+    if (skip !== i) { i = skip - 1; continue; }
     if (text[i] === '(') depth++;
     else if (text[i] === ')' && --depth === 0) return text.slice(open + 1, i);
   }
@@ -125,9 +259,22 @@ function callArgs(text, open) {
 }
 
 const MENU_CALL = /\b(add_menu_itemv|toggle_init|Xt\w*Create\w*(?:Widget|PopupShell))\s*\(/g;
+// x3270/x3270.c only: option_help[]'s declaration has no common type tag to key off (it's an
+// anonymous `static struct option_help { ... } option_help[] = {`), so it's matched by name.
+const OPTION_HELP_TABLE = /\boption_help\s*\[\s*\]\s*=\s*\{/g;
+// x3270/x3270.c only (around x3270.c:497-505): a lone "-v"/"--version"/"--help"/"-?" is matched
+// by direct string compare in main(), before the option tables are even consulted, so these
+// never appear in base_options or option_help and would otherwise be missed entirely.
+const STRCMP_OPTION = /!strcmp\(argv\[1\],\s*(Opt\w+)\)/g;
+// x3270/ files only: a resource fetched by a literal name that has no Res*/Opt*/Dot* macro at
+// all (e.g. keymap.c:309's "serverKeymapList"), so the resources.h-`#define`-driven scan below
+// can never find it.
+const GET_RESOURCE_CALL = /\bget_resource\(\s*"((?:[^"\\]|\\.)*)"/g;
 
 /**
- * The six kinds of name, over the linked `files`. `read(path)` returns file text.
+ * The six kinds of name, over the linked `files`. `read(path)` returns file text, or throws an
+ * ENOENT-coded error for a file genuinely absent (tracking that is the caller's job, e.g. via
+ * `linkedSources()`'s `missingSources`); any other thrown error is a real problem and propagates.
  * @returns {{ names: object[], unresolved: string[], nonLiteralMenuCalls: string[], privateXactions: number }}
  */
 export function extractNames(read, files) {
@@ -135,6 +282,7 @@ export function extractNames(read, files) {
   const names = new Map();
   const unresolved = [];
   const nonLiteralMenuCalls = [];
+  const literalResources = []; // get_resource("literal") candidates; filtered once all files are seen
   let privateXactions = 0;
   const add = (kind, value, file, line, guards, extra = {}) => {
     const id = `${kind}:${value}`;
@@ -155,7 +303,7 @@ export function extractNames(read, files) {
 
   for (const file of files) {
     let text;
-    try { text = read(file); } catch { continue; } // missingSources is computed by the caller
+    try { text = read(file); } catch (e) { if (e && e.code === 'ENOENT') continue; throw e; }
     const guards = guardsByLine(text);
     for (const t of text.match(/\b(?:Res|Dot)\w+/g) ?? []) used.add(t);
     const local = parseDefines(text); // e.g. Common/task.c's RESUME_INPUT
@@ -175,8 +323,11 @@ export function extractNames(read, files) {
       if (/^PA_\w+/.test(name ?? '')) { privateXactions++; continue; }
       if (/^(\w+|"[^"]*")$/.test(name ?? '')) add('xaction', actionName(name, e.line), file, e.line, guards);
     }
-    // Options: x3270's own Xrm table only. Its register_opts() is a no-op (x3270/x3270.c:1356),
-    // so the opt_t tables in Common/ never reach it.
+    // Options: x3270's own Xrm table (base_options[]), option_help[] (adds flag-only OptV
+    // and OptVersion, with no Xrm entry of their own), and OptHelp1/OptHelp2's main() literal
+    // compare -- x3270's register_opts() is a no-op (x3270/x3270.c:1356), so the opt_t tables in
+    // Common/ never reach it. Sites merge by id, so an option in both base_options and
+    // option_help keeps one entry with both sites.
     for (const e of tables(text, /\bXrmOptionDescRec\s+\w+\s*\[\s*\]\s*=\s*\{/g)) {
       const f = fields(e.body);
       if (!/^Opt\w+$/.test(f[0] ?? '')) continue;
@@ -184,6 +335,15 @@ export function extractNames(read, files) {
       const res = dot?.startsWith('.') ? dot.slice(1) : undefined;
       if (res) optionResources.add(res);
       add('option', resolveName(f[0], file, e.line), file, e.line, guards, { resource: res });
+    }
+    if (file === 'x3270/x3270.c') {
+      for (const e of tables(text, OPTION_HELP_TABLE)) {
+        const [name] = fields(e.body);
+        if (/^Opt\w+$/.test(name ?? '')) add('option', resolveName(name, file, e.line), file, e.line, guards);
+      }
+      for (const m of text.matchAll(STRCMP_OPTION)) {
+        add('option', resolveName(m[1], file, lineOf(text, m.index)), file, lineOf(text, m.index), guards);
+      }
     }
     for (const e of tables(text, /\btoggle_name_t\s+toggle_names\s*\[\s*\]\s*=\s*\{/g)) {
       const [res] = fields(e.body);
@@ -193,6 +353,9 @@ export function extractNames(read, files) {
       add('toggle', v, file, e.line, guards);
     }
     if (file.startsWith('x3270/')) {
+      for (const m of text.matchAll(GET_RESOURCE_CALL)) {
+        literalResources.push({ value: m[1], file, line: lineOf(text, m.index), guards });
+      }
       for (const m of text.matchAll(MENU_CALL)) {
         const open = m.index + m[0].length - 1;
         const args = callArgs(text, open);
@@ -208,21 +371,37 @@ export function extractNames(read, files) {
     }
   }
 
+  // get_resource("literal") names, unless an option or toggle already sets that resource.
+  for (const { value, file, line, guards } of literalResources) {
+    if (optionResources.has(value) || toggleResources.has(value)) continue;
+    add('resource', value, file, line, guards);
+  }
+
   const resText = read('include/resources.h');
   const resGuards = guardsByLine(resText);
   for (const m of resText.matchAll(/^#\s*define\s+(Res\w+)\b/gm)) {
+    const line = lineOf(resText, m.index);
     const value = defs.get(m[1]);
-    if (value === undefined || optionResources.has(value) || toggleResources.has(value)) continue;
+    if (value === undefined) { unresolved.push(`${m[1]} at include/resources.h:${line}`); continue; }
+    if (optionResources.has(value) || toggleResources.has(value)) continue;
     const dots = [...defs.keys()].filter((k) => k.startsWith('Dot') && defs.get(k) === `.${value}`);
     if (!used.has(m[1]) && !dots.some((d) => used.has(d))) continue;
-    add('resource', value, 'include/resources.h', lineOf(resText, m.index), resGuards);
+    add('resource', value, 'include/resources.h', line, resGuards);
   }
 
-  for (const n of names.values()) n.sites.sort((a, b) => a.at.localeCompare(b.at, 'en', { numeric: true }));
+  // `path:line` ascending: path in code-unit order, then line as a number, never locale
+  // collation -- stable across locales, and doesn't e.g. sort "...:10" before "...:2" as text.
+  const compareAt = (a, b) => {
+    const ai = a.lastIndexOf(':'), bi = b.lastIndexOf(':');
+    const ap = a.slice(0, ai), bp = b.slice(0, bi);
+    if (ap !== bp) return ap < bp ? -1 : 1;
+    return Number(a.slice(ai + 1)) - Number(b.slice(bi + 1));
+  };
+  for (const n of names.values()) n.sites.sort((a, b) => compareAt(a.at, b.at));
   return {
     names: [...names.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)),
     unresolved: [...new Set(unresolved)].sort(),
-    nonLiteralMenuCalls: nonLiteralMenuCalls.sort(),
+    nonLiteralMenuCalls: nonLiteralMenuCalls.sort(compareAt),
     privateXactions,
   };
 }
