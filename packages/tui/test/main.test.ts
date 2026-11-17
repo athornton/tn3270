@@ -166,6 +166,16 @@ describe('-bind-limit', () => {
   });
 });
 
+describe('-visualbell', () => {
+  it('sets visualBell', () => {
+    expect(parseArgs(['-visualbell', 'h']).visualBell).toBe(true);
+  });
+
+  it('is absent by default', () => {
+    expect(parseArgs(['h']).visualBell).toBeUndefined();
+  });
+});
+
 /**
  * The host argument's full shape, `[prefix:][LU,LU@]host[:port]`.
  *

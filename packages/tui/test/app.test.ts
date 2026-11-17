@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  AckAid, AID, BIND_OFF, BIND_RU, resolve, Session, TelnetCmd as T, TelnetOpt as O, Tn3270eDataType,
-  Tn3270eFunc, Tn3270eOp, type Connection, type GeometrySetting,
+  AckAid, AID, BIND_OFF, BIND_RU, resolve, Session, SnaCmd, TelnetCmd as T, TelnetOpt as O,
+  TelnetSubopt as S, Tn3270eDataType, Tn3270eFunc, Tn3270eOp, WCC,
+  type Connection, type GeometrySetting,
 } from '@tn3270/core';
 import {
   applicable, KEYPAD_KEYS, TERMINAL_BINDINGS, TRANSFER_FIELDS, type Action, type TransferFiles,
@@ -376,6 +377,99 @@ describe('quitting', () => {
     h.session.keyboard.typeString('ZZZ');
     h.app.onInput(Uint8Array.from([0x41]));
     expect(h.stdout.written.length).toBe(after);
+  });
+});
+
+/**
+ * THE HOST'S ALARM (core's `'alarm'` event, Task 5 of the blink/intensify/bell plan): BEL, or
+ * with `-visualbell` a reverse-screen flash (DECSCNM on, then off 100ms later) instead -- as
+ * xterm's own visual bell does. See `app.ts`'s `session.on('alarm', ...)`.
+ *
+ * FIRED FOR REAL, not synthesized by calling a private method: `conn.host(...)` plays the WCC
+ * sound-alarm bit (`WCC.SOUND_ALARM`, 0x04) through a connected, negotiated `Session` exactly as
+ * `core/test/session.test.ts` does, so this proves the whole path from the wire to `stdout`, the
+ * same standard every other `harness()` test in this file holds input and screen events to.
+ */
+describe('the host alarm', () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  interface AlarmHarness extends Harness {
+    /** Play the WCC sound-alarm bit through the (already connected, negotiated) session. */
+    fireAlarm(): void;
+  }
+
+  /** Like `harness()`, but with a real `Connection` the test can write host bytes through. */
+  async function alarmHarness(visualBell?: boolean): Promise<AlarmHarness> {
+    const conn: Connection = {
+      write: () => {}, close: () => {}, onData: undefined, onClose: undefined, onError: undefined,
+    };
+    const session = new Session({ connect: () => conn });
+    const stdin = new FakeStdin();
+    const stdout = new FakeStdout();
+    const host = new FakeHost();
+    const app = new App({
+      session, stdin, stdout, host, depth: 0,
+      ...(visualBell !== undefined ? { visualBell } : {}),
+    });
+    await session.connect('h', 23);
+    // The minimal negotiation `core/test/session.test.ts`'s `FakeConnection.negotiate()` uses, so
+    // `conn.onData` below is read as 3270 data (IAC EOR terminated) rather than NVT text.
+    const send = (...bytes: number[]): void => { conn.onData?.(Uint8Array.from(bytes)); };
+    send(T.IAC, T.DO, O.TERMINAL_TYPE);
+    send(T.IAC, T.SB, O.TERMINAL_TYPE, S.SEND, T.IAC, T.SE);
+    send(T.IAC, T.DO, O.EOR, T.IAC, T.WILL, O.EOR);
+    send(T.IAC, T.DO, O.BINARY, T.IAC, T.WILL, O.BINARY);
+    const fireAlarm = (): void => { send(SnaCmd.W, WCC.SOUND_ALARM, T.IAC, T.EOR); };
+    return { app, session, stdin, stdout, host, fireAlarm };
+  }
+
+  it('writes BEL', async () => {
+    const h = await alarmHarness();
+    h.app.start();
+    h.stdout.written = [];                 // drop start()'s own writes
+    h.fireAlarm();
+    // The WCC write that carries the alarm bit is also an ordinary host write, so it redraws the
+    // screen too (session 'screen' event) -- real and unrelated to the bell. The alarm listener
+    // runs FIRST (core/session.ts emits 'alarm' before 'screen' from the same write), so its own
+    // write is the earliest one, checked alone rather than against the whole, noisier stream.
+    expect(h.stdout.written[0]).toBe('\x07');
+  });
+
+  it('with -visualbell, flashes instead: on now, off 100ms later, and never BEL', async () => {
+    const h = await alarmHarness(true);
+    h.app.start();
+    h.stdout.written = [];
+    h.fireAlarm();
+    expect(h.stdout.written[0]).toBe('\x1b[?5h');
+    vi.advanceTimersByTime(100);
+    expect(h.stdout.written.at(-1)).toBe('\x1b[?5l');
+    expect(h.stdout.all).not.toContain('\x07');
+  });
+
+  it('writes nothing after quitting, even if an alarm arrives', async () => {
+    const h = await alarmHarness();
+    h.app.start();
+    h.app.onInput(Uint8Array.from([0x1d]));          // Ctrl-]: quit
+    const before = h.stdout.written.length;
+    h.fireAlarm();
+    expect(h.stdout.written.length).toBe(before);
+  });
+
+  it('quit during the flash leaves the terminal with reverse screen OFF, and nothing written after', async () => {
+    const h = await alarmHarness(true);
+    h.app.start();
+    h.fireAlarm();
+    expect(h.stdout.all).toContain('\x1b[?5h');
+    expect(h.stdout.all).not.toContain('\x1b[?5l');
+    h.app.onInput(Uint8Array.from([0x1d]));          // Ctrl-]: quit, mid-flash
+    // The terminal ends with reverse screen OFF, written as part of quitting -- NOT left for the
+    // original 100ms timer, which must never fire again (it would write after the TUI has handed
+    // the terminal back, landing a stray DECSCNM "off" on the user's shell).
+    expect(h.stdout.all).toContain('\x1b[?5l');
+    const before = h.stdout.written.length;
+    vi.advanceTimersByTime(1000);
+    expect(h.stdout.written.length).toBe(before);
   });
 });
 
