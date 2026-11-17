@@ -283,3 +283,374 @@
   evidence:
     code: [packages/core/src/tn3270e.ts:124]
     tests: [packages/core/test/tn3270e.test.ts]
+# --- keyboard ---
+- id: typing
+  area: keyboard
+  title: Type characters into the screen
+  covers: [xaction:Default]
+  x3270: "any key with no keymap binding types its character (Default xaction, x3270/xkybd.c:304)"
+  gui: "key: any printable key, through actionForKey into Keyboard.type; witnessed live from the GUI (TN3270_GUI_KEYS seam under Xvfb)"
+  status: ours
+  evidence:
+    code: [packages/canvas/src/keys.ts:302, packages/core/src/keyboard.ts:26]
+    tests: [packages/canvas/test/keys.test.ts, packages/core/test/keyboard.test.ts]
+    live: "Typed input, proved end to end — and the clock nearly faked it"
+  browser: "the same canvas/src/keys.ts mapper in the page"
+  others: {tui: "printable bytes (frontend/src/keymap.ts)", cli: "String()"}
+- id: aid-keys
+  area: keyboard
+  title: Enter, Clear, PF1-PF24 and PA1-PA3
+  covers: [action:Enter, action:Clear, action:PF, action:PA]
+  x3270: "Return, F1-F12, Shift/Alt-F1-F12, Alt-1/2/3, Alt-C (x3270/fb-x3270:215-305); keypad buttons; Enter()/Clear()/PF(n)/PA(n) actions"
+  gui: "keys: Enter, Ctrl-C (Clear), F1-F12, Shift-F1-F12, Alt-1/2/3; keypad buttons for all 24 PF and 3 PA keys. PA1/PA2 witnessed through the CLI; PA1 also by hand from a real GUI keypress on a Mac"
+  status: partial
+  gap: "an AID pressed while the keyboard is locked goes straight to the host (Session.sendAID has no lock check), where x3270 queues it and sends it at unlock, or drops it on X -f (PF_action/PA_action/Enter_action/Clear_action, Common/kybd.c:929, :954, :2832, :2876)"
+  evidence:
+    code: [packages/canvas/src/keys.ts:92, packages/canvas/src/keys.ts:123, packages/canvas/src/keys.ts:290, packages/canvas/src/keys.ts:158, packages/frontend/src/actions.ts:157, packages/core/src/session.ts:1821]
+    tests: [packages/canvas/test/keys.test.ts, packages/frontend/test/actions.test.ts, packages/core/test/session.test.ts]
+    live: "PA1 and PA2 — a real host reaction, observed, not the user's Mac check after all"
+  browser: "the same chords and the keypad overlay"
+  others: {tui: "Enter, Ctrl-C, F1-F12, Shift-Fn, ESC-1/2/3", cli: "Enter(), Clear(), PF(n), PA(n)"}
+- id: attn
+  area: keyboard
+  title: Attn key
+  covers: [action:Attn]
+  x3270: "Alt-A (x3270/fb-x3270:306-307); keypad Attn button; Attn() action"
+  gui: "key: Ctrl-A (c3270's chord); keypad Attn button"
+  status: partial
+  gap: "sends Telnet BREAK even on a TN3270E session, where x3270 sends IAC IP, and x3270 shows X -f on an unbound E session instead (Attn_action, Common/kybd.c:982-1002); README What is not implemented. No live witness on TN3270E"
+  evidence:
+    code: [packages/canvas/src/keys.ts:127, packages/core/src/session.ts:1910, packages/core/src/telnet.ts:226]
+    tests: [packages/core/test/session.test.ts, packages/frontend/test/actions.test.ts]
+    live: "Attn against VM/370 — measured, and the answer is a null result"
+  browser: "the same Ctrl-A and keypad button"
+  others: {tui: "Ctrl-A", cli: "Attn()"}
+- id: interrupt
+  area: keyboard
+  title: Send Telnet IAC IP (Interrupt)
+  covers: [action:Interrupt]
+  x3270: "Interrupt() action, keymap or script only; sends IAC IP in any 3270 mode (Common/kybd.c:1011)"
+  gui: none
+  status: missing
+  browser: "none"
+- id: sysreq
+  area: keyboard
+  title: Sys Req key
+  covers: [action:SysReq]
+  x3270: "keypad Sys Req button; the Sys_Req keysym (x3270/xkybd.c:394); SysReq() action"
+  gui: "keypad SysRq button (no chord, as c3270). The live witness was the CLI on a classic session; the TN3270E IAC AO form and the button click have no live witness"
+  status: ours
+  evidence:
+    code: [packages/frontend/src/keypad.ts:102, packages/frontend/src/actions.ts:189, packages/core/src/session.ts:1889]
+    tests: [packages/core/test/session.test.ts, packages/core/test/tn3270e-session.test.ts, packages/frontend/test/actions.test.ts, packages/canvas/test/keypadUi.test.ts]
+    live: "Sys Req and Dup against VM/370 and TK5 — DONE 2026-09-21, and the keypad button is still untried"
+  browser: "the keypad overlay's SysRq button"
+  others: {tui: "Ctrl-K list", cli: "SysReq()"}
+- id: dup
+  area: keyboard
+  title: Dup key
+  covers: [action:Dup]
+  x3270: "keypad Dup button; Dup() action (writes 0x1c, sets MDT, tabs; Common/kybd.c:2763)"
+  gui: "key: Ctrl-D (c3270's chord); keypad Dup button. The live witness was the CLI; Dup's tab is unwitnessed (single-field panel)"
+  status: ours
+  evidence:
+    code: [packages/canvas/src/keys.ts:128, packages/frontend/src/keypad.ts:98, packages/core/src/keyboard.ts:126]
+    tests: [packages/core/test/keyboard.test.ts, packages/canvas/test/keys.test.ts, packages/frontend/test/actions.test.ts]
+    live: "Sys Req and Dup against VM/370 and TK5 — DONE 2026-09-21, and the keypad button is still untried"
+  browser: "the same Ctrl-D and keypad button"
+  others: {tui: "Ctrl-D", cli: "Dup()"}
+- id: field-mark
+  area: keyboard
+  title: Field Mark key
+  covers: [action:FieldMark]
+  x3270: "keypad Field Mark button; FieldMark() action (writes 0x1e and advances; Common/kybd.c:2802)"
+  gui: "key: Ctrl-F (c3270's chord); keypad FldMk button. The live witness was the CLI"
+  status: ours
+  evidence:
+    code: [packages/canvas/src/keys.ts:129, packages/frontend/src/keypad.ts:107, packages/core/src/keyboard.ts:164]
+    tests: [packages/core/test/keyboard.test.ts, packages/canvas/test/keys.test.ts, packages/frontend/test/actions.test.ts]
+    live: "Field Mark and Newline against VM/370 and TK5 — DONE 2026-09-24, so all four keys are witnessed"
+  browser: "the same Ctrl-F and keypad button"
+  others: {tui: "Ctrl-F", cli: "FieldMark()"}
+- id: reset-key
+  area: keyboard
+  title: Reset key
+  covers: [action:Reset]
+  x3270: "Alt-R (x3270/fb-x3270:322-323); keypad Reset button; Reset() action"
+  gui: "key: Ctrl-R (c3270's chord); keypad Reset button"
+  status: partial
+  gap: "clears the lock but leaves insert mode on; x3270's Reset puts insert mode back to the alwaysInsert default, off (do_reset, Common/kybd.c:2042)"
+  evidence:
+    code: [packages/canvas/src/keys.ts:124, packages/core/src/keyboard.ts:434, packages/core/src/oia.ts:163]
+    tests: [packages/core/test/keyboard.test.ts, packages/canvas/test/keys.test.ts]
+    live: unwitnessed
+  browser: "the same Ctrl-R and keypad button"
+  others: {tui: "Ctrl-R", cli: "Reset()"}
+- id: cursor-movement
+  area: keyboard
+  title: Cursor movement, Home, Tab, BackTab and Newline
+  covers: [action:Up, action:Down, action:Left, action:Right, action:Home, action:Tab, action:BackTab, action:Newline]
+  x3270: "arrow keys, Home, Tab, Shift-Tab, Shift-Return (Newline) (x3270/xkybd.c:356-390, x3270/fb-x3270:291-295); keypad buttons; the matching actions"
+  gui: "keys: arrows, Home, Tab, Shift-Tab; keypad buttons for all, including NewLn (Newline has no chord, deliberately)"
+  status: partial
+  gap: "a movement key does not clear an operator error, which x3270's do (OERR_CLEAR_OR_ENQ, Common/kybd.c:146-157), so X Protected or X Numeric stays up until Reset; and the cursor moves at once on a host-locked keyboard, where x3270 queues the move until unlock"
+  evidence:
+    code: [packages/canvas/src/keys.ts:93, packages/canvas/src/keys.ts:288, packages/core/src/keyboard.ts:288, packages/core/src/keyboard.ts:314, packages/core/src/keyboard.ts:348, packages/frontend/src/keypad.ts:119]
+    tests: [packages/core/test/keyboard.test.ts, packages/canvas/test/keys.test.ts, packages/frontend/test/actions.test.ts]
+    live: "Field Mark and Newline against VM/370 and TK5 — DONE 2026-09-24, so all four keys are witnessed"
+  browser: "the same keys and keypad overlay"
+  others: {tui: "arrows, Home, Tab, Shift-Tab; Newline from the Ctrl-K list", cli: "Up() Down() Left() Right() Home() Tab() BackTab() Newline()"}
+- id: erase-backspace
+  area: keyboard
+  title: Backspace (destructive Erase, and BackSpace's cursor-left)
+  covers: [action:Erase, action:BackSpace]
+  x3270: "the BackSpace key is Erase(), which deletes the character to the left and closes up the field (x3270/fb-x3270:294, Common/kybd.c:2374); BackSpace() is a non-destructive cursor-left (Common/kybd.c:2285)"
+  gui: "key: Backspace; keypad BkSp button"
+  status: partial
+  gap: "Backspace nulls the cell to its left and leaves the gap rather than shifting the rest of the field left as x3270's Erase does; it also edits a host-locked keyboard, where x3270 queues the key. The CLI's BackSpace() erases, where s3270's BackSpace() only moves the cursor"
+  evidence:
+    code: [packages/canvas/src/keys.ts:98, packages/core/src/keyboard.ts:398]
+    tests: [packages/core/test/keyboard.test.ts]
+    live: unwitnessed
+  browser: "the same Backspace and keypad button"
+  others: {tui: "Backspace", cli: "BackSpace() (destructive, unlike s3270's)"}
+- id: delete-key
+  area: keyboard
+  title: Delete key
+  covers: [action:Delete]
+  x3270: "Delete key and Alt-D (x3270/xkybd.c:374, x3270/fb-x3270:312-313); keypad Del button; Delete() action"
+  gui: "key: Delete; keypad Del button"
+  status: partial
+  gap: "does nothing on an unformatted screen, where x3270 shifts the rest of the screen left (do_delete, Common/kybd.c:2168); and edits a host-locked keyboard, where x3270 queues the key (Common/kybd.c:2259-2262)"
+  evidence:
+    code: [packages/canvas/src/keys.ts:99, packages/core/src/keyboard.ts:413]
+    tests: [packages/core/test/keyboard.test.ts]
+    live: unwitnessed
+  browser: "the same key and keypad button"
+  others: {tui: "Delete", cli: "Delete()"}
+- id: erase-eof
+  area: keyboard
+  title: Erase EOF
+  covers: [action:EraseEOF]
+  x3270: "Alt-E (x3270/fb-x3270:314-315); keypad Erase EOF button; EraseEOF() action"
+  gui: "key: End (c3270's choice); keypad ErEOF button"
+  status: partial
+  gap: "does nothing on an unformatted screen, where x3270 erases to the end of the screen (Common/kybd.c:3034-3039); and erases on a host-locked keyboard, where x3270 queues it"
+  evidence:
+    code: [packages/canvas/src/keys.ts:101, packages/core/src/keyboard.ts:369]
+    tests: [packages/core/test/keyboard.test.ts]
+    live: unwitnessed
+  browser: "the same End key and keypad button"
+  others: {tui: "End", cli: "EraseEOF()"}
+- id: erase-input
+  area: keyboard
+  title: Erase Input
+  covers: [action:EraseInput]
+  x3270: "keypad Erase Input button; EraseInput() action"
+  gui: "key: Ctrl-U (c3270's chord); keypad ErInp button"
+  status: partial
+  gap: "erases on a host-locked keyboard, where x3270 queues it (OERR_CLEAR_OR_ENQ in EraseInput_action, Common/kybd.c:3061)"
+  evidence:
+    code: [packages/canvas/src/keys.ts:125, packages/core/src/keyboard.ts:393]
+    tests: [packages/core/test/keyboard.test.ts]
+    live: unwitnessed
+  browser: "the same Ctrl-U and keypad button"
+  others: {tui: "Ctrl-U", cli: "EraseInput()"}
+- id: insert-mode
+  area: keyboard
+  title: Insert mode
+  covers: [action:Insert, action:ToggleInsert, toggle:insertMode]
+  x3270: "Insert key toggles (x3270/fb-x3270:210); Alt-I (Set(insertMode,true), x3270/fb-x3270:318) and the keypad Ins button (Insert_action, Common/kybd.c:3237) set it on; ToggleInsert(); insertMode toggle"
+  gui: "key: Insert toggles; keypad Ins button toggles"
+  status: partial
+  gap: "insert mode survives an AID, a host keyboard-restore and Reset, where x3270 turns it off on each (key_AID, Common/kybd.c:920; do_reset, :2042); the keypad button and the CLI's Insert() toggle where x3270's Insert sets it on; and an insert needs a NUL in the field's last cell, where x3270 counts NULs anywhere after the cursor (and trailing blanks, see blank-fill)"
+  evidence:
+    code: [packages/canvas/src/keys.ts:103, packages/frontend/src/actions.ts:204, packages/core/src/keyboard.ts:438]
+    tests: [packages/core/test/keyboard.test.ts, packages/frontend/test/actions.test.ts, packages/canvas/test/keys.test.ts]
+    live: unwitnessed
+  browser: "the same Insert key and keypad button"
+  others: {tui: "Insert", cli: "Insert() (toggles)"}
+- id: always-insert
+  area: keyboard
+  title: Default insert mode (alwaysInsert)
+  covers: [toggle:alwaysInsert, menu:alwaysInsertOption]
+  x3270: "Options → Toggles → Default Insert Mode; alwaysInsert toggle (off by default)"
+  gui: none
+  status: missing
+  browser: "none"
+- id: blank-fill
+  area: keyboard
+  title: Blank fill and underscore blank fill
+  covers: [toggle:blankFill, menu:blankFillOption, toggle:underscoreBlankFill, menu:underscoreBlankFillOption]
+  x3270: "Options → Toggles → Blank Fill / Underscore Blank Fill; both ON by default (x3270/resources.c:383-384, :413-414): typing turns leading NULs to blanks, and trailing blanks (or underscores) count as room for an insert (Common/kybd.c:1069, :1394)"
+  gui: none
+  status: missing
+  browser: "none"
+- id: typeahead
+  area: keyboard
+  title: Typeahead queue while the keyboard is locked
+  covers: [toggle:typeahead, menu:typeaheadOption]
+  x3270: "Options → Toggles → Typeahead; typeahead toggle, ON by default (x3270/resources.c:399-400): keys pressed while the host holds the keyboard are queued and run at unlock (enq_xta, Common/kybd.c:270)"
+  gui: none
+  status: missing
+  browser: "none"
+- id: oerr-lock
+  area: keyboard
+  title: Lock the keyboard on an operator error (oerrLock)
+  covers: [resource:oerrLock]
+  x3270: "oerrLock resource, ON by default (x3270/resources.c:340-341): an operator error locks the keyboard and drops further keys until Reset or a cursor move (operator_error, Common/kybd.c:743-756)"
+  gui: "none: no flag"
+  status: partial
+  gap: "an operator error is shown in the OIA but locks nothing: the next typed character goes in (core/src/keyboard.ts:57), which matches neither oerrLock setting, and no flag chooses"
+  evidence:
+    code: [packages/core/src/keyboard.ts:57, packages/core/src/oia.ts:151]
+    tests: [packages/core/test/keyboard.test.ts]
+  browser: "the same core behaviour"
+- id: numeric-lock
+  area: keyboard
+  title: Refuse non-numeric characters in a numeric field (numericLock)
+  covers: [resource:numericLock]
+  x3270: "numericLock resource, OFF by default (x3270/resources.c:336-337; tested at Common/kybd.c:1232)"
+  gui: "none: always on"
+  status: partial
+  gap: "always on: a letter in a numeric field is refused with X Numeric, which is x3270's numericLock=true; x3270 by default accepts it, and there is no flag"
+  evidence:
+    code: [packages/core/src/keyboard.ts:66]
+    tests: [packages/core/test/keyboard.test.ts]
+  browser: "the same core behaviour"
+- id: unlock-delay
+  area: keyboard
+  title: Delay the keyboard unlock after a host write (unlockDelay)
+  covers: [resource:unlockDelay, resource:unlockDelayMs]
+  x3270: "unlockDelay resource (OFF by default, x3270/resources.c:318-319) and unlockDelayMs (350, :51-52); do_reset, Common/kybd.c:2055-2069"
+  gui: "none: the keyboard unlocks at once on a WCC restore"
+  status: partial
+  gap: "matches x3270's default (no delay), but there is no flag or preference to turn the delay on or set its length"
+  evidence:
+    code: [packages/core/src/session.ts:1190]
+    tests: [packages/core/test/session.test.ts]
+  browser: "the same core behaviour"
+- id: cursor-extras
+  area: keyboard
+  title: Field End, Next/Previous Word, and two-column moves
+  covers: [action:FieldEnd, action:NextWord, action:PreviousWord, action:Left2, action:Right2]
+  x3270: "End key is FieldEnd (x3270/xkybd.c:380); Alt-Left/Alt-Right are PreviousWord/NextWord (x3270/fb-x3270:296-299); Left2/Right2 from the 3270 keysyms (x3270/xkybd.c:411-414)"
+  gui: "none: End is Erase EOF here"
+  status: missing
+  browser: "none"
+- id: delete-word-field
+  area: keyboard
+  title: Delete Word and Delete Field
+  covers: [action:DeleteWord, action:DeleteField]
+  x3270: "Ctrl-W DeleteWord, Ctrl-U DeleteField (x3270/fb-x3270:328, :332)"
+  gui: "none: Ctrl-U is Erase Input here"
+  status: missing
+  browser: "none"
+- id: cursor-select
+  area: keyboard
+  title: Cursor Select (light-pen selection from the keyboard)
+  covers: [action:CursorSelect]
+  x3270: "keypad Cursor Select button (x3270/keypad.c:168); the 3270 CursorSelect keysym; CursorSelect() action"
+  gui: none
+  status: missing
+  browser: "none"
+- id: move-cursor
+  area: keyboard
+  title: Move the cursor to a given position, or to a clicked cell
+  covers: [action:MoveCursor, action:MoveCursor1, xaction:MoveCursor, xaction:MoveCursor1]
+  x3270: "Shift-click moves the cursor (x3270/fb-x3270:290); MoveCursor(row,col) and MoveCursor1 in keymaps and scripts"
+  gui: none
+  status: missing
+  browser: "none: a click selects text"
+  others: {cli: "MoveCursor(row,col); no MoveCursor1"}
+- id: string-actions
+  area: keyboard
+  title: Keys bound to a string, a keysym, hex data or the not-sign
+  covers: [action:String, action:Key, action:HexString, action:PasteString, action:CircumNot]
+  x3270: "String(), Key(), HexString(), PasteString() and CircumNot() actions, reachable from keymaps and scripts"
+  gui: "none: nothing binds a key to them; ordinary typing and Edit → Paste type literal text only"
+  status: missing
+  browser: "none"
+  others: {cli: "String() only"}
+- id: nvt-page-keys
+  area: keyboard
+  title: PageUp and PageDown in NVT mode
+  covers: [action:PageUp, action:PageDown]
+  x3270: "Shift-Prior/Shift-Next in NVT mode (x3270/fb-x3270:335-336); they do nothing in 3270 mode (Common/kybd.c:3338-3360)"
+  gui: none
+  status: missing
+  browser: "none"
+- id: reverse-input
+  area: keyboard
+  title: Right-to-left display and reverse input mode
+  covers: [toggle:reverseInputMode, action:ToggleReverse, toggle:rightToLeftMode, action:Flip]
+  x3270: "righttoleft keymap: Alt-V Toggle(reverseInputMode), Alt-F Toggle(rightToLeftMode) (x3270/fb-x3270:354-358); ToggleReverse() and Flip() actions"
+  gui: none
+  status: proposed-deferred
+  reason: "these serve right-to-left code pages such as Hebrew and Arabic, and only cp037 is implemented, so they would come after those code pages."
+  browser: "none"
+- id: keypad-window
+  area: keyboard
+  title: Pop-up keypad
+  covers: [menu:keypadOption]
+  x3270: "Options → Toggles → Keypad (or the toolbar keypad button)"
+  gui: "menu: View → Keypad; keys: Ctrl-K, Alt-K"
+  status: partial
+  gap: "no Cursor Select or Compose button (x3270/keypad.c:168, :170), because neither action exists here; every other x3270 keypad key has a button"
+  evidence:
+    code: [packages/gui/src/menu.ts:399, packages/frontend/src/keypad.ts:92, packages/canvas/src/keys.ts:130]
+    tests: [packages/gui/test/menu.test.ts, packages/canvas/test/keypadUi.test.ts, packages/frontend/test/keypad.test.ts]
+    live: unwitnessed
+  browser: "Ctrl-K opens an overlay with the same 48 buttons"
+  others: {tui: "Ctrl-K opens a navigable list of the same keys"}
+- id: keypad-at-startup
+  area: keyboard
+  title: Open the keypad at start-up
+  covers: [option:-keypad]
+  x3270: "-keypad (sets keypadOn)"
+  gui: none
+  status: proposed-skipped
+  category: declined
+  reason: "the README records not reopening the keypad unbidden as a decision (The keypad: it is not remembered between runs), and Ctrl-K opens it in one keystroke."
+- id: keypad-layout
+  area: keyboard
+  title: Keypad placement, key sizes, background and shift inversion
+  covers: [resource:keypad, resource:keypadBackground, resource:keyHeight, resource:keyWidth, resource:pfWidth, resource:paWidth, resource:largeKeyWidth, resource:invertKeypadShift]
+  x3270: "keypad resource (left, right, bottom, integral, insideRight); keypadBackground; keypad.keyHeight/keyWidth/pfWidth/paWidth/largeKeyWidth; invertKeypadShift"
+  gui: "n/a: the keypad is its own window of native HTML buttons"
+  status: proposed-skipped
+  category: n/a
+  reason: "these size and place x3270's Athena widget keypad, and ours is a separate window of HTML buttons that shows all 24 PF keys at once, so there is no pixel size, attachment or shifted PF bank to set."
+- id: keymaps
+  area: keyboard
+  title: Custom keymaps
+  covers: [option:-keymap, action:Keymap, action:TemporaryKeymap, menu:keymapOption, resource:serverKeymapList]
+  x3270: "-keymap; Options → Keymap… dialog; Keymap()/TemporaryKeymap() actions; serverKeymapList picks one by X server vendor"
+  gui: "none: the key table is fixed"
+  status: missing
+  browser: "none"
+- id: keymap-display
+  area: keyboard
+  title: Show the current keymap
+  covers: [menu:keymapDisplayOption]
+  x3270: "Options → Display Keymap"
+  gui: "none: the bindings are documented in the README and in keypad tooltips only"
+  status: missing
+  browser: "none"
+  others: {tui: "the Ctrl-K list shows each key's chord"}
+- id: compose
+  area: keyboard
+  title: Compose key and compose maps
+  covers: [action:Compose, action:TemporaryComposeMap, resource:composeMap]
+  x3270: "Multi_key and dead keys run Compose() (x3270/fb-x3270:194, :267-271); keypad Compose button; composeMap resource (latin1 by default, x3270/resources.c:67-68); TemporaryComposeMap()"
+  gui: none
+  status: missing
+  browser: "none"
+- id: apl-mode
+  area: keyboard
+  title: APL mode
+  covers: [option:-apl, toggle:aplMode, resource:aplCircledAlpha]
+  x3270: "-apl; aplMode toggle (Shift-Escape swaps in the apl keymap and compose map, x3270/fb-x3270:274); aplCircledAlpha"
+  gui: none
+  status: missing
+  browser: "none"
