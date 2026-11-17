@@ -21,3 +21,14 @@ export interface KeyInput {
 export function isQuitChord(input: KeyInput): boolean {
   return input.type === 'keyDown' && input.control && !input.alt && !input.meta && input.key === ']';
 }
+
+/**
+ * The `before-input-event` listener main.ts gives every window: on Ctrl-] it keeps the key from
+ * the page (so the terminal's renderer does not ALSO send `quit`) and calls `quit` once. Every other
+ * key passes through untouched. Separate from main.ts so a test can drive it with a fake event.
+ */
+export function quitOnChord(quit: () => void): (event: { preventDefault(): void }, input: KeyInput) => void {
+  return (event, input) => {
+    if (isQuitChord(input)) { event.preventDefault(); quit(); }
+  };
+}

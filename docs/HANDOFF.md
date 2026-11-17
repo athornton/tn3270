@@ -1,4 +1,4 @@
-# Handoff — state as of 2026-11-17 (x3270 PARITY CHECKLIST BUILT on branch `parity-checklist` (from `8693176`, not merged): 413 x3270 names, 158 checklist rows, `parity.mjs gate` FAIL 157 blocking; 0.1.4 RELEASED: npm by the tag workflow with provenance, and the first GitHub release with the seven installers, SHA256SUMS and scriv notes; macOS CODE SIGNING MERGED (`db5a93d`; released installers up to 0.1.4 are UNSIGNED), Windows CI signing DROPPED for the Microsoft Store; STORE PROBE MERGED (`559ea78`); README AUDIT + FIXES MERGED (`ae8724f`); WEB RECEIVE DOWNLOADS ON COMPLETION (`4a940fe`, live-verified); `Exist` PER DIRECTION (`f533bff`); next: the user triages the parity checklist's proposed-* and unwitnessed `ours` rows, then the store roadmap)
+# Handoff — state as of 2026-11-17 (x3270 PARITY CHECKLIST MERGED (`df62e6f`); THE PACKAGED GUI'S DROPPED FIRST ARGUMENT AND SYSTEM-WIDE Ctrl-] FIXED (`gui-argv-and-quit`): 413 x3270 names, 158 checklist rows, `parity.mjs gate` FAIL 157 blocking; 0.1.4 RELEASED: npm by the tag workflow with provenance, and the first GitHub release with the seven installers, SHA256SUMS and scriv notes; macOS CODE SIGNING MERGED (`db5a93d`; released installers up to 0.1.4 are UNSIGNED), Windows CI signing DROPPED for the Microsoft Store; STORE PROBE MERGED (`559ea78`); README AUDIT + FIXES MERGED (`ae8724f`); WEB RECEIVE DOWNLOADS ON COMPLETION (`4a940fe`, live-verified); `Exist` PER DIRECTION (`f533bff`); next: the user triages the parity checklist's proposed-* and unwitnessed `ours` rows, then the store roadmap)
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
@@ -7,8 +7,15 @@ latest START HERE entry names. Each finished feature has its own pair under `doc
 
 ## START HERE — LATEST FIRST; NEXT: TRIAGE THE PARITY CHECKLIST'S proposed-* AND unwitnessed `ours` ROWS, THEN THE STORE ROADMAP (REPLACES README *Remaining* 15-22)
 
-**2026-11-17, LATEST: THE x3270 PARITY CHECKLIST IS BUILT, NOT YET MERGED** (piece 2 of the
-three-piece store plan below; branch `parity-checklist`, commits from `8693176` (`git log --oneline main..parity-checklist`);
+**2026-11-17, LATEST: TWO GUI FIXES FOUND BY THE CHECKLIST**, branch `gui-argv-and-quit`
+(`git log --oneline df62e6f..gui-argv-and-quit`): the PACKAGED app no longer drops its first
+argument (`userArgv` in `gui/src/electronSwitches.ts`, slicing at 1 unless `process.defaultApp`, and
+dropping a macOS `-psn_` argument), and Ctrl-] quits only from our own windows (`quitChord.ts`, a
+per-window `before-input-event` hook, no `globalShortcut`). Package smoke's golden launch now leads
+with `-model`: the 0.1.4 deb fails it ("more than one host given"), the fixed build passes 4/4.
+
+**2026-11-17, EARLIER: THE x3270 PARITY CHECKLIST, MERGED as `df62e6f`** (piece 2 of the
+three-piece store plan below; commits from `8693176`, merged `--no-ff`;
 spec `docs/superpowers/specs/2026-11-17-x3270-parity-checklist-design.md`, plan
 `docs/superpowers/plans/2026-11-17-x3270-parity-checklist.md`, Tasks 0-14 done). `scripts/parity-extract.mjs`
 reads the x3270 source tree as text only (never built: `make`/`configure` are never run on it, and

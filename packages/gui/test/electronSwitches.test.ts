@@ -62,4 +62,11 @@ describe('userArgv', () => {
       .toEqual(['vm']);
     expect(userArgv(['/x/electron', '/x/main.js', '--disable-gpu', 'vm'], true)).toEqual(['vm']);
   });
+
+  it("drops macOS LaunchServices' -psn_ process-serial argument, which slice(2) used to hide", () => {
+    expect(userArgv(['/Applications/TN3270.app/Contents/MacOS/TN3270', '-psn_0_123456'], undefined)).toEqual([]);
+    expect(userArgv(['/Applications/TN3270.app/Contents/MacOS/TN3270', '-psn_0_123456', 'vm'], undefined)).toEqual(['vm']);
+    // Only that exact shape: anything else still reaches parseGuiArgs and fails as unknown.
+    expect(userArgv(['/x/TN3270', '-psn_x', 'vm'], undefined)).toEqual(['-psn_x', 'vm']);
+  });
 });

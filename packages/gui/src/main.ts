@@ -25,7 +25,7 @@ import { buildMenuTemplate, modelMenuStates, applyChoiceStates, type GeometryMen
 import { createTransferController, saveDialogOptions, suggestedNameFrom } from './transferWindow.js';
 import { layoutFor } from './appRoot.js';
 import { userArgv } from './electronSwitches.js';
-import { isQuitChord } from './quitChord.js';
+import { quitOnChord } from './quitChord.js';
 import { probeLine } from './probe.js';
 import { describeFileError } from './seamFile.js';
 
@@ -3162,9 +3162,7 @@ async function maybeCapture(win: BrowserWindow, failExitCode?: number): Promise<
  * also sending its `quit` action; both would only call app.quit(), and once is enough.
  */
 app.on('browser-window-created', (_e, created) => {
-  created.webContents.on('before-input-event', (event, input) => {
-    if (isQuitChord(input)) { event.preventDefault(); app.quit(); }
-  });
+  created.webContents.on('before-input-event', quitOnChord(() => { app.quit(); }));
 });
 
 app.on('window-all-closed', () => { app.quit(); });

@@ -114,6 +114,9 @@ describe('package-checks drive the route\'s stage and probe', () => {
     expect(s.REPLAY).toBe(TRACE);
     expect(s.SHOT).toMatch(new RegExp(`^${work.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&')}[\\\\/]shot-[^\\\\/]+[\\\\/]shot\\.png$`));
     expect(s.argv).toContain(`--user-data-dir=${join(s.SHOT!, '..', 'user-data')}`);
+    // The user's arguments FIRST and `-model` leading: a packaged app that drops its first
+    // argument then fails this check ("more than one host given"); see drawsGolden's comment.
+    expect(s.argv.slice(0, 4)).toEqual(['-model', '3278-2-E', '-insecure', '127.0.0.1:1']);
     expect(s.PROBE).toBe('');
   }, 30_000);
 

@@ -1380,7 +1380,7 @@
   status: partial
   gap: "no Exit menu item on Linux or Windows (the app menu, which carries Quit, is built only on macOS), and nothing confirms before quitting a connected session as x3270's Disconnect and Exit does."
   evidence:
-    code: [packages/canvas/src/keys.ts:126, packages/gui/src/main.ts:3164, packages/gui/src/quitChord.ts, packages/gui/src/main.ts:1628, packages/gui/src/menu.ts:418, packages/gui/src/main.ts:3170]
+    code: [packages/canvas/src/keys.ts:126, packages/gui/src/main.ts:3164, packages/gui/src/quitChord.ts, packages/gui/src/main.ts:1628, packages/gui/src/menu.ts:418, packages/gui/src/main.ts:3168]
     tests: [packages/canvas/test/keys.test.ts, packages/gui/test/menu.test.ts, packages/gui/test/quitChord.test.ts]
     live: n/a
   browser: "n/a: closing the tab ends the session"

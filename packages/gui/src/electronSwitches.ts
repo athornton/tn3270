@@ -52,5 +52,13 @@ export function stripElectronSwitches(argv: readonly string[]): string[] {
  * Chromium switch that would have been stripped anyway.
  */
 export function userArgv(argv: readonly string[], defaultApp: boolean | undefined): string[] {
-  return stripElectronSwitches(argv.slice(defaultApp === true ? 2 : 1));
+  return stripElectronSwitches(argv.slice(defaultApp === true ? 2 : 1)).filter((a) => !PSN.test(a));
 }
+
+/**
+ * macOS LaunchServices may append `-psn_<n>_<n>` (a process serial number) when Finder opens the
+ * app, reportedly on the first launch of a quarantined download. `slice(2)` used to drop it by
+ * accident; now that the packaged app keeps its first argument, it is dropped by name. Only that
+ * exact shape: anything else still reaches `parseGuiArgs` and fails as an unknown flag.
+ */
+const PSN = /^-psn_\d+_\d+$/;
