@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { afterAll, describe, it, expect } from 'vitest';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,9 +13,20 @@ import { blocking, cell, check, loadRows, main, render, type Row } from '../../.
  * early) followed by a heading after the fence closes. It also has a real file just outside the
  * root (for a plain path-traversal citation) and a symlink inside the root pointing to a file
  * outside it (for the realpath escape check).
+ *
+ * Everything lives under one parent temp dir (the root, the `../x` sibling and the symlink's
+ * target are all inside it), so nothing is written elsewhere in the temp directory, and the
+ * afterAll below removes every parent this file created.
  */
+const parents: string[] = [];
+afterAll(() => {
+  for (const p of parents.splice(0)) rmSync(p, { recursive: true, force: true });
+});
 function fakeRoot(): string {
-  const root = mkdtempSync(join(tmpdir(), 'parity-'));
+  const parent = mkdtempSync(join(tmpdir(), 'parity-test-'));
+  parents.push(parent);
+  const root = join(parent, 'root');
+  mkdirSync(root);
   mkdirSync(join(root, 'src'));
   mkdirSync(join(root, 'docs'));
   writeFileSync(join(root, 'src/a.ts'), 'one\ntwo\nthree\n');
@@ -29,8 +40,9 @@ function fakeRoot(): string {
     '````', '```', '# inner', '````', '',
     '## After', '',
   ].join('\n'));
-  writeFileSync(join(root, '..', 'x'), 'a real file just outside the root\n');
-  const outsideDir = mkdtempSync(join(tmpdir(), 'parity-outside-'));
+  writeFileSync(join(parent, 'x'), 'a real file just outside the root\n');
+  const outsideDir = join(parent, 'outside');
+  mkdirSync(outsideDir);
   writeFileSync(join(outsideDir, 'secret.txt'), 'outside the root\n');
   symlinkSync(join(outsideDir, 'secret.txt'), join(root, 'src/escape-link.ts'));
   return root;
