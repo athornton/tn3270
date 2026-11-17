@@ -72,10 +72,21 @@ devDependency), GitHub Actions.
    `covers: [option:-proxy, menu:proxyOption]` under this rule.)
 2. **Rows have an `area`**, required, one of `connection`, `keyboard`, `display`, `files`,
    `scripting`, `other`. `docs/parity.md` renders one table per area in that order.
-3. **Options come from two tables, unioned:** `opt_t` arrays (`Common/glue.c` `base_opts[]`
-   and every `register_opts` table in a linked file) and x3270's own Xrm
-   `XrmOptionDescRec base_options[]` (`x3270/x3270.c`), whose resource is its `Dot*` name minus
-   the leading `.`. An option in both is one name with both sites.
+3. **Options come only from x3270's Xrm `XrmOptionDescRec base_options[]`** (`x3270/x3270.c`),
+   whose resource is its `Dot*` name minus the leading `.`. x3270's `register_opts()` is a no-op
+   (`x3270/x3270.c:1356`, `valkeep` only), so the `opt_t` tables in `Common/` (`glue.c`
+   `base_opts[]`, `sio_glue.c` `tls_opts`, …) never reach it. libXt's own options (`-geometry`,
+   `-display`, `-fg`, …) are in no x3270 table and are not names.
+3a. **Actions:** `action_table_t` entries, **excluding `ACTION_HIDDEN`** ones (x3270 hides them
+   itself), with names resolved through `include/names.h` and the source file's own `#define`s
+   (`Common/task.c` names `RESUME_INPUT` locally). **A sixth kind, `xaction`:** the pure Xt
+   actions of `XtActionsRec xactions[]` in `x3270/xactions.c` (`Cut`, `insert-selection`, …),
+   bindable in keymaps and so reachable by a user.
+3b. **A cross-check, by hand, when the inventory is regenerated:** the x3270 wiki
+   (https://x3270.miraheze.org), with its command-line options page and `Category:Actions`, because
+   `x3270.man` in 4.5ga6 is a 24-line stub pointing there. The wiki tracks 4.6, so names newer than
+   the recorded GA are expected differences. (Found by the other thread's prototype, which
+   measured 129 sources and 470 names; the counts are not to be hard-coded.)
 4. **Linkage is read from `x3270/x3270_files.mk` (`X3270_OBJECTS`) and
    `Common/lib3270_files.mk`, `lib3270i_files.mk` and `lib32xx_files.mk`**, which x3270's
    link line names (`x3270/Makefile.obj.in`: `$(LD3270) $(LD3270I) $(LD32XX) $(LD3270STUBS)`).
@@ -288,8 +299,9 @@ export function guardsByLine(text: string): (string | null)[];
 **Files:** Modify: `scripts/parity-extract.mjs`, `.d.mts`, `packages/core/test/parityExtract.test.ts`
 
 **Re-read before writing:** `Common/kybd.c:212` (an `action_table_t`), `x3270/xactions.c:137`
-(`XtActionsRec xactions[]`, literals and `An*` mixed), `Common/glue.c:505` (`opt_t base_opts[]`),
-`Common/sio_glue.c` around its `tls_opts`, `x3270/x3270.c:146` (`XrmOptionDescRec base_options[]=`,
+(`XtActionsRec xactions[]`, literals and `An*` mixed), `Common/kybd.c:239` and `Common/task.c:611-630`
+(`ACTION_HIDDEN`; task.c's local `RESUME_INPUT`), `x3270/x3270.c:1356` (`register_opts` is a
+no-op, which is why `opt_t` tables are ignored), `x3270/x3270.c:146` (`XrmOptionDescRec base_options[]=`,
 no space before `=`), `Common/toggles.c:86` (`toggle_names[]`), `x3270/menubar.c:1095-1270`
 and `:2268` (`toggle_init(t, MONOCASE, "monocaseOption", ...)`: the name is NOT the first
 argument), `include/names.h`, `include/resources.h`.
@@ -302,16 +314,20 @@ argument), `include/names.h`, `include/resources.h`.
 import { extractNames } from '../../../scripts/parity-extract.mjs';
 
 const TREE: Record<string, string> = {
-  'include/names.h': '#define AnAttn "Attn"\n#define AnStepEfont "StepEfont"\n',
+  'include/names.h': '#define AnAttn "Attn"\n#define AnStepEfont "StepEfont"\n#define AnMonoCase "MonoCase"\n',
   'include/resources.h': [
     '#define ResProxy "proxy"', '#define DotProxy "." ResProxy', '#define OptProxy "-proxy"',
     '#define ResModel "model"', '#define DotModel "." ResModel', '#define OptModel "-model"',
     '#define ResMonoCase "monoCase"', '#define ResHostsFile "hostsFile"', '#define ResUnused "unused"',
     '#define OptOnlyXrm "-onlyxrm"', '#define ResOnlyXrm "onlyXrm"', '#define DotOnlyXrm "." ResOnlyXrm',
+    '#define OptGlueOnly "-glueonly"', '#define ResGlueOnly "glueOnly"',
   ].join('\n'),
   'Common/kybd.c': [
+    '#define RESUME_INPUT "ResumeInput"',
     'static action_table_t kybd_actions[] = {',
     '    { AnAttn,\t\tAttn_action,\t\tACTION_KE },',
+    '    { AnMonoCase,\tMonoCase_action,\tACTION_KE | ACTION_HIDDEN },',
+    '    { RESUME_INPUT,\tResumeInput_action, 0 },',
     '};',
     'x = ResHostsFile;',
   ].join('\n'),
@@ -319,9 +335,7 @@ const TREE: Record<string, string> = {
     'static opt_t base_opts[] = {',
     '{ OptProxy,  OPT_STRING, false, ResProxy, aoffset(proxy),',
     '    "<host>", "Proxy" },',
-    '#if defined(X) /*[*/',
-    '{ OptModel,  OPT_STRING, false, ResModel, aoffset(model), NULL, NULL },',
-    '#endif /*]*/',
+    '{ OptGlueOnly, OPT_STRING, false, ResGlueOnly, aoffset(g), NULL, NULL },',
     '};',
   ].join('\n'),
   'Common/toggles.c': 'toggle_name_t toggle_names[] = {\n    { ResMonoCase,        MONOCASE,\t\tfalse },\n    { NULL, 0, false }\n};\n',
@@ -329,6 +343,9 @@ const TREE: Record<string, string> = {
     'XrmOptionDescRec base_options[]= {',
     '    { OptProxy,\tDotProxy,\tXrmoptionSepArg,\tNULL },',
     '    { OptOnlyXrm,\tDotOnlyXrm,\tXrmoptionNoArg,\tResTrue },',
+    '#if defined(X) /*[*/',
+    '    { OptModel,\tDotModel,\tXrmoptionSepArg,\tNULL },',
+    '#endif /*]*/',
     '    { OptClear,\t".xxx",\tXrmoptionSkipArg,\tNULL },',
     '};',
   ].join('\n'),
@@ -351,22 +368,32 @@ describe('extractNames', () => {
   const out = extractNames(read, FILES);
   const ids = out.names.map((n) => n.id);
 
-  it('finds actions from action_table_t and XtActionsRec, literal or An*', () => {
-    expect(ids).toEqual(expect.arrayContaining(['action:Attn', 'action:Cut', 'action:StepEfont']));
-    expect(out.names.find((n) => n.id === 'action:Attn')!.sites).toEqual([{ at: 'Common/kybd.c:2', guard: null }]);
+  it('finds actions (An*, or a define local to the file), leaving out ACTION_HIDDEN', () => {
+    expect(ids).toEqual(expect.arrayContaining(['action:Attn', 'action:ResumeInput']));
+    expect(ids).not.toContain('action:MonoCase');
+    expect(out.names.find((n) => n.id === 'action:Attn')!.sites).toEqual([{ at: 'Common/kybd.c:3', guard: null }]);
   });
 
-  it('unions options across opt_t and Xrm tables, with the resource each sets', () => {
+  it('finds the pure Xt actions of xactions[] as xaction:, literal or An*', () => {
+    expect(ids).toEqual(expect.arrayContaining(['xaction:Cut', 'xaction:StepEfont']));
+  });
+
+  it("takes options from x3270's Xrm table only, with the resource each sets", () => {
     const proxy = out.names.find((n) => n.id === 'option:-proxy')!;
     expect(proxy.resource).toBe('proxy');
-    expect(proxy.sites.map((s) => s.at)).toEqual(['Common/glue.c:2', 'x3270/x3270.c:2']);
+    expect(proxy.sites.map((s) => s.at)).toEqual(['x3270/x3270.c:2']);
     expect(out.names.find((n) => n.id === 'option:-onlyxrm')!.resource).toBe('onlyXrm');
     expect(out.names.find((n) => n.id === 'option:-model')!.sites[0]!.guard).toBe('defined(X)');
   });
 
+  it("ignores opt_t tables (x3270's register_opts is a no-op), so their resource is a plain resource", () => {
+    expect(ids).not.toContain('option:-glueonly');
+    expect(ids).toContain('resource:glueOnly');
+  });
+
   it('keeps an option whose define is unknown, under its identifier, and flags it', () => {
     expect(ids).toContain('option:OptClear');
-    expect(out.unresolved).toContain('OptClear at x3270/x3270.c:4');
+    expect(out.unresolved).toContain('OptClear at x3270/x3270.c:7');
   });
 
   it('finds toggles from toggle_names[]', () => {
@@ -450,7 +477,7 @@ function callArgs(text, open) {
 const MENU_CALL = /\b(add_menu_itemv|toggle_init|Xt\w*Create\w*(?:Widget|PopupShell))\s*\(/g;
 
 /**
- * The five kinds of name, over the linked `files`. `read(path)` returns file text.
+ * The six kinds of name, over the linked `files`. `read(path)` returns file text.
  * @returns {{ names: object[], unresolved: string[], nonLiteralMenuCalls: string[] }}
  */
 export function extractNames(read, files) {
@@ -480,18 +507,21 @@ export function extractNames(read, files) {
     try { text = read(file); } catch { continue; } // missingSources is computed by the caller
     const guards = guardsByLine(text);
     for (const t of text.match(/\b(?:Res|Dot)\w+/g) ?? []) used.add(t);
+    const local = parseDefines(text); // e.g. Common/task.c's RESUME_INPUT
+    const actionName = (token, line) => (local.has(token) ? local.get(token) : resolveName(token, file, line));
 
-    for (const e of tables(text, /\b(?:action_table_t|XtActionsRec)\s+\w+\s*\[\s*\]\s*=\s*\{/g)) {
-      const [name] = fields(e.body);
-      if (name && /^(An\w+|"[^"]*")$/.test(name)) add('action', resolveName(name, file, e.line), file, e.line, guards);
-    }
-    for (const e of tables(text, /\bopt_t\s+\w+\s*\[\s*\]\s*=\s*\{/g)) {
+    for (const e of tables(text, /\baction_table_t\s+\w+\s*\[\s*\]\s*=\s*\{/g)) {
       const f = fields(e.body);
-      if (!/^Opt\w+$/.test(f[0] ?? '')) continue;
-      const res = /^Res\w+$/.test(f[3] ?? '') ? defs.get(f[3]) : undefined;
-      if (res) optionResources.add(res);
-      add('option', resolveName(f[0], file, e.line), file, e.line, guards, { resource: res });
+      if (!/^(\w+|"[^"]*")$/.test(f[0] ?? '') || /\bACTION_HIDDEN\b/.test(f[2] ?? '')) continue;
+      add('action', actionName(f[0], e.line), file, e.line, guards);
     }
+    // The pure Xt actions (x3270/xactions.c): bindable in keymaps, so reachable by a user.
+    for (const e of tables(text, /\bXtActionsRec\s+xactions\s*\[\s*\]\s*=\s*\{/g)) {
+      const [name] = fields(e.body);
+      if (/^(\w+|"[^"]*")$/.test(name ?? '')) add('xaction', actionName(name, e.line), file, e.line, guards);
+    }
+    // Options: x3270's own Xrm table only. Its register_opts() is a no-op (x3270/x3270.c:1356),
+    // so the opt_t tables in Common/ never reach it.
     for (const e of tables(text, /\bXrmOptionDescRec\s+\w+\s*\[\s*\]\s*=\s*\{/g)) {
       const f = fields(e.body);
       if (!/^Opt\w+$/.test(f[0] ?? '')) continue;
@@ -546,7 +576,7 @@ Add to `.d.mts`:
 
 ```ts
 export interface Site { at: string; guard: string | null }
-export interface Name { id: string; kind: 'action' | 'option' | 'resource' | 'toggle' | 'menu'; value: string; sites: Site[]; resource?: string }
+export interface Name { id: string; kind: 'action' | 'xaction' | 'option' | 'resource' | 'toggle' | 'menu'; value: string; sites: Site[]; resource?: string }
 export interface Extracted { names: Name[]; unresolved: string[]; nonLiteralMenuCalls: string[] }
 export function extractNames(read: (path: string) => string, files: string[]): Extracted;
 ```
@@ -561,7 +591,7 @@ naming it appears in a linked file (resources.h itself is not linked, so its own
 don't count). The `used` check excluding resources.h relies on `files` not containing it. The
 sorting uses code-unit order on purpose, so the output is stable across locales.
 
-- [ ] **Step 4:** Run the test file: PASS (11 tests). `npm run typecheck`: exit 0.
+- [ ] **Step 4:** Run the test file: PASS (13 tests). `npm run typecheck`: exit 0.
 - [ ] **Step 5: Commit** with message `parity: extract actions, options, resources, toggles and menu items` + attribution.
 
 ---
@@ -735,10 +765,12 @@ the tag archive and the release tarball aren't the same tree, which the spec ass
 - [ ] **Step 6: Read the inventory before committing.** Report the counts per kind
   (`node -e` over the JSON), every `unresolved` entry, every `missingSources` entry, every
   `nonLiteralMenuCalls` site, and spot-check five names of each kind against the source by
-  `file:line`. The spec's estimates were ~98 actions, ~88 options, ≤248 resources, 24 toggles and ~45 menu
-  items. A count wildly off (say under half or over double) means a rule is wrong: fix it, add a
-  test for the case, and re-run Step 5. Known suspects: `opt_t` tables in `#if` blocks, `XtActionsRec`
-  in widget files (excluded by linkage), a `toggle_init` with a non-literal name.
+  `file:line`. The other thread's prototype measured 129 sources and 470 names (100 `action`, 21
+  `xaction`, 67 `option`, 209 `resource`, 73 `menu`; it had no `toggle` kind, and this plan's
+  toggles take their resources out of `resource`), so expect roughly that. A count wildly off (say under half or over double) means a rule is wrong: fix it, add a
+  test for the case, and re-run Step 5. Known suspects: Xrm entries in `#if` blocks, `XtActionsRec`
+  in widget files (excluded by linkage), a `toggle_init` with a non-literal name. Do the
+  amendment's wiki cross-check (3b) here too, and record the differences in the commit message.
 
 - [ ] **Step 7: Commit** the script, `.d.mts`, test and `docs/parity/x3270-names.json`, message
   `parity: the x3270 4.5ga6 name inventory (N names)`, with N the real count, + attribution.
