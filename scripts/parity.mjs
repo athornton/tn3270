@@ -81,6 +81,18 @@ const LINE = /^[1-9]\d*$/;
  * physically lives inside the repo but points outside it is still refused: resolving the
  * citation lexically would never notice.
  */
+/**
+ * Does `rel`, a `path.relative(root, x)` result, leave the root?
+ *
+ * Either separator, because `path.relative` uses `\\` on Windows: a `startsWith('../')` test caught
+ * nothing there (windows-latest, run 44142799663). The FIRST segment must be exactly `..`, so
+ * `..foo/x` stays inside. A different drive comes back absolute (`D:\\x`), so that counts too, on
+ * any platform -- `isAbsolute` alone would not see a drive letter from Linux.
+ */
+export function escapesRoot(rel) {
+  return rel.split(/[\\/]/)[0] === '..' || isAbsolute(rel) || /^[A-Za-z]:/.test(rel) || /^[\\/]/.test(rel);
+}
+
 function citationProblem(root, cite) {
   const i = cite.indexOf(':');
   const file = i === -1 ? cite : cite.slice(0, i);
@@ -92,7 +104,7 @@ function citationProblem(root, cite) {
   const real = realpathSync(resolved);
   const realRoot = realpathSync(root);
   const rel = relative(realRoot, real);
-  if (rel === '..' || rel.startsWith('../') || isAbsolute(rel)) return `${cite}: path escapes the repo root`;
+  if (escapesRoot(rel)) return `${cite}: path escapes the repo root`;
   if (!statSync(real).isFile()) return `${file || '(empty)'} is not a regular file`;
   if (lineStr !== undefined) {
     const count = readFileSync(real, 'utf8').replace(/\n$/, '').split('\n').length;
