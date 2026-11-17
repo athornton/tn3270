@@ -212,3 +212,18 @@ workflow; re-pinning the README's existing x3270 citations.
    list) are built at run time.
 6. **The extractor has no npm dependencies**, so the upstream workflow runs it with no
    `npm ci`; only `scripts/parity.mjs` uses `yaml`.
+7. **Linkage also reads `lib/3270/lib3270u_files.mk` and `lib/32xx/lib32xxu_files.mk`** (the
+   Unix-specific object lists for lib3270 and lib32xx), and adds the Unix-default TLS module
+   (`sio_openssl`, per `lib/configure.in:254-262`), resolving each object's `.c` through that
+   lib's VPATH (`lib/*/Makefile.in`'s `VPATH = $(this):$(top)/Common[:.../Nodisplay]`) rather than
+   assuming a fixed directory.
+8. **Options also come from `option_help[]`** (`x3270/x3270.c`; adds flag-only options with no
+   Xrm entry of their own, such as `OptV`/`OptVersion`) **and from `main()`'s literal `strcmp`
+   checks** (`OptHelp1`/`OptHelp2`, matched before any option table is consulted), merging sites
+   with `base_options` by id.
+9. **Resources also come from `get_resource("literal")` calls** in linked `x3270/` files (e.g.
+   `keymap.c`'s `"serverKeymapList"`, which has no `Res*`/`Dot*` macro at all), unless an option or
+   toggle already sets that name.
+10. **Menu buttons, lock icons and keymap sort-order dialog controls are deliberately not
+    names**: their functions are reachable through other, already-named items, so adding them
+    would just be a second name for the same feature.
