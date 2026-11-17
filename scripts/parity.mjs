@@ -191,7 +191,15 @@ export const cell = (s) => String(s ?? '')
   .replace(/\|/g, '\\|')
   .replace(/\r/g, '')
   .replace(/\n/g, ' ');
-const note = (r) => r.gap ?? r.reason ?? r['accept-unwitnessed'] ?? '';
+/** The note column: the gap, the reason, or the acceptance -- or, for an `ours` row that is
+ * unwitnessed and not accepted (legal in the file, blocking at the gate), says so, so a blocked
+ * `ours` row never reads as done. */
+const note = (r) => {
+  const n = r.gap ?? r.reason ?? r['accept-unwitnessed'];
+  if (n !== undefined) return n;
+  if (r.status === 'ours' && r.evidence?.live === 'unwitnessed') return 'unwitnessed, not accepted';
+  return '';
+};
 
 /** A row shaped enough to look at: a non-null, non-array object. `check()` is what reports a
  * malformed row (or a non-array top level) as a problem; `blocking()` and `render()` just skip
@@ -238,6 +246,8 @@ export function render(rows, names) {
     '| status | rows |',
     '|---|---|',
     ...STATUSES.map((s) => `| ${s} | ${count(s)} |`),
+    '',
+    `Passing the gate: ${list.length - blocking(list).length} of ${list.length} rows`,
     '',
   ];
   for (const area of AREAS) {

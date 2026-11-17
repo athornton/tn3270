@@ -182,6 +182,21 @@ describe('render and gate', () => {
     expect(md).toContain('no dialog');
   });
 
+  it('notes an unaccepted unwitnessed ours row as blocked, and an accepted one by its acceptance', () => {
+    const md = render([
+      ours({ id: 'u-open', covers: [], evidence: { code: ['src/a.ts'], tests: ['src/a.test.ts'], live: 'unwitnessed' } }),
+      ours({ id: 'u-ok', covers: [], evidence: { code: ['src/a.ts'], tests: ['src/a.test.ts'], live: 'unwitnessed' }, 'accept-unwitnessed': 'no host' }),
+    ], { tag: '4.5ga6', names: [] } as never);
+    expect(md).toContain('| u-open | ours | unwitnessed, not accepted |');
+    expect(md).toContain('| u-ok | ours | no host |');
+  });
+
+  it('says how many rows pass the gate, right after the status counts', () => {
+    const md = render(rows, { tag: '4.5ga6', names: [{ id: 'action:A' }, { id: 'option:-b' }] } as never);
+    // b-thing (ours, witnessed) and z-skip pass; a-gap (partial) blocks.
+    expect(md).toContain('| skipped | 1 |\n\nPassing the gate: 2 of 3 rows\n');
+  });
+
   it('cell escapes backslashes before pipes and strips carriage returns', () => {
     expect(cell('a\\b|c\r\nd')).toBe('a\\\\b\\|c d');
   });
