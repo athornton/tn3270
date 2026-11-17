@@ -1376,11 +1376,11 @@
   title: Exit the emulator, confirming first when connected
   covers: [action:Quit, action:Exit, menu:exitOption, menu:exitReallyOption]
   x3270: "File → Exit x3270, which while connected becomes a pullright whose Disconnect and Exit item confirms (x3270/menubar.c:653-679, :1255-1272; labels x3270/fb-x3270:907-908); Quit()/Exit() actions (Common/xio.c:209-210), refused from a keymap while connected unless -force (Common/xio.c:181-192), with Alt-Q bound to Quit(-force) (x3270/fb-x3270:266)"
-  gui: "keystroke: Ctrl-] quits at once; menu: the macOS app menu's Quit only; closing the last window quits"
+  gui: "keystroke: Ctrl-] quits at once, registered with globalShortcut and so system-wide (main.ts:480, :501); menu: the macOS app menu's Quit only; closing the last window quits. Before our menu is installed (e.g. behind the Connect dialog) Electron's default menu applies on Linux, with File → Quit and View → Reload/Toggle Developer Tools, which is not a reach equivalent"
   status: partial
   gap: "no Exit menu item on Linux or Windows (the app menu, which carries Quit, is built only on macOS), and nothing confirms before quitting a connected session as x3270's Disconnect and Exit does."
   evidence:
-    code: [packages/canvas/src/keys.ts:126, packages/gui/src/main.ts:1629, packages/gui/src/menu.ts:418, packages/gui/src/main.ts:3158]
+    code: [packages/canvas/src/keys.ts:126, packages/gui/src/main.ts:501, packages/gui/src/main.ts:1629, packages/gui/src/menu.ts:418, packages/gui/src/main.ts:3158]
     tests: [packages/canvas/test/keys.test.ts, packages/gui/test/menu.test.ts]
     live: n/a
   browser: "n/a: closing the tab ends the session"
@@ -1392,7 +1392,7 @@
   x3270: "File → About x3270 → Copyright, a popup with the build string, copyright and licence text (x3270/menubar.c:1103-1124, x3270/about.c:183)"
   gui: "menu: macOS app menu → About (Electron's standard panel, from the appMenu role); none on Linux or Windows"
   status: partial
-  gap: "the About item exists only on macOS, as Electron's default panel (main.ts never calls setAboutPanelOptions), so Linux and Windows have no About at all and no licence text is shown anywhere."
+  gap: "Linux and Windows have no About at all; the macOS panel shows the version and a default copyright line, but no licence text."
   evidence:
     code: [packages/gui/src/menu.ts:418]
     tests: [packages/gui/test/menu.test.ts]
@@ -1427,7 +1427,7 @@
   title: Print command-line usage
   covers: [option:--help, option:-?]
   x3270: "a lone --help or -? prints the option list and exits (x3270/x3270.c:502-506)"
-  gui: "none: --help is refused as an unrecognized argument (packages/gui/src/args.ts:176-177)"
+  gui: "none: from npm, refused as an unrecognized argument (args.ts:176-177); in the packaged app the first argument is dropped (main.ts:510 slices argv at 2, but a packaged Electron's argv is [exe, ...userArgs]) and the Connect dialog opens."
   status: missing
   browser: "n/a"
 - id: version-flag
@@ -1435,7 +1435,7 @@
   title: Print the version and build options
   covers: [option:-v, option:--version]
   x3270: "a lone -v or --version prints the build, build options, TLS provider, code pages and copyright, then exits (x3270/x3270.c:497-501, Common/util.c:944-956)"
-  gui: "none: --version is refused as an unrecognized argument (packages/gui/src/args.ts:176-177)"
+  gui: "none: from npm, refused as an unrecognized argument (args.ts:176-177); in the packaged app the first argument is dropped (main.ts:510 slices argv at 2, but a packaged Electron's argv is [exe, ...userArgs]) and the Connect dialog opens."
   status: missing
   browser: "n/a"
 - id: min-version
@@ -1474,7 +1474,7 @@
   area: other
   title: RPQ Names query reply and its self-defining terms
   covers: [resource:rpq]
-  x3270: "x3270 answers Query with an RPQ Names reply, QCODE 0xA1 (Common/sf.c:91); the rpq resource, or X3270RPQ in the environment, selects which self-defining terms (timezone, user, address, version) it carries (Common/rpq.c:241-245), and is settable at run time (Common/rpq.c:811)"
+  x3270: "x3270 sends an RPQ Names reply, QCODE 0xA1 (Common/sf.c:91), unconditionally in Query and QueryList All/Equiv (Common/sf.c:237-241, :280-298), carrying the program name when no rpq resource is set (Common/rpq.c:146-174, :242-245); the rpq resource, or X3270RPQ in the environment, adds self-defining terms (timezone, user, address, version), and is settable at run time (Common/rpq.c:811)"
   gui: "none: the query reply has no RPQ Names unit (packages/core/src/queryreply.ts: summary, usable area, implicit partition, colour, highlighting, DDM, null)"
   status: missing
   browser: "none"
@@ -1512,17 +1512,17 @@
   area: other
   title: Application alias
   covers: [resource:alias]
-  x3270: "alias is in the generic resource table (Common/glue.c:858), but its only reader is Windows print code (Common/Win32/gdi_print.c:570-571); nothing in a Unix x3270 reads it"
+  x3270: "no way to set it: x3270/resources.c has no Xt resource entry for alias, and glue.c's command-line parser is not called by x3270, which uses its own parse_set_clear (x3270/x3270.c:1099); its readers, Common/readres.c:84-87 and Common/childscript.c:1517-1518, always see NULL"
   gui: "n/a"
   status: proposed-skipped
   category: n/a
-  reason: "x3270 on Unix never reads alias (its only reader is wc3270's print code, under Common/Win32), so a Unix x3270 user has no such setting to miss."
+  reason: "x3270 has no way to set alias (no Xt resource entry in x3270/resources.c, and glue.c's command-line parser is not called by x3270, which uses its own parse_set_clear, x3270.c:1099); its readers in Common/readres.c:84-87 and Common/childscript.c:1517-1518 always see NULL."
   browser: "n/a"
 - id: message-text
   area: other
   title: Override the text of x3270's messages
   covers: [resource:message]
-  x3270: "every popup and About label is looked up as the resource message.<key> (Common/util.c:396-403), so a resource file can reword them"
+  x3270: "About labels, keymap, status and file-transfer messages are looked up as message.<key> (Common/util.c:396-403); most popups are literal strings."
   gui: "none: our messages are compiled in"
   status: proposed-skipped
   category: declined
@@ -1542,7 +1542,7 @@
   area: other
   title: Attach to a given window id
   covers: [resource:windowId]
-  x3270: "windowId is in the generic resource table (Common/glue.c:949), but only Windows code reads it (Common/Win32/main_window.c:98, :131)"
+  x3270: "windowId's entry in the generic resource table (Common/glue.c:949) is itself inside #if defined(_WIN32) (Common/glue.c:948-950), and only Windows code reads it (Common/Win32/main_window.c:98, :131)"
   gui: "n/a"
   status: proposed-skipped
   category: n/a
