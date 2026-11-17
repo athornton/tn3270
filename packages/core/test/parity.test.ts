@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { check, type Row } from '../../../scripts/parity.mjs';
+import { fileURLToPath } from 'node:url';
+import { blocking, check, loadRows, render, type Row } from '../../../scripts/parity.mjs';
 
 /** A throwaway repo root with one source file of 3 lines, one test file and a live-testing heading. */
 function fakeRoot(): string {
@@ -65,5 +66,47 @@ describe('parity check', () => {
       { id: 'b', area: 'other', title: 'B', covers: ['option:-b'], x3270: '-b', gui: 'none', status: 'skipped', category: 'x11-only', reason: 'X only', decided: '2026-11-17, user' } as Row,
     ]).problems).toEqual([]);
     expect(run([{ id: 'm', area: 'other', title: 'M', covers: ['action:A', 'option:-b'], x3270: 'x', gui: 'none', status: 'missing' } as Row]).problems).toEqual([]);
+  });
+});
+
+describe('render and gate', () => {
+  const rows: Row[] = [
+    ours({ id: 'b-thing', covers: ['action:A'], gui: 'File | Connect' }),
+    { id: 'a-gap', area: 'connection', title: 'Gap', covers: ['option:-b'], x3270: 'x', gui: 'flag only', status: 'partial', gap: 'no dialog' } as Row,
+    { id: 'z-skip', area: 'display', title: 'Z', covers: [], x3270: 'x', gui: 'none', status: 'skipped', category: 'x11-only', reason: 'X fonts', decided: '2026-11-17, user' } as Row,
+  ];
+
+  it('renders generated counts, then one table per area in AREAS order, rows sorted by id', () => {
+    const md = render(rows, { tag: '4.5ga6', names: [{ id: 'action:A' }, { id: 'option:-b' }] } as never);
+    expect(md).toContain('Compared against x3270 **4.5ga6**');
+    expect(md).toMatch(/\| ours \| 1 \|[\s\S]*\| partial \| 1 \|[\s\S]*\| skipped \| 1 \|/);
+    expect(md.indexOf('## connection')).toBeLessThan(md.indexOf('## display'));
+    expect(md.indexOf('a-gap')).toBeLessThan(md.indexOf('b-thing'));
+    expect(md).toContain('File \\| Connect');
+    expect(md).toContain('no dialog');
+  });
+
+  it('blocks partial, missing, proposed-* and unaccepted unwitnessed; passes the rest', () => {
+    const more = [...rows,
+      { id: 'm', area: 'other', status: 'missing', title: 'M' },
+      { id: 'p', area: 'other', status: 'proposed-deferred', reason: 'later?', title: 'P' },
+    ] as Row[];
+    expect(blocking(more)).toEqual([
+      'a-gap: partial -- no dialog', 'm: missing', 'p: proposed-deferred -- later?',
+    ]);
+  });
+});
+
+describe('the committed checklist', () => {
+  const root = fileURLToPath(new URL('../../../', import.meta.url));
+  const names = JSON.parse(readFileSync(`${root}docs/parity/x3270-names.json`, 'utf8'));
+  const committed = loadRows(readFileSync(`${root}docs/parity/checklist.yaml`, 'utf8'));
+
+  it('has no problems', () => {
+    expect(check({ rows: committed, names, root }).problems).toEqual([]);
+  });
+
+  it('docs/parity.md is exactly what render produces (run: node scripts/parity.mjs render)', () => {
+    expect(readFileSync(`${root}docs/parity.md`, 'utf8')).toBe(render(committed, names));
   });
 });

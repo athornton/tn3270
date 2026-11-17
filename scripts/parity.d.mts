@@ -15,3 +15,6 @@ export const STATUSES: Status[];
 export const CATEGORIES: string[];
 export function check(args: { rows: Row[]; names: Pick<Inventory, 'names'>; root: string }): { problems: string[]; uncovered: string[] };
 export function loadRows(text: string): Row[];
+export function blocking(rows: Row[]): string[];
+export function render(rows: Row[], names: Pick<Inventory, 'tag' | 'names'>): string;
+export function main(argv: string[], io?: { log: (s: string) => void; err: (s: string) => void }): number;
