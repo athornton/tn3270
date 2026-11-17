@@ -36,6 +36,8 @@ describe('blinker: x3270 text_blink_it (x3270/screen.c:1411-1435)', () => {
     b.frame(list(true));                  // a host repaint mid-period
     vi.advanceTimersByTime(100);
     expect(b.off).toBe(true);             // ticked at 500 from the FIRST frame, not 900
+    b.frame(list(true));                  // a frame arriving IN the off phase must not relight it
+    expect(b.off).toBe(true);
     b.frame(list(false));
     expect(b.off).toBe(false);            // no blinkers: back to on, so nothing stays blanked
     vi.advanceTimersByTime(5000);

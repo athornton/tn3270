@@ -191,6 +191,36 @@ describe('the renderer bundle', () => {
     ).toBeGreaterThan(arm);
   });
 
+  /*
+    THE BLINK TICK MUST NOT REPAINT OVER AN ERROR OR A COPY NOTICE, 2026-11-17 review finding.
+
+    `paint(last)` draws the SCREEN; `onError`/`onCopyFailed` draw their message over the canvas
+    through `paintMessage`, which never touches `last` (see `errored`'s own docstring in
+    `renderer.ts`). A repaint with no gate, firing twice a second from the blink timer whenever the
+    last screen had a blinking cell, paints that stale screen right back over the message -- which
+    is exactly the trap `errored` exists to close for the keypad/mousedown guard, reopened here.
+    `errored` alone is the right gate, not `errored && !noticeOnly`: a copy notice is ALSO painted
+    by `paintMessage`, so either one up must hold off this repaint.
+
+    A SOURCE-TEXT ASSERTION ON THE BUILT ARTIFACT, following the two cases above, for the same
+    reason: `renderer.ts` touches `window` at module load, so no unit test can import it and drive
+    the timer. Comments are stripped first so this cannot match the surrounding docstring's own
+    prose about the gate, the same correction `requestCopy` above needed.
+  */
+  it('gates the blinker\'s repaint on `!errored`, so it cannot paint over a message', () => {
+    const js = readFileSync(join(distDir, 'renderer.js'), 'utf8');
+    const code = js
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/\/\/[^\n]*/g, ' ');
+    expect(
+      /repaint:\s*\(\)\s*=>\s*\{\s*if\s*\(\s*!errored\s*&&\s*last\s*!==\s*undefined\s*\)/.test(code),
+      'renderer.js must gate the blinker\'s repaint callback on `!errored` before calling '
+      + '`paint(last)`: without it, the 500 ms blink tick repaints the stale screen over whatever '
+      + '`onError` or `onCopyFailed` painted, on a two-per-second clock, for as long as that '
+      + 'screen had a blinking cell.',
+    ).toBe(true);
+  });
+
   it('confirms drawlist.js is NOT in that graph, since it imports core and frontend', () => {
     // This is implied by the offender scan above, since drawlist.js's own @tn3270/core import
     // would already be caught if drawlist.js ever entered the graph. It earns its place anyway:

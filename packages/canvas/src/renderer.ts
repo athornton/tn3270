@@ -219,14 +219,25 @@ function tintOf(color: Rgb): ImageBitmap | undefined {
  * is pure and timer-injected (see `blinker.ts`); here it is wired to the DOM's own `setInterval`
  * (the default) and to a repaint.
  *
- * THE REPAINT IS `paint(last)` AND NOTHING ELSE, matching `resize`'s listener below exactly
- * (`window.addEventListener('resize', () => { if (last !== undefined) paint(last); });`) --
- * which is the one other place a repaint runs with no new frame and no state change. `paint`
- * itself never touches the selection or `errored`/`noticeOnly`; those are cleared by callers that
- * have a real reason to (`onFrame`, `onError`, a new press), and the blink tick is not one of
- * them, exactly as a resize is not.
+ * GATED ON `!errored`, and that is NOT the same gate the `resize` listener below gets away without
+ * (`window.addEventListener('resize', () => { if (last !== undefined) paint(last); });`): comparing
+ * the tick to resize is what this comment used to do, and it was wrong. `paint(last)` draws the
+ * SCREEN, which is `last` -- and `onError`/`onCopyFailed` paint their message over the canvas
+ * WITHOUT touching `last` (see `errored`'s own docstring above, and `paintMessage`), so a tick that
+ * fires while one is up would paint the stale screen right back over it, on a two-per-second clock,
+ * for as long as that screen had a blinking cell. `errored` alone is the right gate and not
+ * `errored && !noticeOnly`: a copy notice is ALSO painted by `paintMessage` over the canvas
+ * (`noticeOnly` only distinguishes which message, for the click and prefetch guards elsewhere), so
+ * either one up must hold off this repaint the same way.
+ *
+ * NOT RESET HERE: `onFrame` and `onAtlas` already clear `errored`/`noticeOnly` before their own
+ * `paint(...)`, and `copiedFromCache` does the same before its repaint, so the very next of those
+ * un-gates the tick's future repaints too -- the blink resumes being drawn once any of them run,
+ * with no separate wiring needed here.
  */
-const blinker = createBlinker({ repaint: () => { if (last !== undefined) paint(last); } });
+const blinker = createBlinker({
+  repaint: () => { if (!errored && last !== undefined) paint(last); },
+});
 
 function paint(list: DrawList): void {
   last = list;

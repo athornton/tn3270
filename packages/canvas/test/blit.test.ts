@@ -183,6 +183,14 @@ describe('blink and intensify, as x3270 draws them', () => {
     expect(r.draws[1]!.sx).toBe(r.draws[0]!.sx);
     expect(r.draws[1]!.dx - r.draws[0]!.dx).toBe(3);
   });
+
+  it('a blinking AND intensified cell draws neither the glyph nor its overstrike in the off phase', () => {
+    // The overstrike is reached only from inside the same guard as the glyph itself (blit.ts), so
+    // a cell that is both must lose BOTH draws in the off phase, not just the first.
+    const r = recorder();
+    blit(r.ctx, one({ blink: true, intensify: true }), { ...opts(), blinkOff: true });
+    expect(r.draws).toHaveLength(0);
+  });
 });
 
 describe('blankColumns', () => {
