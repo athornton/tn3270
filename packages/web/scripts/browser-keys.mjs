@@ -70,9 +70,10 @@ const ELECTRON_ARGV = ['--no-sandbox', '--disable-gpu', '--no-proxy-server'];
  * SPELLINGS ARE ELECTRON ACCELERATOR NAMES, never DOM code names: `Digit1` and `ArrowUp` are
  * delivered as EMPTY events, so the wrong spelling is a test that passes while proving nothing.
  *
- * `Ctrl+]` is deliberately absent, and for a DIFFERENT reason than in `keys.mjs`. There it quits
- * and would truncate the run; here the bridge intercepts it and closes the socket, so it would end
- * the session mid-sequence. Its interception is tested in `bridgecore.test.ts` instead.
+ * `Ctrl+]` is deliberately absent. In a plain browser the bridge intercepts it and closes the
+ * socket, ending the session mid-sequence (tested in `bridgecore.test.ts`); when this page is loaded
+ * in the GUI's URL mode, Electron's main process now quits the app on it before the page sees it
+ * (gui/src/quitChord.ts). Either way it would end the run.
  *
  * The negatives carry as much weight as the positives: Ctrl+Z must be dropped rather than typing
  * "z", and F13 must not become PF13. Both are asserted as absences, which is why the pass

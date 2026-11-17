@@ -41,3 +41,24 @@ export function stripElectronSwitches(argv: readonly string[]): string[] {
   return argv.filter((a) => !ELECTRON_SWITCHES.has(a)
     && !ELECTRON_VALUE_SWITCHES.some((p) => a.startsWith(p) && a.length > p.length));
 }
+
+/**
+ * The user's arguments from `process.argv`, with the Chromium switches above removed.
+ *
+ * `defaultApp` is `process.defaultApp`: true under `electron main.js ...` (npm's launcher and the
+ * harnesses), whose argv is [electron, main.js, ...user]; unset in a PACKAGED app, whose argv is
+ * [exe, ...user]. A fixed `slice(2)` dropped the packaged app's first argument, so `TN3270 host`
+ * opened the Connect dialog -- and package smoke never saw it, because the argument it lost was a
+ * Chromium switch that would have been stripped anyway.
+ */
+export function userArgv(argv: readonly string[], defaultApp: boolean | undefined): string[] {
+  return stripElectronSwitches(argv.slice(defaultApp === true ? 2 : 1)).filter((a) => !PSN.test(a));
+}
+
+/**
+ * macOS LaunchServices may append `-psn_<n>_<n>` (a process serial number) when Finder opens the
+ * app, reportedly on the first launch of a quarantined download. `slice(2)` used to drop it by
+ * accident; now that the packaged app keeps its first argument, it is dropped by name. Only that
+ * exact shape: anything else still reaches `parseGuiArgs` and fails as an unknown flag.
+ */
+const PSN = /^-psn_\d+_\d+$/;

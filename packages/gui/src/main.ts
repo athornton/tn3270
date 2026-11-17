@@ -1,5 +1,5 @@
 import {
-  app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, screen,
+  app, BrowserWindow, clipboard, dialog, ipcMain, Menu, screen,
 } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { writeFileSync, readFileSync } from 'node:fs';
@@ -24,7 +24,8 @@ import { parseKeySpec, type KeySpec } from './keyspec.js';
 import { buildMenuTemplate, modelMenuStates, applyChoiceStates, type GeometryMenu } from './menu.js';
 import { createTransferController, saveDialogOptions, suggestedNameFrom } from './transferWindow.js';
 import { layoutFor } from './appRoot.js';
-import { stripElectronSwitches } from './electronSwitches.js';
+import { userArgv } from './electronSwitches.js';
+import { quitOnChord } from './quitChord.js';
 import { probeLine } from './probe.js';
 import { describeFileError } from './seamFile.js';
 
@@ -477,7 +478,6 @@ app.whenReady().then(async () => {
       }
     }
     await win.loadURL(SEAM.url);
-    globalShortcut.register('Control+]', () => { app.quit(); });
     await maybeSendKeys(win);
     /**
      * CALLED IN URL MODE NOW, WHICH IT WAS NOT BEFORE, and the reason it could not be is gone.
@@ -498,7 +498,6 @@ app.whenReady().then(async () => {
   }
 
   await win.loadFile(layout.document('index.html'));
-  globalShortcut.register('Control+]', () => { app.quit(); });
 
   const fail = (message: string): void => {
     process.stderr.write(`${message}\n`);
@@ -507,7 +506,7 @@ app.whenReady().then(async () => {
     if (!win.isDestroyed()) win.webContents.send('error-message', message);
   };
 
-  const argv = stripElectronSwitches(process.argv.slice(2));
+  const argv = userArgv(process.argv, process.defaultApp);
   const plan = planStartup(argv, SEAM);
   if (plan.kind === 'fail') {
     fail(explain(plan.err));
@@ -3154,5 +3153,16 @@ async function maybeCapture(win: BrowserWindow, failExitCode?: number): Promise<
   }
   app.quit();
 }
+
+/**
+ * Ctrl-] quits from EVERY window this app opens (the terminal, the Connect dialog, the keypad,
+ * keyboard and transfer windows) and from no other application's. See `quitChord.ts` for why this
+ * replaced a system-wide `globalShortcut`. `browser-window-created` fires for each BrowserWindow,
+ * so a window added later cannot be left out. preventDefault keeps the terminal's renderer from
+ * also sending its `quit` action; both would only call app.quit(), and once is enough.
+ */
+app.on('browser-window-created', (_e, created) => {
+  created.webContents.on('before-input-event', quitOnChord(() => { app.quit(); }));
+});
 
 app.on('window-all-closed', () => { app.quit(); });

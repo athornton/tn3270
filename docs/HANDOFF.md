@@ -1,4 +1,4 @@
-# Handoff — state as of 2026-11-17 (x3270 PARITY CHECKLIST BUILT on branch `parity-checklist` (from `8693176`, not merged): 413 x3270 names, 158 checklist rows, `parity.mjs gate` FAIL 157 blocking; 0.1.4 RELEASED: npm by the tag workflow with provenance, and the first GitHub release with the seven installers, SHA256SUMS and scriv notes; macOS CODE SIGNING MERGED (`db5a93d`; released installers up to 0.1.4 are UNSIGNED), Windows CI signing DROPPED for the Microsoft Store; STORE PROBE MERGED (`559ea78`); README AUDIT + FIXES MERGED (`ae8724f`); WEB RECEIVE DOWNLOADS ON COMPLETION (`4a940fe`, live-verified); `Exist` PER DIRECTION (`f533bff`); next: the user triages the parity checklist's proposed-* and unwitnessed `ours` rows, then the store roadmap)
+# Handoff — state as of 2026-11-17 (x3270 PARITY CHECKLIST MERGED (`df62e6f`); THE PACKAGED GUI'S DROPPED FIRST ARGUMENT AND SYSTEM-WIDE Ctrl-] FIXED (`gui-argv-and-quit`): 413 x3270 names, 158 checklist rows, `parity.mjs gate` FAIL 157 blocking; 0.1.4 RELEASED: npm by the tag workflow with provenance, and the first GitHub release with the seven installers, SHA256SUMS and scriv notes; macOS CODE SIGNING MERGED (`db5a93d`; released installers up to 0.1.4 are UNSIGNED), Windows CI signing DROPPED for the Microsoft Store; STORE PROBE MERGED (`559ea78`); README AUDIT + FIXES MERGED (`ae8724f`); WEB RECEIVE DOWNLOADS ON COMPLETION (`4a940fe`, live-verified); `Exist` PER DIRECTION (`f533bff`); next: the user triages the parity checklist's proposed-* and unwitnessed `ours` rows, then the store roadmap)
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
@@ -7,8 +7,15 @@ latest START HERE entry names. Each finished feature has its own pair under `doc
 
 ## START HERE — LATEST FIRST; NEXT: TRIAGE THE PARITY CHECKLIST'S proposed-* AND unwitnessed `ours` ROWS, THEN THE STORE ROADMAP (REPLACES README *Remaining* 15-22)
 
-**2026-11-17, LATEST: THE x3270 PARITY CHECKLIST IS BUILT, NOT YET MERGED** (piece 2 of the
-three-piece store plan below; branch `parity-checklist`, commits from `8693176` (`git log --oneline main..parity-checklist`);
+**2026-11-17, LATEST: TWO GUI FIXES FOUND BY THE CHECKLIST**, branch `gui-argv-and-quit`
+(`git log --oneline df62e6f..gui-argv-and-quit`): the PACKAGED app no longer drops its first
+argument (`userArgv` in `gui/src/electronSwitches.ts`, slicing at 1 unless `process.defaultApp`, and
+dropping a macOS `-psn_` argument), and Ctrl-] quits only from our own windows (`quitChord.ts`, a
+per-window `before-input-event` hook, no `globalShortcut`). Package smoke's golden launch now leads
+with `-model`: the 0.1.4 deb fails it ("more than one host given"), the fixed build passes 4/4.
+
+**2026-11-17, EARLIER: THE x3270 PARITY CHECKLIST, MERGED as `df62e6f`** (piece 2 of the
+three-piece store plan below; commits from `8693176`, merged `--no-ff`;
 spec `docs/superpowers/specs/2026-11-17-x3270-parity-checklist-design.md`, plan
 `docs/superpowers/plans/2026-11-17-x3270-parity-checklist.md`, Tasks 0-14 done). `scripts/parity-extract.mjs`
 reads the x3270 source tree as text only (never built: `make`/`configure` are never run on it, and
@@ -38,20 +45,16 @@ evidence is `live: unwitnessed` — `reconnect`, `devname`, `bind-limit`, `tls-v
 `dup`, `field-mark`; (3) whatever is still `missing`/`partial` after that is the store roadmap, which
 replaces README *Remaining* 15-22 (separate work, no spec yet).
 
-### FOUND, NOT FIXED
+### FOUND BY THE CHECKLIST (1-2 FIXED SINCE, 3-13 OPEN)
 
 Found while populating the checklist and confirmed by an independent reviewer, mostly with a
-probe; none of these are fixed by this branch.
+probe. Items 1-2 were fixed afterwards in `a5aa71e`; the rest are open.
 
-1. **GUI, HIGH, blocks any store build:** `packages/gui/src/main.ts:510` uses
-   `process.argv.slice(2)`, but a packaged Electron's argv is `[exe, ...userArgs]`, so the first
-   user argument is dropped. `TN3270 host` opens the Connect dialog. Package smoke misses it
-   because its first argument is `--disable-gpu` (`scripts/package-checks.mjs:99,173`). Likely
-   fix: `slice(process.defaultApp ? 2 : 1)`, plus a package-smoke case with a host as the first
-   argument.
-2. **GUI, MEDIUM:** Ctrl-] is registered with `globalShortcut` (`main.ts:480,501`), which is
-   system-wide, so Ctrl-] in another app (e.g. telnet's escape) quits TN3270, per Electron's docs
-   (not run).
+1. ~~**GUI, HIGH:** the packaged app dropped its first argument (`main.ts` sliced argv at 2).~~
+   **FIXED in `a5aa71e`** (`userArgv`, slicing at 1 unless `process.defaultApp`); package smoke's
+   golden launch now leads with `-model`, which the 0.1.4 deb fails and the fix passes 4/4.
+2. ~~**GUI, MEDIUM:** Ctrl-] was a system-wide `globalShortcut`.~~ **FIXED in `a5aa71e`**: a
+   per-window `before-input-event` hook (`quitChord.ts`), probed to quit before the renderer acts.
 3. **Core:** AID keys are sent while the keyboard is locked (`Session.sendAID` has no lock check;
    x3270 queues or drops them).
 4. **Core:** editing and cursor keys change the screen while host-locked.
