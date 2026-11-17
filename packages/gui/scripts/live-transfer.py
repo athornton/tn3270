@@ -9,6 +9,8 @@ stubbed dialog, so it can never see a transfer that COMPLETES.
 
     python3 packages/gui/scripts/live-transfer.py vm
     python3 packages/gui/scripts/live-transfer.py tso
+    python3 packages/gui/scripts/live-transfer.py vm --ascii     # Mode=ascii, line ends converted
+    python3 packages/gui/scripts/live-transfer.py tso --ascii
 
 ## WHAT THIS IS AND IS NOT
 
@@ -71,6 +73,30 @@ PAYLOAD = bytes(range(249))
 # the frame count is the worst case rather than a lucky one) and the seed keeps the run repeatable.
 BIG_SEED = 11
 BIG_SIZE = 200 * 1024
+
+
+# `--ascii`: an LF-ONLY text file sent and received with `Mode=ascii`, the live witness for the
+# local line-end conversion (`frontend/src/lineEnds.ts`, wired once in `startTransfer`). The round
+# trip is byte-identical ONLY IF BOTH HALVES CONVERT: with no CR inserted on the send the host sees
+# no CRLF and stores ONE record, and with no CR stripped on the receive every line comes back
+# CRLF-terminated. Either omission fails the `cmp`, which is what makes it a witness.
+#
+# PRINTABLE ASCII, AND ONLY CHARACTERS EVERY CODE PAGE AGREES ON: letters, digits, space and
+# `.,:-`. No brackets, braces, `^`, `|` or tabs, whose ASCII<->EBCDIC mapping differs between hosts
+# and code pages -- a mismatch there would be a translation question, not a line-end one. No
+# trailing blanks either, which a record format is free to trim. Lines of DIFFERENT LENGTHS, so the
+# CMS listing's record length identifies the longest one rather than a coincidence, and the last
+# line is LF-terminated, as the plan requires.
+ASCII_LINES = [
+    "Line 1: ascii line ends, tn3270 live witness.",
+    "Line 2: the quick brown fox jumps over the lazy dog.",
+    "Line 3: 0123456789",
+    "Line 4: short",
+    "Line 5: THE QUICK BROWN FOX, IN CAPITALS, FOR A HOST THAT FOLDS.",
+    "Line 6: -.,:",
+    "Line 7: last line, LF-terminated.",
+]
+ASCII_PAYLOAD = "".join(f"{l}\n" for l in ASCII_LINES).encode("ascii")
 
 
 def big_payload():
@@ -304,7 +330,10 @@ def run(which, phase, keys_value, transfer_value, local_path, log):
         # plaintext host does not REJECT a handshake -- it goes quiet. So the symptom of omitting
         # this is a stall, not an error.
         "-insecure", "-model", "3278-2-E",
-        cfg["target"],
+        # `TN3270_TARGET` points the client at a RECORDING RELAY in front of the host, which is
+        # how a run names the protocol it used: the GUI prints no engine of its own, and the
+        # status line reads `done: N bytes` on CUT and DFT alike. Unset, it is the host itself.
+        os.environ.get("TN3270_TARGET", cfg["target"]),
     ]
     # STREAMED TO THE LOG, NOT CAPTURED, and this is a defect fixed rather than a preference.
     # `subprocess.run(capture_output=True, timeout=...)` buffers everything in memory and
@@ -413,9 +442,11 @@ def report(label, ok, detail=""):
 def main():
     which = sys.argv[1] if len(sys.argv) > 1 else ""
     big = "--big" in sys.argv[2:]
-    if which not in FLOWS:
-        print(f"usage: live-transfer.py [{'|'.join(FLOWS)}] [--big]")
+    ascii_mode = "--ascii" in sys.argv[2:]
+    if which not in FLOWS or (big and ascii_mode):
+        print(f"usage: live-transfer.py [{'|'.join(FLOWS)}] [--big | --ascii]")
         print("  --big: 200 KB instead of 249 bytes, to watch progress climb and cancel mid-flight")
+        print("  --ascii: an LF-only text file both ways with Mode=ascii (local line-end conversion)")
         return 2
     pw = os.environ.get("TN3270_PASSWORD")
     if not pw:
@@ -424,30 +455,41 @@ def main():
     cfg = FLOWS[which]
     user = os.environ.get("TN3270_USER", cfg["user"])
 
-    suffix = "-big" if big else ""
-    src = Path(os.environ.get("TN3270_SRC", f"/tmp/gui-xfer-src-{which}{suffix}.bin"))
-    back = Path(os.environ.get("TN3270_BACK", f"/tmp/gui-xfer-back-{which}{suffix}.bin"))
+    suffix = "-big" if big else "-ascii" if ascii_mode else ""
+    ext = "txt" if ascii_mode else "bin"
+    src = Path(os.environ.get("TN3270_SRC", f"/tmp/gui-xfer-src-{which}{suffix}.{ext}"))
+    back = Path(os.environ.get("TN3270_BACK", f"/tmp/gui-xfer-back-{which}{suffix}.{ext}"))
     log = f"/tmp/gui-live-transfer-{which}{suffix}.log"
     Path(log).write_text("")
-    payload = big_payload() if big else PAYLOAD
+    payload = big_payload() if big else ASCII_PAYLOAD if ascii_mode else PAYLOAD
     src.write_bytes(payload)
     # The receive target must NOT exist: `Exist=keep` is the default and the engine correctly
     # refuses a receive onto an existing file. Removing it here is what makes the run repeatable.
     back.unlink(missing_ok=True)
 
-    print(f"-- {which}: {cfg['target']} as {user}, engine expected: {cfg['engine']}")
+    print(f"-- {which}: {os.environ.get('TN3270_TARGET', cfg['target'])} as {user}, "
+          f"engine expected: {cfg['engine']}")
     print(f"-- src {src} ({len(payload)}B) -> host -> {back}")
     print(f"-- log {log}  MAY CONTAIN THE PASSWORD; not for git")
     if big:
         print("-- BIG MODE: watching progress climb, then canceling mid-flight")
         print("-- NOTE a canceled transfer leaves a PARTIAL file on the host. Expected, not a fault.")
+    if ascii_mode:
+        print(f"-- ASCII MODE: {len(ASCII_LINES)} LF-only lines, Mode=ascii both ways; "
+              f"identical bytes need BOTH local conversions")
+    # `Mode=ascii` IN BOTH FORM FILLS, and on the receive too even though the form is reused and
+    # still holds it from the send: each transfer's mode is then stated where it is used rather
+    # than inherited, which is the same reasoning that sets `direction=receive` explicitly below.
+    mode_field = "mode=ascii," if ascii_mode else ""
 
     checks = []
     if which == "vm":
-        host_file = os.environ.get("TN3270_HOSTFILE", "GUIX TEST A")
+        # A DIFFERENT HOST FILE IN ASCII MODE, so the binary and ascii witnesses never share one.
+        host_file = os.environ.get("TN3270_HOSTFILE",
+                                   "GUIXA TEST A" if ascii_mode else "GUIX TEST A")
         logon = vm_flow(user, pw, host_file)
-        send_fields = f"localFile={src},hostFile={host_file},submit,done=180000"
-        recv_fields = f"localFile={back},hostFile={host_file},submit,done=180000"
+        send_fields = f"{mode_field}localFile={src},hostFile={host_file},submit,done=180000"
+        recv_fields = f"{mode_field}localFile={back},hostFile={host_file},submit,done=180000"
         # `host=vm` is NOT the default (`tso` is), so the send form must set it -- the one field
         # this flow changes that the TSO flow leaves alone.
         send_fields = f"direction=send,host=vm,{send_fields}"
@@ -467,20 +509,21 @@ def main():
         # host exists to find.
         logoff_step = "host:#cp logoff|LOGOFF AT"
     else:
-        ds_plain = os.environ.get("TN3270_DSN", "GUIXFER.BIN")
+        ds_plain = os.environ.get("TN3270_DSN", "GUIXFER.TXT" if ascii_mode else "GUIXFER.BIN")
         ds_full = f"'{user}.{ds_plain}'"
         logon = tso_flow(user, pw, ds_plain, ds_full)
         # `Recfm=variable`, NEVER fixed: fixed PADS to the record boundary, and the same 249-byte
         # payload came back as 320 bytes (249 + 71 nulls) in the TUI run -- correct behavior that
         # fails a byte comparison. Lrecl follows it.
-        send_fields = (f"direction=send,localFile={src},hostFile={ds_plain},"
+        send_fields = (f"direction=send,{mode_field}localFile={src},hostFile={ds_plain},"
                        f"recfm=variable,lrecl=1024,submit,done=180000")
         # UNQUOTED to send (TSO prepends the userid) and QUOTED to receive (absolute), which is
         # the pair the CLI round trip used and exercises both forms in one session.
         # `direction=receive` explicitly, for the reason the VM branch gives: one window, two
         # transfers, and the form still holds `send`. `recfm`/`lrecl` become inapplicable on a
         # receive and the SHARED MODEL clears them itself -- which is why they are not reset here.
-        recv_fields = f"direction=receive,localFile={back},hostFile={ds_full},submit,done=180000"
+        recv_fields = (f"direction=receive,{mode_field}localFile={back},hostFile={ds_full},"
+                       f"submit,done=180000")
         # **THE LOGOFF MUST HAPPEN IN THIS RUN, NOT A LATER ONE.** A held TSO userid is REFUSED
         # (`IKJ56425I ... IN USE`), so a separate logoff process -- which has to log on first --
         # cannot recover the one case that needs it. Three TK5 userids were stranded this way in
@@ -597,8 +640,25 @@ def main():
         scenario = (f"{prep},{send_sampled},{recv_fields},{logoff_step}"
                     if which == "tso" else f"{send_sampled},{recv_fields},{logoff_step}")
     else:
+        # **ON CMS IN ASCII MODE, THE HOST'S OWN LISTING BETWEEN THE TWO TRANSFERS**: the host
+        # stored one record per line. `LISTFILE ... (DATE` prints
+        # `GUIXA TEST A1 V <longest> <records> ...` once the seam collapses blanks, so the needle
+        # names the record format, the longest line and the line count together. A wrong count
+        # TIMES OUT, and the timeout arm prints the screen -- a CMS listing, after the logon.
+        #
+        # **IT DOES NOT JUDGE OUR SEND CONVERSION, MEASURED 2026-11-17.** With the conversion
+        # removed (the control in `docs/live-testing.md`) the LF-only send STILL listed
+        # `V 64 7`: MECAFF's IND$FILE splits records on a bare LF as well as on CRLF, and TK5's
+        # FFTP does the same. So this is a check that the file landed as records, and the SEND
+        # half's witness is the wire count instead (see "the SEND put a CR before each LF").
+        listing = ""
+        if ascii_mode and which == "vm":
+            listing_needle = (f"{host_file.split()[0]} {host_file.split()[1]} "
+                              f"{host_file.split()[2]}1 V {max(len(l) for l in ASCII_LINES)} "
+                              f"{len(ASCII_LINES)}").upper()
+            listing = f"host:listfile {host_file} (date|{listing_needle},"
         scenario = (f"{prep},{send_fields},{recv_fields},{logoff_step}"
-                    if which == "tso" else f"{send_fields},{recv_fields},{logoff_step}")
+                    if which == "tso" else f"{send_fields},{listing}{recv_fields},{logoff_step}")
     st, out = run(which, "both", keys(logon, "Ctrl+t"), scenario, str(src), log)
     checks.append(report("the run reached the form", "transfer window: opened" in out))
     checks.append(report("the form drew its rows",
@@ -639,6 +699,33 @@ def main():
     checks.append(report("BYTES ARE IDENTICAL", got == payload,
                          "identical" if got == payload
                          else f"expected {len(payload)}B, got {len(got)}B"))
+    if ascii_mode:
+        # **THE SEND HALF'S ONLY WITNESS, because neither host needs it.** MECAFF and TK5's FFTP
+        # both split records on a bare LF. Measured in the control: the LF-only send still listed
+        # `V 64 7` on CMS, and both hosts sent back the same 7 CRLF lines (251 bytes) as after a
+        # converted send -- so the compare above fails on the RECEIVE half alone. The status count
+        # is what crossed the wire, so a send that put a CR before each LF reports the payload plus
+        # one byte per line, and one that did not reports the payload's own size.
+        lines = payload.count(b"\n")
+        want_sent = len(payload) + lines
+        m = re.search(r"status=done: (\d+) bytes", dones[0]) if dones else None
+        sent = int(m.group(1)) if m else None
+        checks.append(report("the SEND put a CR before each LF (wire count)", sent == want_sent,
+                             f"{sent} bytes on the wire, want {want_sent} "
+                             f"({len(payload)} + {lines} CRs)"))
+        # SAID BY CAUSE, so a failed compare names which conversion is missing rather than just a
+        # size: CRs in the file mean the receive did not strip them, and one line means the send
+        # never gave the host a CRLF to split on.
+        crs, subs, lfs = got.count(b"\r"), got.count(b"\x1a"), got.count(b"\n")
+        checks.append(report("the received file has LF line ends only (no CR, no ^Z)",
+                             len(got) > 0 and crs == 0 and subs == 0,
+                             f"{crs} CR, {subs} ^Z, {lfs} LF"))
+        if which == "vm":
+            list_line = next((l.strip() for l in out.splitlines()
+                              if "host listfile" in l and "->" in l), "")
+            checks.append(report(f"CMS LISTFILE shows {len(ASCII_LINES)} records, one per line",
+                                 "-> saw" in list_line,
+                                 list_line or "(no listfile line)"))
 
     # THE LOGOFF IS PART OF THE SCENARIO NOW (see `logoff_step`), so this only reports what it did.
     # The separate `logoff()` helper is kept as a FALLBACK for a run that died before the step --
