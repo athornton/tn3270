@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { stripElectronSwitches } from '../src/electronSwitches.js';
+import { stripElectronSwitches, userArgv } from '../src/electronSwitches.js';
 import { parseGuiArgs, UsageError } from '../src/args.js';
 
 /** main.ts strips these before `parseGuiArgs`; what is left must be only the user's arguments. */
@@ -37,5 +37,29 @@ describe('stripElectronSwitches', () => {
   it('never strips our own --terminal-type or its value', () => {
     expect(stripElectronSwitches(['--terminal-type', 'IBM-3278-2', 'vm']))
       .toEqual(['--terminal-type', 'IBM-3278-2', 'vm']);
+  });
+});
+
+/**
+ * A PACKAGED app's argv is [exe, ...userArgs]; `electron main.js ...` (npm, dev) gives
+ * [electron, main.js, ...userArgs] and sets `process.defaultApp`. Slicing at 2 unconditionally
+ * dropped the packaged app's FIRST user argument, so `TN3270 host` opened the Connect dialog
+ * (found 2026-11-17 by the parity review; package smoke hid it by passing a switch first).
+ */
+describe('userArgv', () => {
+  it('a packaged app (no defaultApp) keeps every argument after the executable', () => {
+    expect(userArgv(['/opt/TN3270/tn3270-gui', 'vm:3270'], undefined)).toEqual(['vm:3270']);
+    expect(userArgv(['/opt/TN3270/tn3270-gui', '-model', '3278-2-E', 'vm'], false))
+      .toEqual(['-model', '3278-2-E', 'vm']);
+  });
+
+  it('electron main.js (defaultApp) skips the script path too', () => {
+    expect(userArgv(['/x/electron', '/x/dist/main.js', 'vm:3270'], true)).toEqual(['vm:3270']);
+  });
+
+  it('strips Chromium switches wherever they sit, packaged or not', () => {
+    expect(userArgv(['/opt/TN3270/tn3270-gui', 'vm', '--no-sandbox', '--user-data-dir=/u'], undefined))
+      .toEqual(['vm']);
+    expect(userArgv(['/x/electron', '/x/main.js', '--disable-gpu', 'vm'], true)).toEqual(['vm']);
   });
 });

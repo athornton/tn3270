@@ -170,7 +170,12 @@ export async function drawsGolden(r, work) {
   // A fresh directory each run, so a capture left by an earlier run cannot be what passes.
   const dir = mkdtempSync(join(work, 'shot-'));
   const { trace, shot, userData } = d.stage(dir);
-  const p = await start(r, [...switches(userData), '-insecure', '-model', '3278-2-E', '127.0.0.1:1'],
+  // THE USER'S ARGUMENTS COME FIRST, AND `-model` LEADS, ON PURPOSE. A packaged app's argv is
+  // [exe, ...args], and main.ts once sliced at 2 regardless, dropping the first argument. With a
+  // Chromium switch first, the switch was the casualty and this check passed. With `-model` first,
+  // losing it makes `3278-2-E` the host and `127.0.0.1:1` a second one, and the launch fails.
+  // (gui/src/electronSwitches.ts, userArgv.)
+  const p = await start(r, ['-model', '3278-2-E', '-insecure', '127.0.0.1:1', ...switches(userData)],
     { TN3270_GUI_REPLAY: trace, TN3270_GUI_SHOT: shot, TN3270_GUI_SHOT_MS: '2500' }, dir);
   p.child.stdin.end();
   const exited = await exitedWithin(p, LAUNCH_MS);

@@ -41,3 +41,16 @@ export function stripElectronSwitches(argv: readonly string[]): string[] {
   return argv.filter((a) => !ELECTRON_SWITCHES.has(a)
     && !ELECTRON_VALUE_SWITCHES.some((p) => a.startsWith(p) && a.length > p.length));
 }
+
+/**
+ * The user's arguments from `process.argv`, with the Chromium switches above removed.
+ *
+ * `defaultApp` is `process.defaultApp`: true under `electron main.js ...` (npm's launcher and the
+ * harnesses), whose argv is [electron, main.js, ...user]; unset in a PACKAGED app, whose argv is
+ * [exe, ...user]. A fixed `slice(2)` dropped the packaged app's first argument, so `TN3270 host`
+ * opened the Connect dialog -- and package smoke never saw it, because the argument it lost was a
+ * Chromium switch that would have been stripped anyway.
+ */
+export function userArgv(argv: readonly string[], defaultApp: boolean | undefined): string[] {
+  return stripElectronSwitches(argv.slice(defaultApp === true ? 2 : 1));
+}
