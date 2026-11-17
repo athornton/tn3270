@@ -5,8 +5,11 @@
 // No npm dependencies, so parity-upstream.yml runs this without `npm ci`.
 //
 // Exit codes (`main`'s return value, and `process.exitCode` when run as a script):
-//   0  success: --dir/--tag wrote the inventory, or --upstream found the recorded tag current.
-//   1  --upstream found a newer GA upstream: a notification, printed with the name/site diff.
+//   0  success: --dir/--tag wrote the inventory, or --upstream found the recorded tag current
+//      and re-extracting it gave back the committed file byte for byte.
+//   1  --upstream found a real difference, printed with the name/site diff: a newer GA upstream
+//      (a notification), a newer GA whose linkage changed (LIBS below needs updating), or a
+//      committed inventory that doesn't match a re-extraction of its own tag.
 //   2  usage error (bad or missing arguments).
 //   3  any other error: network failure, a non-OK GitHub response, malformed JSON, an invalid
 //      --tag, or a curl/tar failure.
@@ -198,22 +201,24 @@ function existsAt(read, path) {
 // against the real files on every run and throws loudly if either has changed.
 const EXPECTED_LD_LIBS = ['LD3270', 'LD3270I', 'LD32XX', 'LD3270STUBS'];
 const DRIFT = 'x3270 linkage changed: update LIBS in scripts/parity-extract.mjs';
+const DRIFT_CODE = 'X3270_LINKAGE_DRIFT';
+const drift = (detail) => Object.assign(new Error(`${DRIFT} (${detail})`), { code: DRIFT_CODE });
 
 function checkLinkageDrift(read) {
   const obj = read('x3270/Makefile.obj.in');
   const linkLine = obj.split('\n').find((l) => /\$\(CC\)\s+-o\s+\$@\s+\$\(OBJS1\)/.test(l));
-  if (!linkLine) throw new Error(`${DRIFT} (x3270/Makefile.obj.in's link line was not found)`);
+  if (!linkLine) throw drift("x3270/Makefile.obj.in's link line was not found");
   // `LD\d\w*` (not `LD\w+`): the library macros are LD3270/LD3270I/LD32XX/LD3270STUBS, always
   // digit-after-LD; `$(LDFLAGS)` on the same line is a different thing entirely and must not match.
   const found = [...linkLine.matchAll(/\$\((LD\d\w*)\)/g)].map((m) => m[1]);
   const expected = EXPECTED_LD_LIBS;
   if (found.length !== expected.length || !found.every((l) => expected.includes(l))) {
-    throw new Error(`${DRIFT} (link line now names [${found.join(', ')}], expected [${expected.join(', ')}])`);
+    throw drift(`link line now names [${found.join(', ')}], expected [${expected.join(', ')}]`);
   }
 
   const cfg = read('lib/configure.in');
   if (!/TLS_MODULES\s*=\s*sio_openssl\.o/.test(cfg)) {
-    throw new Error(`${DRIFT} (lib/configure.in no longer defaults TLS_MODULES to sio_openssl.o on Unix)`);
+    throw drift('lib/configure.in no longer defaults TLS_MODULES to sio_openssl.o on Unix');
   }
 }
 
@@ -497,6 +502,17 @@ export function renderInventory({ tag, missingSources, unresolved, nonLiteralMen
   )}\n`;
 }
 
+/** Every line of `diffNames`, then one `~ <field>: <old> -> <new>` line per other top-level field
+ * whose JSON differs (e.g. `unresolved`), so a difference outside `names` is never silent. */
+function diffInventories(oldInv, newInv) {
+  const lines = diffNames(oldInv, newInv);
+  for (const k of ['source', 'tag', 'missingSources', 'unresolved', 'nonLiteralMenuCalls', 'privateXactions']) {
+    const [a, b] = [JSON.stringify(oldInv[k]), JSON.stringify(newInv[k])];
+    if (a !== b) lines.push(`~ ${k}: ${a} -> ${b}`);
+  }
+  return lines;
+}
+
 /** Names added, removed, or whose sites moved, between two inventories: one line each, `+`/`-`/`~`. */
 export function diffNames(oldInv, newInv) {
   const sites = (n) => n.sites.map((s) => s.at).join(', ');
@@ -534,7 +550,7 @@ export function fetchTag(tag) {
     const tgz = join(dir, 'src.tgz');
     const url = `https://github.com/pmattes/x3270/archive/refs/tags/${tag}.tar.gz`;
     for (const [cmd, args] of [
-      ['curl', ['-fsSL', '-o', tgz, url]],
+      ['curl', ['-fsSL', '--max-time', '300', '-o', tgz, url]],
       // --no-same-owner: we're not root, and don't want the archive's original ownership
       // restored anyway. Extraction otherwise relies on tar's own default refusal to write a
       // member whose path has a '..' segment or is absolute -- true of GNU tar, and these are
@@ -572,7 +588,10 @@ function githubHeaders() {
 }
 
 async function fetchTagsPage(page) {
-  const r = await fetch(`${GITHUB_TAGS_URL}?per_page=100&page=${page}`, { headers: githubHeaders() });
+  const r = await fetch(`${GITHUB_TAGS_URL}?per_page=100&page=${page}`, {
+    headers: githubHeaders(),
+    signal: AbortSignal.timeout(30000),
+  });
   if (!r.ok) {
     const body = await r.json().catch(() => ({}));
     const limited = r.headers.get('x-ratelimit-remaining') === '0';
@@ -598,15 +617,16 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_OUT = resolve(SCRIPT_DIR, '..', 'docs/parity/x3270-names.json');
 
 const USAGE = 'usage: parity-extract.mjs (--dir <tree> | --tag <tag>) [--out <file>] | --upstream <committed.json>\n'
-  + 'exit codes: 0 current/success, 1 newer GA found upstream, 2 usage error, 3 other error';
+  + 'exit codes: 0 current/success, 1 newer GA upstream or committed inventory out of date, 2 usage error, 3 other error';
 
 /**
  * @param {string[]} argv
  * @param {{ log: (s: string) => void, err: (s: string) => void }} [io]
  * @param {{ tags?: () => Promise<string[]> | string[], inventoryForTag?: (tag: string) => Promise<object> | object }} [deps]
  *   Injected for testing without the network: `tags` replaces the GitHub tags fetch, and
- *   `inventoryForTag` replaces `(tag) => withTag(tag, inventory)` (used by both --upstream and
- *   --tag, so a test never needs a real download).
+ *   `inventoryForTag` replaces `(tag) => withTag(tag, inventory)` (used by --tag, and by
+ *   --upstream for both the newer GA and the re-extraction of the recorded tag, so a test never
+ *   needs a real download).
  */
 export async function main(argv, io = { log: console.log, err: console.error }, deps = {}) {
   const getTags = deps.tags ?? upstreamTags;
@@ -614,19 +634,41 @@ export async function main(argv, io = { log: console.log, err: console.error }, 
   const [mode, arg, ...rest] = argv;
   try {
     if (mode === '--upstream' && arg && rest.length === 0) {
-      const committed = JSON.parse(readFileSync(arg, 'utf8'));
+      const text = readFileSync(arg, 'utf8');
+      const committed = JSON.parse(text);
       if (typeof committed.tag !== 'string') throw new Error(`${arg}: no tag recorded`);
       const ga = newestGa(await getTags());
       if (!ga) throw new Error('no GA tag upstream');
       const cmp = compareGa(ga, committed.tag);
       if (cmp === 0) {
-        io.log(`x3270 ${ga} is the newest GA and is the one recorded`);
-        return 0;
+        // The tag is current; check the content too. Re-extract the recorded tag and require the
+        // committed file to be exactly what --tag would write, so a hand edit, a stale file or an
+        // extractor change that was never regenerated all fail here, not just a new GA.
+        const fresh = await getInventoryForTag(ga);
+        if (renderInventory(fresh) === text) {
+          io.log(`x3270 ${ga} is the newest GA and is the one recorded; re-extracting it matches ${arg}`);
+          return 0;
+        }
+        io.err(`${arg}: the committed inventory doesn't match the tag ${ga} it records: regenerate with --tag ${ga}`);
+        const lines = diffInventories(committed, fresh);
+        for (const l of lines.length ? lines : ['(same content; the committed file is not in the form --tag writes)']) io.err(l);
+        return 1;
       }
       if (cmp < 0) {
         throw new Error(`recorded ${committed.tag} is newer than upstream's newest GA ${ga}: the tag list looks wrong`);
       }
-      const lines = diffNames(committed, await getInventoryForTag(ga));
+      let newer;
+      try {
+        newer = await getInventoryForTag(ga);
+      } catch (e) {
+        // A real upstream change (exit 1), not a broken run (exit 3): LIBS needs updating.
+        if (e && e.code === DRIFT_CODE) {
+          io.err(`x3270 ${ga} is newer than ${committed.tag} and its linkage changed: ${e.message}`);
+          return 1;
+        }
+        throw e;
+      }
+      const lines = diffInventories(committed, newer);
       io.err(`x3270 ${ga} is newer than the recorded ${committed.tag}: regenerate with --tag ${ga}`);
       for (const l of lines) io.err(l);
       return 1;

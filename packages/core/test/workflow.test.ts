@@ -394,6 +394,10 @@ describe('parity-upstream.yml', () => {
     expect(up).toMatch(/env:\s*\{\s*GITHUB_TOKEN:\s*'\$\{\{\s*github\.token\s*\}\}'\s*\}/);
   });
 
+  it('has a job timeout, so a hung download cannot run for the default six hours', () => {
+    expect(up).toMatch(/^  upstream:\n    runs-on: [^\n]+\n    timeout-minutes: 15$/m);
+  });
+
   it('documents the exit codes a failure can mean', () => {
     expect(up).toMatch(/exit 1/);
     expect(up).toMatch(/exit 3/);

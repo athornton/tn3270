@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   diffNames, extractNames, guardsByLine, linkedSources, main, makeVar, newestGa, parseDefines, renderInventory,
 } from '../../../scripts/parity-extract.mjs';
@@ -13,7 +14,7 @@ async function withCommitted(inv: unknown, fn: (path: string) => Promise<void> |
   const dir = mkdtempSync(join(tmpdir(), 'parity-upstream-test-'));
   try {
     const path = join(dir, 'committed.json');
-    writeFileSync(path, JSON.stringify(inv));
+    writeFileSync(path, typeof inv === 'string' ? inv : JSON.stringify(inv));
     await fn(path);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -424,6 +425,23 @@ describe('renderInventory', () => {
   });
 });
 
+describe('the committed inventory', () => {
+  const text = readFileSync(fileURLToPath(new URL('../../../docs/parity/x3270-names.json', import.meta.url)), 'utf8');
+  const inv = JSON.parse(text);
+
+  it('is in canonical form: renderInventory gives back the same text (regenerate with --tag)', () => {
+    expect(renderInventory(inv)).toBe(text);
+  });
+
+  it('records a GA tag and its names have sorted, unique ids', () => {
+    expect(inv.tag).toMatch(/^\d+\.\d+ga\d+$/);
+    const ids: string[] = inv.names.map((n: { id: string }) => n.id);
+    expect(ids.length).toBeGreaterThan(0);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toEqual([...ids].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)));
+  });
+});
+
 describe('diffNames', () => {
   it('reports added, removed and moved names, one line each', () => {
     const a = { names: [{ id: 'action:A', sites: [{ at: 'x.c:1' }] }, { id: 'action:B', sites: [{ at: 'x.c:2' }] }] };
@@ -440,13 +458,72 @@ describe('diffNames', () => {
 describe('main --upstream', () => {
   const io = () => ({ log: vi.fn(), err: vi.fn() });
 
-  it('exits 0 and logs "current" when the recorded tag is the newest GA', async () => {
-    await withCommitted({ tag: '4.5ga6', names: [] }, async (path) => {
+  const current = {
+    tag: '4.5ga6', missingSources: [], unresolved: [], nonLiteralMenuCalls: [], privateXactions: 0,
+    names: [{ id: 'action:A', kind: 'action', value: 'A', sites: [{ at: 'x.c:1', guard: null }] }],
+  };
+
+  it('exits 0 when the recorded tag is the newest GA and re-extracting it gives the committed file', async () => {
+    await withCommitted(renderInventory(current as never), async (path) => {
       const out = io();
-      const code = await main(['--upstream', path], out, { tags: async () => ['4.5ga6'] });
+      const asked: string[] = [];
+      const code = await main(['--upstream', path], out, {
+        tags: async () => ['4.5ga6'],
+        inventoryForTag: async (tag) => { asked.push(tag); return structuredClone(current) as never; },
+      });
       expect(code).toBe(0);
+      expect(asked).toEqual(['4.5ga6']);
       expect(out.log).toHaveBeenCalledWith(expect.stringContaining('is the newest GA and is the one recorded'));
       expect(out.err).not.toHaveBeenCalled();
+    });
+  });
+
+  it("exits 1 with the diff when the recorded tag is the newest GA but the committed inventory doesn't match it", async () => {
+    const extracted = { ...current, unresolved: ['X at y.c:2'], names: [{ id: 'action:B', kind: 'action', value: 'B', sites: [{ at: 'x.c:2', guard: null }] }] };
+    await withCommitted(renderInventory(current as never), async (path) => {
+      const out = io();
+      const code = await main(['--upstream', path], out, {
+        tags: async () => ['4.5ga6'],
+        inventoryForTag: async () => extracted as never,
+      });
+      expect(code).toBe(1);
+      expect(out.err).toHaveBeenCalledWith(expect.stringContaining("the committed inventory doesn't match the tag"));
+      expect(out.err).toHaveBeenCalledWith('+ action:B (x.c:2)');
+      expect(out.err).toHaveBeenCalledWith('- action:A (x.c:1)');
+      expect(out.err).toHaveBeenCalledWith(expect.stringContaining('unresolved'));
+      expect(out.log).not.toHaveBeenCalled();
+    });
+  });
+
+  it('exits 1, not 0, when the only difference is that the committed file is not in canonical form', async () => {
+    await withCommitted(JSON.stringify(current), async (path) => {
+      const out = io();
+      const code = await main(['--upstream', path], out, {
+        tags: async () => ['4.5ga6'],
+        inventoryForTag: async () => structuredClone(current) as never,
+      });
+      expect(code).toBe(1);
+      expect(out.err).toHaveBeenCalledWith(expect.stringContaining("the committed inventory doesn't match the tag"));
+    });
+  });
+
+  it('exits 1, naming the linkage change, when a newer GA fails the linkage check', async () => {
+    // The real error linkedSources() throws for a tree whose link line lost $(LD3270I).
+    const drifted = (p: string) => {
+      if (p === 'x3270/Makefile.obj.in') return '\t$(CC) -o $@ $(OBJS1) $(LDFLAGS) $(LD3270) $(LD32XX) $(LD3270STUBS) $(LIBS)\n';
+      if (p === 'lib/configure.in') return GOOD_CONFIGURE_IN;
+      throw Object.assign(new Error(`ENOENT ${p}`), { code: 'ENOENT' });
+    };
+    await withCommitted(renderInventory(current as never), async (path) => {
+      const out = io();
+      const code = await main(['--upstream', path], out, {
+        tags: async () => ['4.5ga6', '4.6ga1'],
+        inventoryForTag: async () => { linkedSources(drifted); return current as never; },
+      });
+      expect(code).toBe(1);
+      expect(out.err).toHaveBeenCalledWith(expect.stringMatching(
+        /^x3270 4\.6ga1 is newer than 4\.5ga6 and its linkage changed: .*link line now names/,
+      ));
     });
   });
 

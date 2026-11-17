@@ -1,9 +1,12 @@
 # Weekly: is there an x3270 GA newer than the one docs/parity/x3270-names.json was extracted from?
+# And if not, does re-extracting the recorded tag still give exactly the committed file?
 # A failure is a notification, not a broken main: regenerate with
 #   node scripts/parity-extract.mjs --tag <new>
 # and cover every new name in docs/parity/checklist.yaml (parity spec, section 1).
 # Exit codes from scripts/parity-extract.mjs --upstream (its header comment has the full list):
-#   exit 1 means a newer GA was found -- the notification above, not a broken workflow.
+#   exit 1 means a newer GA was found (its linkage may have changed too: update LIBS in the
+#   script), or the committed inventory no longer matches its own tag -- the notification above,
+#   not a broken workflow.
 #   exit 3 means the script itself errored (e.g. a GitHub API or network failure) -- that IS a
 #   broken run, worth looking at as infrastructure, not as a parity gap.
 name: parity-upstream
@@ -16,6 +19,7 @@ permissions:
 jobs:
   upstream:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
