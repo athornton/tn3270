@@ -60,6 +60,8 @@ declare global {
       fetchSelection?(rect: CellRect): Promise<string>;
       /** OPTIONAL, the same way: a failed clipboard write, painted as a notice. See bridgecore.ts. */
       onCopyFailed?(fn: (message: string) => void): void;
+      /** OPTIONAL: the host's alarm with `-visualbell`/the gateway's flash choice. See `flash()` below. */
+      onFlash?(fn: () => void): void;
     };
   }
 }
@@ -420,6 +422,32 @@ window.tn3270.onCopyFailed?.((message) => {
   noticeOnly = true;
   paintMessage(message);
 });
+
+/**
+ * THE VISUAL BELL: the whole canvas inverted for ~100 ms, then repainted, as x3270's `ring_bell`
+ * flashes with `visualBell` set (x3270/screen.c:5457). `difference` against white is an inversion,
+ * the same composition the selection highlight uses (above, in `paint`) -- `ctx.save()`/
+ * `ctx.restore()` around it rather than setting `globalCompositeOperation` back by hand, following
+ * that block.
+ *
+ * GATED ON `!errored`, the SAME REASONING the blink tick's `repaint` is gated on (see `blinker`
+ * above): `errored` covers a real error AND a copy notice (`paintMessage`, not `paint`), and either
+ * one up means the canvas is NOT showing `last` -- inverting it would flash whatever message is on
+ * screen, and the plain `canvas === null` check the draft plan had would not catch that. Skipping
+ * the flash entirely (rather than flashing and then skipping only the repaint) avoids leaving that
+ * message inverted with nothing to flip it back. The repaint after the timeout re-checks `!errored`
+ * too, for the error that can arrive during the 100 ms the flash is up.
+ */
+function flash(): void {
+  if (canvas === null || errored) return;
+  ctx.save();
+  ctx.globalCompositeOperation = 'difference';
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.restore();
+  setTimeout(() => { if (!errored && last !== undefined) paint(last); }, 100);
+}
+window.tn3270.onFlash?.(() => { flash(); });
 
 window.addEventListener('keydown', (e) => {
   /**

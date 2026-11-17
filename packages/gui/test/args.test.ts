@@ -216,6 +216,16 @@ describe('-bind-limit', () => {
   });
 });
 
+describe('-visualbell', () => {
+  it('sets visualBell', () => {
+    expect(parseGuiArgs(['-visualbell', 'vm']).visualBell).toBe(true);
+  });
+
+  it('is absent by default', () => {
+    expect(parseGuiArgs(['vm']).visualBell).toBeUndefined();
+  });
+});
+
 describe('-oversize', () => {
   it('parses a fixed size and auto', () => {
     expect(parseGuiArgs(['-oversize', '160x62', 'vm']).oversize)
