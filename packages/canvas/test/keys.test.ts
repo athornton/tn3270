@@ -176,6 +176,7 @@ describe('actionForKey', () => {
       Enter: ev({ key: 'Enter' }),
       'Ctrl-C': ev({ key: 'c', ctrlKey: true }),
       'Ctrl-]': ev({ key: ']', ctrlKey: true }),
+      'Ctrl-Q': ev({ key: 'q', code: 'KeyQ', ctrlKey: true }),
       'Ctrl-R': ev({ key: 'r', ctrlKey: true }),
       'Ctrl-U': ev({ key: 'u', ctrlKey: true }),
       Tab: ev({ key: 'Tab' }),

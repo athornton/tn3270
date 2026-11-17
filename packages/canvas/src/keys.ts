@@ -124,12 +124,17 @@ const CTRL: Readonly<Record<string, Action>> = Object.freeze({
   r: { kind: 'reset' },
   u: { kind: 'eraseInput' },
   ']': { kind: 'quit' },
+  // Ctrl-Q quits too, because Ctrl-] needs AltGr on German and French layouts (BINDING_INTENT).
+  // In the GUI the main process's per-window hook takes it first (gui/src/quitChord.ts); in a
+  // browser it ends the session exactly as Ctrl-] does -- unless the browser itself owns Ctrl-Q
+  // (Firefox on Linux quits), which no page can override.
+  q: { kind: 'quit' },
   a: { kind: 'attn' },
   d: { kind: 'dup' },
   f: { kind: 'fieldMark' },
   k: { kind: 'toggleKeypad' },
   // The full 122-key keyboard, 2026-10-22. Free in both mappers -- the taken chords are
-  // C R U ] A D F K T -- and claiming it also suppresses Firefox's bookmarks sidebar, which is
+  // C R U ] Q A D F K T -- and claiming it also suppresses Firefox's bookmarks sidebar, which is
   // correct: `renderer.ts` calls `preventDefault` only for keys we claimed, so claiming it is
   // what makes it ours. Intercepted CLIENT-SIDE in both DOM front ends, exactly as `toggleKeypad`
   // is, and the gateway returns before `applyAction` for it -- see `web/src/main.ts`.

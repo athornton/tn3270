@@ -10,3 +10,5 @@
 - The GUI also quits on `Ctrl-Q`, from any of its windows, on every keyboard layout (`Ctrl-]`
   needs AltGr on German and French keyboards). Linux and Windows get a File menu with Quit
   (`Ctrl+Q`); they had no Quit item before. On macOS, Quit stays in the app menu (`Cmd-Q`).
+- The TUI quits on `Ctrl-Q` as well as `Ctrl-]`, and the `Ctrl-K` special-keys list now ends with
+  a Quit line, which needs no chord at all. The startup hint says `Ctrl-] or Ctrl-Q quits`.

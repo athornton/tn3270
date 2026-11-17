@@ -496,7 +496,7 @@ running byte count on each**: CUT per frame, DFT per accepted data frame, throug
 `Cmd-W` are both prevented, the window is brought forward, and `Cancel` is left as the only enabled
 control. Cancel tells the host to leave transfer mode rather than abandoning it mid-frame. **Two
 other ways out do not refuse, they cancel**, and they must not be read as the same guard: quitting
-the app (`Ctrl-]` or `Cmd-Q`) cancels a running transfer first and then quits, rather than becoming
+the app (`Ctrl-]`, `Ctrl-Q` or `Cmd-Q`) cancels a running transfer first and then quits, rather than becoming
 unquittable; and closing the TERMINAL window destroys the transfer window with it, which also
 cancels — Electron fires the child's `closed` **without** its `close`, so the refusal never runs on
 that path and a separate hook does the cancelling. **If the session drops underneath**, the transfer
@@ -574,8 +574,10 @@ stdin and stdout must both be TTYs. A script or a pipe on either end gets the us
 with no host; a script never meets a prompt. An unknown `-model` given on the command line is
 still a usage error regardless of a terminal being present.
 
-**`Ctrl-]` quits. `Ctrl-C` does not** — it is the Clear AID, which a 3270 user needs
-constantly, so a hint line says so. Given a spare row (27 or more for a 24-row screen)
+**`Ctrl-]` or `Ctrl-Q` quits**, and so does the last line of the `Ctrl-K` list, which needs no
+chord at all. `Ctrl-Q` is there because `Ctrl-]` needs AltGr on German and French keyboards, and
+whether the terminal then sends it is the terminal's business. **`Ctrl-C` does not quit** — it is
+the Clear AID, which a 3270 user needs constantly, so a hint line says so. Given a spare row (27 or more for a 24-row screen)
 it is drawn dim above the screen and **stays there**; in a shorter window it is printed
 once before raw mode starts instead. Never both. Vertical slack is spent in priority
 order — OIA, bottom border, hint, top border — so at exactly 27 rows the hint takes the

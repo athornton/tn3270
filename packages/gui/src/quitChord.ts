@@ -25,7 +25,7 @@ export function isQuitChord(input: KeyInput): boolean {
 /**
  * `]` is c3270's quit chord; `q` is the one every keyboard layout can type. Ctrl-] needs AltGr on
  * German and French layouts, where Windows reports AltGr as Ctrl+Alt and the Alt guard above then
- * refuses it. Ctrl-Q is no 3270 chord here (the renderer's CTRL table is c r u ] a d f k b t), and
+ * refuses it. Ctrl-Q is no 3270 chord (the renderer's CTRL table maps it to quit as well), and
  * it matches the File -> Quit item's accelerator (menu.ts).
  */
 const QUIT_KEYS: ReadonlySet<string> = new Set([']', 'q', 'Q']);

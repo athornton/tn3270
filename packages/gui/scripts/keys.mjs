@@ -63,11 +63,12 @@ const ARGV = ['--no-sandbox', '--disable-gpu', '-insecure', '-model', '3278-2-E'
  * typing "z", and F13 must not become PF13. Both are asserted as absences, which is why the
  * pass condition is the whole ORDERED sequence rather than a set of sightings.
  *
- * Ctrl+] is deliberately absent: it quits, and would truncate the run. Every OTHER entry in
+ * Ctrl+] and Ctrl+Q are deliberately absent: both quit, and would truncate the run. Every OTHER entry in
  * `keys.ts`'s CTRL table is here, so a chord dropped from that table cannot hide. THAT CLAIM IS
  * LOAD-BEARING and it is why Ctrl+D, Ctrl+F, Ctrl+K and Ctrl+B appear below: adding them to that
  * table and not to this one would have left the claim quietly false. Checked by hand 2026-10-23:
  * that table's ten entries are c r u ] a d f k b t, and all of them but `]` are cases here.
+ * Re-checked 2026-11-17: `q` (quit) makes eleven, and it is absent for the same reason as `]`.
  *
  * Ctrl+K, Ctrl+T, Ctrl+B and Alt+M are the ones whose interception is in `main.ts` rather than
  * in `applyAction`, so this run also proves the log-then-intercept ORDER there -- log it after

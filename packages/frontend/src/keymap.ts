@@ -322,6 +322,11 @@ function buildBindings(): readonly TerminalBinding[] {
   bind('\x12', { kind: 'reset' }, 'Ctrl-R');
   bind('\x15', { kind: 'eraseInput' }, 'Ctrl-U');
   bind('\x1d', { kind: 'quit' }, 'Ctrl-]');
+  // Ctrl-Q quits too: Ctrl-] needs AltGr on German and French layouts, and whether a terminal then
+  // sends 0x1d is up to the terminal. A letter chord every layout can type; raw mode turns IXON off,
+  // so 0x11 reaches us rather than being eaten as XON. Listed AFTER Ctrl-], which stays the chord
+  // the Ctrl-K list shows (the first row for an action is the canonical one).
+  bind('\x11', { kind: 'quit' }, 'Ctrl-Q');
 
   // Dup and Field Mark are c3270's own Ctrl-D and Ctrl-F, and BOTH of its keymaps agree:
   // `Ctrl<Key>d: Dup()` / `Ctrl<Key>f: FieldMark()` at Common/fb-c3270:186-187 (the

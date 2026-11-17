@@ -34,7 +34,7 @@ export type { TuiArgs } from './args.js';
  * before raw mode and before the alternate screen buffer, which is the only way a
  * short terminal learns Ctrl-] at all.
  */
-export const BANNER = 'tn3270: Ctrl-] quits, Ctrl-C is Clear, Ctrl-R is Reset';
+export const BANNER = 'tn3270: Ctrl-] or Ctrl-Q quits, Ctrl-C is Clear, Ctrl-R is Reset';
 
 /** The real terminal's size, read when called -- never captured. 0 for an unknown dimension. */
 function processTerminal(): Geometry {

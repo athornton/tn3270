@@ -461,7 +461,10 @@ def oversize_auto():
         resize_msg = sip(2.0, until=b"applies at the next reconnect")
         captured += resize_msg
 
-    os.write(main_fd, b"\x1d")               # Ctrl-] quits
+    # CTRL-Q HERE, NOT CTRL-]: the default run quits with Ctrl-] and this one with Ctrl-Q, so both
+    # quit keys cross a REAL pty in CI. Ctrl-Q is 0x11, which a cooked tty eats as XON; it reaches
+    # the TUI only because raw mode turns IXON off, and that is exactly what a unit test cannot see.
+    os.write(main_fd, b"\x11")               # Ctrl-Q quits
     captured += sip(2.0)
     time.sleep(0.3)
     os.waitpid(pid, os.WNOHANG)
@@ -477,7 +480,7 @@ def oversize_auto():
         ("a resize to 51x132 said 'applies at the next reconnect' within 2 s",
          b"applies at the next reconnect" in resize_msg),
         ("and named 50 rows by 132 columns", m is not None and m.group(1) == b"50 rows by 132 columns"),
-        ("left the alternate screen buffer on quit", b"\x1b[?1049l" in out),
+        ("Ctrl-Q quit: left the alternate screen buffer", b"\x1b[?1049l" in out),
         ("ECHO is restored after exit", bool(after[3] & termios.ECHO)),
     ]
     print(f"terminal type the host saw: {host.ttype!r}")

@@ -49,6 +49,11 @@ export const BINDING_INTENT: readonly Binding[] = Object.freeze([
     key: 'Ctrl-]', action: { kind: 'quit' }, terminal: '\x1d',
     note: 'the way out, because Ctrl-C is Clear. Say so on startup.',
   },
+  {
+    key: 'Ctrl-Q', action: { kind: 'quit' }, terminal: '\x11',
+    note: 'also the way out, and the one every keyboard layout can type: Ctrl-] needs AltGr on '
+      + 'German and French ones. The GUI quits on it too, and offers File -> Quit on Ctrl+Q',
+  },
   { key: 'Ctrl-R', action: { kind: 'reset' }, terminal: '\x12' },
   { key: 'Ctrl-U', action: { kind: 'eraseInput' }, terminal: '\x15' },
   { key: 'Tab', action: { kind: 'tab' }, terminal: '\t' },
