@@ -1164,3 +1164,189 @@
   gui: "none: there is no preferences store (README *Using the GUI*, *Staging* item 15). Store: a profile outside the app's data would need a store-probe check (docs/releasing.md:808)"
   status: missing
   browser: "none"
+# --- scripting ---
+- id: script-stdin
+  area: scripting
+  title: Accept script commands on standard input
+  covers: [option:-script, resource:scriptedAlways]
+  x3270: "-script reads s3270-protocol commands on stdin (x3270/x3270.c:197, :285; stdin_init from peer_script_init, Common/task.c:950-956); -scriptport, -socket and -httpd each turn it off (Common/task.c:915, :930, :946-948) unless scriptedAlways, default false (x3270/resources.c:310-311)"
+  gui: "none: no flag reads commands from stdin (the TN3270_GUI_KEYS seam, packages/gui/src/main.ts:193, is a test harness, not a feature)"
+  status: proposed-skipped
+  category: declined
+  reason: "A GUI started from Finder or the Start menu has no stdin to read commands from, so -script only serves a GUI started from a shell, which the s3270-compatible CLI already serves; skipping it costs x3270 scripts that drive a visible window."
+  browser: "none"
+  others: {cli: "stdin is the CLI's whole interface: one s3270-style command per line, a status line and ok/error after each (packages/cli/src/main.ts:227); no scriptedAlways"}
+- id: script-port
+  area: scripting
+  title: Listen for script connections on a TCP port or a Unix socket (peer scripts)
+  covers: [option:-scriptport, option:-scriptportonce, option:-socket]
+  x3270: "-scriptport [addr:]port listens for s3270-protocol peers, -scriptportonce accepts one then exits, -socket listens on /tmp/x3sck.<pid> (x3270/x3270.c:201-203, :288-291; Common/task.c:906-944); scriptPort is also an extended toggle, so Set(scriptPort,...) opens one at run time (Common/task.c:656); clients are typically x3270if"
+  gui: "none"
+  status: proposed-skipped
+  category: declined
+  reason: "A listening control port lets any local process drive the session, and the store builds are entitled only network.client, not network.server (docs/releasing.md:693), so this would need a new entitlement and a store-probe check (docs/releasing.md:808); the trade-off is losing x3270-style external control of the GUI."
+  browser: "none"
+  others: {cli: "none: stdin only (packages/cli/src/main.ts:227)"}
+- id: httpd
+  area: scripting
+  title: HTTP server for REST/JSON script commands
+  covers: [option:-httpd]
+  x3270: "-httpd [addr:]port starts an HTTP server taking actions as /3270/rest/ text or JSON requests, with a small web page (x3270/x3270.c:170, :254; Common/httpd-core.c, httpd-nodes.c); httpd is an extended toggle, so Set(httpd,...) starts it at run time (Common/httpd-io.c:864)"
+  gui: "none"
+  status: proposed-skipped
+  category: declined
+  reason: "Like the script port it is a listening server, which needs the network.server entitlement the store builds do not have (docs/releasing.md:693) and a store-probe check (docs/releasing.md:808); the trade-off is losing HTTP control of the GUI."
+  browser: "none: the gateway serves the page, not an action API"
+  others: {cli: "none"}
+- id: child-scripts
+  area: scripting
+  title: Run a child script that drives the session (Script, CloseScript)
+  covers: [action:Script, action:CloseScript]
+  x3270: "Script(program[,args]) action, from a keymap, a macro or another script, forks a child with X3270OUTPUT/X3270INPUT pipes, a loopback httpd URL and a script port in its environment, and locks the keyboard while it runs (Common/childscript.c:1128, :1312-1319, :1473); CloseScript ends the script's connection (Common/task.c:4036)"
+  gui: "none"
+  status: proposed-skipped
+  category: declined
+  reason: "It starts arbitrary other programs and opens loopback listening ports for them, both outside what the store sandboxes grant today (docs/releasing.md:693, :808); the trade-off is that x3270's keymap- and macro-launched helper scripts have no GUI equivalent."
+  browser: "none"
+  others: {cli: "none: the CLI is itself driven as a child of the user's script, but has no Script() to start one"}
+- id: execute-shell
+  area: scripting
+  title: Run a shell command from an action (Execute)
+  covers: [action:Execute]
+  x3270: "Execute(command) runs /bin/sh -c command as an unlocked child script (Common/task.c:4057-4075), bindable in keymaps and macros"
+  gui: "none"
+  status: proposed-skipped
+  category: declined
+  reason: "It starts a shell, which the Mac App Store sandbox and an MSIX package would each need justifying and a store-probe check for (docs/releasing.md:808); the trade-off is losing keymap-bound shell commands."
+  browser: "none"
+  others: {cli: "none"}
+- id: prompt
+  area: scripting
+  title: The x3270> interactive prompt
+  covers: [action:Prompt, menu:promptOption, resource:console]
+  x3270: "File → x3270> Prompt (x3270/menubar.c:1208-1212, hidden under -secure; label x3270/fb-x3270:910) and Prompt() run x3270if -I in a console program found by the console resource, default none, i.e. a search for xterm and others (Common/childscript.c:1486-1515, x3270/resources.c:117-118)"
+  gui: "none"
+  status: proposed-skipped
+  category: declined
+  reason: "It starts a terminal emulator and x3270if as child processes and talks to them over a script channel, none of which a store-sandboxed app may assume exists; the trade-off is losing an interactive action prompt, which an in-app console window could replace later."
+  browser: "none"
+  others: {cli: "the CLI at a terminal is itself an action prompt, without x3270's x3270> line editing (packages/cli/src/main.ts:227)"}
+- id: macros-menu
+  area: scripting
+  title: Macros menu of named action sequences (macros resource, Macro action)
+  covers: [resource:macros, action:Macro]
+  x3270: "the macros resource, or macros.<host> per host, lists name: actions pairs (Common/task.c:400-425); x3270 shows them as a Macros menu while connected (x3270/menubar.c:1489-1545, label x3270/fb-x3270:972-973); Macro(name) runs one by name (Common/task.c:4228-4245)"
+  gui: none
+  status: missing
+  browser: "none"
+  others: {cli: "none"}
+- id: source-file
+  area: scripting
+  title: Run actions from a file (Source)
+  covers: [action:Source]
+  x3270: "Source(file) reads actions from a file and runs them, locking the keyboard while it runs (Common/source.c:214, :247)"
+  gui: "none. Store: reading a file outside the app's data needs a user-selected file and a store-probe check (docs/releasing.md:808)"
+  status: missing
+  browser: "none"
+  others: {cli: "none: no Source(); a script is fed on stdin instead, and Replay(file) reads only a trace (packages/cli/src/main.ts:235)"}
+- id: idle-command
+  area: scripting
+  title: Run an action when the session has been idle (keep-alive)
+  covers: [menu:idleCommandOption, resource:idleCommand, resource:idleCommandEnabled, resource:idleTimeout]
+  x3270: "Options → Configure Idle Command dialog, in 3270 mode and not under -secure (x3270/menubar.c:2560-2568, x3270/idle_gui.c; label x3270/fb-x3270:985); idleCommand, idleTimeout and idleCommandEnabled, default false (x3270/resources.c:101-104, :352-353), validated and armed by Common/idle.c:90-125; saved by Save Changed Options (x3270/save.c:720-722)"
+  gui: none
+  status: missing
+  browser: "none"
+  others: {cli: "none"}
+- id: abort-script
+  area: scripting
+  title: Abort running scripts, macros and strings
+  covers: [action:Abort, menu:abortScriptOption]
+  x3270: "File → Abort Scripts/Macros/Strings, sensitive while a task is active (x3270/menubar.c:1239-1245, :894-898; label x3270/fb-x3270:905); Abort() marks the running macro fatal (Common/task.c:4416-4430)"
+  gui: "none: the GUI runs no scripts or macros for it to abort"
+  status: missing
+  browser: "none"
+  others: {cli: "none: a script stops at EOF or Quit"}
+- id: keyboard-disable
+  area: scripting
+  title: Disable the keyboard during a script, and re-enable it from the menu
+  covers: [action:KeyboardDisable, menu:reenableKeyboardOption]
+  x3270: "KeyboardDisable([true|false|ForceEnable]) (Common/task.c:4202-4224); Script() and Source() disable the keyboard implicitly (Common/childscript.c:1473, Common/source.c:247); File → Re-enable Keyboard, sensitive while it is disabled, runs KeyboardDisable(ForceEnable) (x3270/menubar.c:1231-1237, :886-890; label x3270/fb-x3270:913)"
+  gui: "none: nothing in the GUI disables the keyboard, since it runs no scripts"
+  status: missing
+  browser: "none"
+  others: {cli: "none"}
+- id: aid-wait
+  area: scripting
+  title: An AID action in a script waits for the host to unlock (aidWait)
+  covers: [toggle:aidWait]
+  x3270: "aidWait toggle, default true (x3270/resources.c:395-396, Common/glue.c:479), makes a scripted Enter/PF/Clear block until the keyboard unlocks (Common/task.c:265)"
+  gui: "none: the GUI has no scripts; its keyboard is always the operator's"
+  status: missing
+  browser: "none"
+  others: {cli: "none, and a divergence: Enter() returns as soon as the AID is sent (packages/cli/src/runner.ts:318), as if aidWait were false, so an s3270 script needs an explicit Wait(Unlock) after it"}
+- id: script-screen-read
+  area: scripting
+  title: Read the screen, fields, buffer and NVT text from a script
+  covers: [action:Ascii, action:Ascii1, action:AsciiField, action:Ebcdic, action:Ebcdic1, action:EbcdicField, action:ReadBuffer, action:Snap, action:NvtText, action:AnsiText]
+  x3270: "Ascii/Ebcdic with (), (len) from the cursor, (row,col,len) or (row,col,rows,cols), 0-origin, Ascii1/Ebcdic1 1-origin, AsciiField/EbcdicField the cursor's field (Common/task.c:2739-2785); ReadBuffer([Ascii|Ebcdic|Unicode|Field]) dumps the buffer with attributes (Common/task.c:3087); Snap() saves a snapshot and Snap(Status|Rows|Cols|Ascii|Ascii1|Ebcdic|Ebcdic1|ReadBuffer) reads it and Snap(Wait,...) waits for output and saves (Common/task.c:3340-3480); NvtText/AnsiText return buffered NVT-mode text (Common/task.c:3987); all reachable only from scripts and macros"
+  gui: "none"
+  status: missing
+  browser: "none"
+  others: {cli: "partial: Ascii() and Ascii(row,col,len), 0-origin (packages/cli/src/runner.ts:412, tests in packages/cli/test/runner.test.ts 'screen reading'), but not Ascii(len) or Ascii(row,col,rows,cols); Snap returns the screen text (runner.ts:439), unlike s3270's Snap(), which saves a snapshot and prints nothing; our own ScreenText and ScreenJson (runner.ts:443) stand in for ReadBuffer; no Ascii1, AsciiField, Ebcdic*, ReadBuffer, NvtText or AnsiText"}
+- id: script-wait
+  area: scripting
+  title: Wait for a host condition, NVT text, or the unlock delay (Wait, Expect, Pause)
+  covers: [action:Wait, action:Expect, action:Pause]
+  x3270: "Wait([timeout,]InputField|NVTMode|3270Mode|Output|Seconds|Disconnect|Unlock|CursorAt|StringAt|InputFieldAt), the timeout FIRST, scripts and macros only (Common/task.c:3556-3600, keywords :3608-3610); Expect(text[,timeout]) waits for NVT-mode text, default 30 s (Common/task.c:4166-4199); Pause() waits unlockDelayMs, default 350 (Common/task.c:3757-3770, x3270/resources.c:51-52)"
+  gui: "none"
+  status: missing
+  browser: "none"
+  others: {cli: "partial, with an incompatible argument order: Wait(condition[,seconds]) takes Output, Unlock, Settle (ours), 3270Mode or InputField with the timeout LAST (packages/cli/src/runner.ts:486, :899); s3270's Wait(10,Unlock) is refused as 'unknown condition 10' (probed 2026-11-17); no NVTMode, Seconds, Disconnect, CursorAt, StringAt or InputFieldAt; no Expect or Pause"}
+- id: script-query
+  area: scripting
+  title: Query session state from a script (Query, Show)
+  covers: [action:Query, action:Show]
+  x3270: "Query([keyword]) and its alias Show report connection state, host, LU, model, code page, TLS, etc. (Common/query.c:321-330, registered :355-356)"
+  gui: "none"
+  status: missing
+  browser: "none"
+  others: {cli: "none: each reply's status line carries the s3270 status fields (packages/cli/src/status.ts), but there is no Query or Show (unknown command, probed 2026-11-17)"}
+- id: script-messages
+  area: scripting
+  title: Script output, failure and message actions (Echo, Fail, Info, ignore)
+  covers: [action:Echo, action:Fail, action:Info, action:ignore]
+  x3270: "Echo(text) writes to the script's output (Common/task.c:543-555); Fail([text|-Async]) fails the script with a message (Common/task.c:570); Info(text) pops up an informational message, from a keymap or macro too (Common/task.c:509-517); ignore() does nothing, for binding a key to nothing (Common/task.c:520-524)"
+  gui: "none: no action language reaches the GUI, so no Info popup or ignore binding"
+  status: missing
+  browser: "none"
+  others: {cli: "none (Echo is an unknown command, probed 2026-11-17; commands.ts:24 lists what exists)"}
+- id: script-cookie
+  area: scripting
+  title: Security cookie for script connections (-cookiefile, Cookie)
+  covers: [option:-cookiefile, action:Cookie]
+  x3270: "-cookiefile path names a cookie file, read or created mode 0400 (x3270/x3270.c:162, :248; Common/cookiefile.c:84-165) and passed to child scripts (Common/childscript.c:1317-1319); a peer or httpd client must send Cookie(value) first, a wrong one is delayed (Common/task.c:4590-4630)"
+  gui: "none"
+  status: proposed-skipped
+  category: declined
+  reason: "The cookie only authenticates the script port, httpd and child-script channels, which are themselves proposed-skipped; if any of those is accepted instead, this row should follow it."
+  browser: "none"
+  others: {cli: "none: stdin needs no cookie"}
+- id: script-utf8
+  area: scripting
+  title: Force script I/O to UTF-8
+  covers: [option:-utf8]
+  x3270: "-utf8 makes script I/O UTF-8 regardless of the locale, default false (x3270/x3270.c:211, :303; x3270/resources.c:358-359; Common/codepage.c:141)"
+  gui: "none: the GUI has no script I/O"
+  status: missing
+  browser: "none"
+  others: {cli: "no -utf8 flag; Node reads and writes UTF-8 always (packages/cli/src/main.ts:227), i.e. as if -utf8 were given"}
+- id: set-toggle
+  area: scripting
+  title: Set or flip any toggle by name (Set, Toggle, -set, -clear)
+  covers: [action:Set, action:Toggle, option:-set, option:-clear]
+  x3270: "Toggle(name[,value]) and Set(name[,value...]) change any registered toggle or extended toggle, Set(name) alone reports it (Common/toggles.c:624-641); -set name[=value] and -clear name preset a boolean toggle (x3270/x3270.c:157, :200, :1105-1160); used from keymaps, macros and scripts"
+  gui: "none: individual settings have their own menu items, but there is no by-name toggle mechanism, flag or action"
+  status: missing
+  browser: "none"
+  others: {cli: "Set(model,<m>[,oversize,<spec>]) and Set(oversize,<spec>) only, refused while connected (packages/cli/src/runner.ts:275); no Toggle, no Set(name) query, no -set/-clear"}
