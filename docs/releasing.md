@@ -664,6 +664,18 @@ feature parity with x3270. Until then, every CI run builds a **stand-in** for ea
 confines it the way that store would, and launches it. A feature that breaks under the App Sandbox
 or inside an MSIX then fails the PR that adds it, not the submission months later.
 
+**The parity gate.** Feature parity is tracked in `docs/parity.md` (generated from
+`docs/parity/checklist.yaml` and `docs/parity/x3270-names.json` by `scripts/parity.mjs`); store
+submission requires `node scripts/parity.mjs gate` to exit 0 (no `missing`, `partial` or
+`proposed-*` row left uncovered). The weekly `.github/workflows/parity-upstream.yml` workflow
+re-runs `scripts/parity-extract.mjs` against x3270's newest tagged GA and fails if it is newer than
+the committed `docs/parity/x3270-names.json`; it only runs from the default branch, so it does
+nothing until this work is merged. To check by hand, run
+`node scripts/parity-extract.mjs --upstream docs/parity/x3270-names.json` (exit 1 means a newer
+GA exists). To regenerate on that new GA, run `node scripts/parity-extract.mjs --tag <tag>`, then
+cover whatever new names it adds to `docs/parity/x3270-names.json` with rows in
+`docs/parity/checklist.yaml`.
+
 **Nothing is uploaded or submitted.** No `upload-artifact` path names `.appx` or `mas-universal`,
 the `gui-*` upload is exactly the five one-level globs (`*.AppImage *.deb *.dmg *.zip *.exe`), and
 `packages/core/test/workflow.test.ts` pins both. If an `.appx` ever reached a release anyway,

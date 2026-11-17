@@ -1397,6 +1397,9 @@ own client. Unscheduled, and much larger than this project.
 Stated plainly, because a 3270 emulator that quietly does three-quarters of the job is
 worse than one that says which quarter is missing.
 
+The complete feature-by-feature comparison with x3270 is **[docs/parity.md](docs/parity.md)**,
+generated from `docs/parity/checklist.yaml`; the items below are the ones worth prose.
+
 - **`Attn` SENDS TELNET BREAK EVEN ON A TN3270E SESSION, WHERE x3270 SENDS `IAC IP`.** Found
   2026-10-06, while reviewing a *comment* about Attn during the keypad work — so it is an
   unverified divergence rather than an observed failure. `Session.sendAttn()` is unconditional
