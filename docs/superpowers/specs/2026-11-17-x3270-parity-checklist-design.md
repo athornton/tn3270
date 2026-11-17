@@ -42,7 +42,7 @@ x3270 source tree and writes `docs/parity/x3270-names.json`.
   `x3270/Makefile.obj.in`, and only the matching `.c` files in `Common/` and `x3270/` are scanned.
   `c3270`-, `s3270`- and `b3270`-only code and the `*_stubs*.c` files are therefore out. The
   extractor re-reads this list for every tag, because a new release may change it.
-- **Five kinds of name, each with `file:line`:**
+- **Kinds of name, each with `file:line`** (superseded in detail by the *Amendment 2026-11-17*: six kinds, options from x3270's Xrm table only, hidden actions out):
   - `action`: `An*` entries in `action_table_t` arrays (~98 in 4.5ga6);
   - `option`: entries of the `opts[]` table, each paired with the `Res*` it sets (~88). The pair
     is **one** entry, named by the option, and a resource that has an option is not listed again
