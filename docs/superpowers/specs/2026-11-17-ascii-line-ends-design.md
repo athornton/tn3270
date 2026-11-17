@@ -71,3 +71,12 @@ names are not directional.
 
 `Remap` (local character-set translation, parity row `transfer-remap`), the other `IND$FILE`
 options, and any change to which `Cr` value is the default.
+
+## Amendment 2026-11-17, while planning
+
+**The wiring wraps `TransferFiles` once instead of converting at each read and write site.**
+`withLineEnds(files)` returns a `TransferFiles` whose `read` applies `toHost` and whose `write` and
+`append` apply `fromHost`; `startTransfer` uses it in place of `files` when `convertsLineEnds`
+holds. Same behaviour as the design above, one wiring point instead of three, and CUT and DFT
+cannot diverge because they write through the same object. `wantsCrlf` delegates to
+`convertsLineEnds`, which replaces the planned agreement test with a single definition.
