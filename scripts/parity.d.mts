@@ -35,3 +35,5 @@ export function main(
   io?: { log: (s: string) => void; err: (s: string) => void },
   deps?: MainDeps,
 ): number;
+/** Whether a `path.relative(root, x)` result leaves the root, in either separator. */
+export function escapesRoot(rel: string): boolean;

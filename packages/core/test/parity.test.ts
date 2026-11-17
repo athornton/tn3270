@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { blocking, cell, check, loadRows, main, render, type Row } from '../../../scripts/parity.mjs';
+import { blocking, cell, check, escapesRoot, loadRows, main, render, type Row } from '../../../scripts/parity.mjs';
 
 /**
  * A throwaway repo root with one source file of 3 lines, one test file and a live-testing.md
@@ -372,5 +372,24 @@ describe('the committed checklist', () => {
 
   it('docs/parity.md is exactly what render produces (run: node scripts/parity.mjs render)', () => {
     expect(readFileSync(`${root}docs/parity.md`, 'utf8')).toBe(render(committed, names));
+  });
+});
+
+/**
+ * `path.relative` separates with `\\` on Windows, so a `startsWith('../')` test caught NOTHING
+ * there: CI on windows-latest (run 44142799663) failed both escape cases. Tested as strings, so
+ * Linux CI checks the Windows spellings too.
+ */
+describe('escapesRoot', () => {
+  it('is true for a parent, in either separator, and for another drive', () => {
+    for (const rel of ['..', '../x', '..\\x', '..\\..\\x', 'D:\\x', '/etc/x']) {
+      expect(escapesRoot(rel), rel).toBe(true);
+    }
+  });
+
+  it('is false inside the root, including names that merely start with two dots', () => {
+    for (const rel of ['', 'src/a.ts', 'src\\a.ts', '..foo/x', '..foo\\x', 'a/..b']) {
+      expect(escapesRoot(rel), rel).toBe(false);
+    }
   });
 });
