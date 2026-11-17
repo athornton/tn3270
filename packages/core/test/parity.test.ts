@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,7 +8,11 @@ import { blocking, cell, check, loadRows, main, render, type Row } from '../../.
 /**
  * A throwaway repo root with one source file of 3 lines, one test file and a live-testing.md
  * with: a plain heading, a heading carrying literal markdown emphasis characters, a `#`-looking
- * line inside a fenced code block (must NOT count as a heading), and a closing-hashes heading.
+ * line inside a fenced code block (must NOT count as a heading), a closing-hashes heading, and a
+ * ```` fence containing a shorter ``` line and a `#`-looking line (neither must end the fence
+ * early) followed by a heading after the fence closes. It also has a real file just outside the
+ * root (for a plain path-traversal citation) and a symlink inside the root pointing to a file
+ * outside it (for the realpath escape check).
  */
 function fakeRoot(): string {
   const root = mkdtempSync(join(tmpdir(), 'parity-'));
@@ -22,7 +26,13 @@ function fakeRoot(): string {
     '### Reached *AND ACTIVE* now', '',
     '```', '# comment', '```', '',
     '## Closer ##', '',
+    '````', '```', '# inner', '````', '',
+    '## After', '',
   ].join('\n'));
+  writeFileSync(join(root, '..', 'x'), 'a real file just outside the root\n');
+  const outsideDir = mkdtempSync(join(tmpdir(), 'parity-outside-'));
+  writeFileSync(join(outsideDir, 'secret.txt'), 'outside the root\n');
+  symlinkSync(join(outsideDir, 'secret.txt'), join(root, 'src/escape-link.ts'));
   return root;
 }
 const NAMES = { names: [{ id: 'action:A' }, { id: 'option:-b' }] } as never;
@@ -72,6 +82,9 @@ describe('parity check', () => {
     // live heading matching is exact: emphasis markers are part of the literal text.
     ['a live heading missing its literal asterisks', [ours({ evidence: { code: ['src/a.ts'], tests: ['src/a.test.ts'], live: 'Reached AND ACTIVE now' } })], 'thing: live heading not in docs/live-testing.md: Reached AND ACTIVE now'],
     ['a live heading that is only inside a fenced code block', [ours({ evidence: { code: ['src/a.ts'], tests: ['src/a.test.ts'], live: 'comment' } })], 'thing: live heading not in docs/live-testing.md: comment'],
+    // fences pair by kind and length (CommonMark): a ``` line and a `#`-looking line inside a
+    // ```` block neither close the fence nor count as a heading.
+    ['a heading-looking line inside a longer fence', [ours({ evidence: { code: ['src/a.ts'], tests: ['src/a.test.ts'], live: 'inner' } })], 'thing: live heading not in docs/live-testing.md: inner'],
     // citations: line must be a positive integer.
     ['a zero line number', [ours({ evidence: { code: ['src/a.ts:0'], tests: ['src/a.test.ts'], live: 'n/a' } })], 'thing: src/a.ts:0: line must be a positive integer'],
     ['a negative line number', [ours({ evidence: { code: ['src/a.ts:-1'], tests: ['src/a.test.ts'], live: 'n/a' } })], 'thing: src/a.ts:-1: line must be a positive integer'],
@@ -83,9 +96,12 @@ describe('parity check', () => {
     ['a directory citation', [ours({ evidence: { code: ['src'], tests: ['src/a.test.ts'], live: 'n/a' } })], 'thing: src is not a regular file'],
     ['a directory citation with a line number (would have thrown EISDIR)', [ours({ evidence: { code: ['src:1'], tests: ['src/a.test.ts'], live: 'n/a' } })], 'thing: src is not a regular file'],
     ['an empty citation', [ours({ evidence: { code: [''], tests: ['src/a.test.ts'], live: 'n/a' } })], 'thing: (empty) is not a regular file'],
-    // citations: path must be repo-relative and stay inside the repo root.
+    // citations: path must be repo-relative and stay inside the repo root, by its real path
+    // (after symlinks), not just lexically -- so a symlink inside the repo pointing outside it
+    // is refused, not silently followed.
     ['an absolute path citation', [ours({ evidence: { code: ['/etc/passwd'], tests: ['src/a.test.ts'], live: 'n/a' } })], 'thing: /etc/passwd: must be a repo-relative path, not absolute'],
     ['a citation that escapes the repo root', [ours({ evidence: { code: ['../x'], tests: ['src/a.test.ts'], live: 'n/a' } })], 'thing: ../x: path escapes the repo root'],
+    ['a symlink inside the repo pointing outside it', [ours({ evidence: { code: ['src/escape-link.ts'], tests: ['src/a.test.ts'], live: 'n/a' } })], 'thing: src/escape-link.ts: path escapes the repo root'],
     // shape checks: malformed covers/evidence/cites give a problem, not a crash.
     ['a non-array covers', [ours({ covers: 'action:A' as never })], 'thing: covers must be a list'],
     ['a non-array evidence.code', [ours({ evidence: { code: 'src/a.ts' as never, tests: ['src/a.test.ts'], live: 'n/a' } })], 'thing: evidence.code must be a list'],
@@ -116,6 +132,10 @@ describe('parity check', () => {
   it('matches a live heading exactly, asterisks and all, and matches a closing-hashes heading', () => {
     expect(run([ours({ evidence: { code: ['src/a.ts'], tests: ['src/a.test.ts'], live: 'Reached *AND ACTIVE* now' } })]).problems).toEqual([]);
     expect(run([ours({ evidence: { code: ['src/a.ts'], tests: ['src/a.test.ts'], live: 'Closer' } })]).problems).toEqual([]);
+  });
+
+  it('still recognizes a heading after a longer fence closes', () => {
+    expect(run([ours({ evidence: { code: ['src/a.ts'], tests: ['src/a.test.ts'], live: 'After' } })]).problems).toEqual([]);
   });
 
   it('reports a non-array top level without crashing', () => {
@@ -227,6 +247,45 @@ describe('main (gate, injected)', () => {
     const { io, logs } = captured();
     expect(main(['gate'], io, { rows, names, root })).toBe(0);
     expect(logs).toContain('parity gate: pass');
+  });
+});
+
+describe('main handles a malformed checklist without crashing', () => {
+  const root = fakeRoot();
+  const names = NAMES;
+  const captured = () => {
+    const logs: string[] = [];
+    const errs: string[] = [];
+    return { io: { log: (s: string) => logs.push(s), err: (s: string) => errs.push(s) }, logs, errs };
+  };
+
+  it.each([
+    ['a null row', [null]],
+    ['a top-level mapping', { oops: true }],
+    ['a string row', ['oops']],
+  ])('gate does not crash on %s, and exits 1', (_label, rows) => {
+    const { io } = captured();
+    expect(main(['gate'], io, { rows: rows as never, names, root })).toBe(1);
+  });
+
+  it.each([
+    ['a null row', [null]],
+    ['a top-level mapping', { oops: true }],
+    ['a string row', ['oops']],
+  ])('render does not crash on %s', (_label, rows) => {
+    let written = '';
+    expect(() => main(['render'], captured().io, {
+      rows: rows as never, names, root, mdFile: '/dev/null', writeFile: (_p: string, data: string) => { written = data; },
+    })).not.toThrow();
+    expect(written).toContain('# x3270 parity checklist');
+  });
+
+  it('gate on a top-level mapping prints only the check() problems, not uncovered/blocking noise', () => {
+    const { io, logs, errs } = captured();
+    const code = main(['gate'], io, { rows: { oops: true } as never, names, root });
+    expect(code).toBe(1);
+    expect(errs).toEqual(['checklist: top level must be a list of rows']);
+    expect(logs).toEqual(['parity gate: FAIL, 1 blocking']);
   });
 });
 

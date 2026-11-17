@@ -139,7 +139,7 @@ is for review, and the `gui` field states the claim so a reviewer can check it.
 
 `scripts/parity.mjs` (with `.d.mts`) has two modes:
 - `render`: writes `docs/parity.md`, a header with generated counts per status, then one table
-  per area with the reason or gap leading in each row;
+  per area, with the note (the reason or gap) as the third column, after id and status;
 - `gate`: exits 0 only when no row is `missing`, `partial`, `proposed-*`, or `unwitnessed` without
   acceptance; otherwise it prints one line per blocking row, id and reason first, and exits 1.
 

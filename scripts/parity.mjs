@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // The x3270 parity checklist: check, render, gate
 // (docs/superpowers/specs/2026-11-17-x3270-parity-checklist-design.md, sections 2-3).
-import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
@@ -32,20 +32,28 @@ const FENCE = /^ {0,3}(`{3,}|~{3,})/;
 const HEADING = /^ {0,3}#{1,6}\s(.*)$/;
 
 /**
- * Heading texts of a markdown file: a line outside a fenced code block (``` or ~~~, tracked so a
- * `# comment` inside a fence never counts), with 0-3 leading spaces then 1-6 `#`s and a space.
- * An optional closing run of `#`s is removed; the rest -- asterisks, underscores, backticks --
- * is kept verbatim, so a citation must be copied exactly, markup and all.
+ * Heading texts of a markdown file: a line outside a fenced code block, with 0-3 leading spaces
+ * then 1-6 `#`s and a space. An optional closing run of `#`s is removed; the rest -- asterisks,
+ * underscores, backticks -- is kept verbatim, so a citation must be copied exactly, markup and
+ * all.
+ *
+ * Fences pair by kind and length, per CommonMark: a fence opened with N backticks closes only on
+ * a line of >= N backticks (same for tildes), so a ```` block can contain a ``` line -- and a
+ * `#`-looking line -- without either ending it early.
  */
 function headings(text) {
   const out = [];
-  let inFence = false;
+  let fence = null; // { char: '`' | '~', len: number } | null
   for (const line of text.split('\n')) {
-    if (FENCE.test(line)) { inFence = !inFence; continue; }
-    if (inFence) continue;
-    const m = HEADING.exec(line);
-    if (!m) continue;
-    out.push(m[1].replace(/\s+#+$/, '').trim());
+    const m = FENCE.exec(line);
+    if (fence) {
+      if (m && m[1][0] === fence.char && m[1].length >= fence.len) fence = null;
+      continue;
+    }
+    if (m) { fence = { char: m[1][0], len: m[1].length }; continue; }
+    const hm = HEADING.exec(line);
+    if (!hm) continue;
+    out.push(hm[1].replace(/\s+#+$/, '').trim());
   }
   return out;
 }
@@ -57,6 +65,12 @@ const LINE = /^[1-9]\d*$/;
  * or null if the citation is fine; never throws. In particular, a directory is rejected by
  * `isFile()` *before* any attempt to read it for a line count, which is what keeps a citation
  * like `src:1` from throwing EISDIR (the bug this replaces).
+ *
+ * Existence is checked on the lexically-resolved path first (so a missing citation is reported,
+ * not crashed on -- `realpathSync` throws ENOENT), and only then is the real path resolved
+ * (following symlinks) to check it stays inside the repo root. That order means a symlink that
+ * physically lives inside the repo but points outside it is still refused: resolving the
+ * citation lexically would never notice.
  */
 function citationProblem(root, cite) {
   const i = cite.indexOf(':');
@@ -65,12 +79,14 @@ function citationProblem(root, cite) {
   if (lineStr !== undefined && !LINE.test(lineStr)) return `${cite}: line must be a positive integer`;
   if (isAbsolute(file)) return `${cite}: must be a repo-relative path, not absolute`;
   const resolved = resolve(root, file);
-  const rel = relative(root, resolved);
-  if (rel === '..' || rel.startsWith('../')) return `${cite}: path escapes the repo root`;
   if (!existsSync(resolved)) return `${file} does not exist`;
-  if (!statSync(resolved).isFile()) return `${file || '(empty)'} is not a regular file`;
+  const real = realpathSync(resolved);
+  const realRoot = realpathSync(root);
+  const rel = relative(realRoot, real);
+  if (rel === '..' || rel.startsWith('../') || isAbsolute(rel)) return `${cite}: path escapes the repo root`;
+  if (!statSync(real).isFile()) return `${file || '(empty)'} is not a regular file`;
   if (lineStr !== undefined) {
-    const count = readFileSync(resolved, 'utf8').replace(/\n$/, '').split('\n').length;
+    const count = readFileSync(real, 'utf8').replace(/\n$/, '').split('\n').length;
     if (Number(lineStr) > count) return `${cite} is past the end (${count} lines)`;
   }
   return null;
@@ -174,6 +190,12 @@ export const cell = (s) => String(s ?? '')
   .replace(/\n/g, ' ');
 const note = (r) => r.gap ?? r.reason ?? r['accept-unwitnessed'] ?? '';
 
+/** A row shaped enough to look at: a non-null, non-array object. `check()` is what reports a
+ * malformed row (or a non-array top level) as a problem; `blocking()` and `render()` just skip
+ * anything that doesn't look like a row, rather than crashing on it. */
+const isMapping = (r) => r !== null && typeof r === 'object' && !Array.isArray(r);
+const rowList = (rows) => (Array.isArray(rows) ? rows.filter(isMapping) : []);
+
 /**
  * An allow-list: a row passes only if it is `ours` (with an accepted `unwitnessed` live, or a
  * non-unwitnessed live), `deferred`, or `skipped`. Anything else -- `partial`, `missing`, a
@@ -182,7 +204,7 @@ const note = (r) => r.gap ?? r.reason ?? r['accept-unwitnessed'] ?? '';
  * (a typo, a future addition) blocks by default rather than silently passing the gate.
  */
 export function blocking(rows) {
-  return [...rows].sort((a, b) => (a.id < b.id ? -1 : 1)).flatMap((r) => {
+  return rowList(rows).sort((a, b) => (a.id < b.id ? -1 : 1)).flatMap((r) => {
     if (r.status === 'ours') {
       const live = r.evidence?.live;
       if (live === 'unwitnessed') return r['accept-unwitnessed'] ? [] : [`${r.id}: ours but unwitnessed, not accepted`];
@@ -199,14 +221,15 @@ export function blocking(rows) {
 }
 
 export function render(rows, names) {
-  const count = (s) => rows.filter((r) => r.status === s).length;
+  const list = rowList(rows);
+  const count = (s) => list.filter((r) => r.status === s).length;
   const out = [
     '# x3270 parity checklist',
     '',
     '<!-- GENERATED by `node scripts/parity.mjs render` from docs/parity/checklist.yaml and',
     '     docs/parity/x3270-names.json. Do not edit by hand. -->',
     '',
-    `Compared against x3270 **${names.tag}**: ${names.names.length} names in ${rows.length} rows.`,
+    `Compared against x3270 **${names.tag}**: ${names.names.length} names in ${list.length} rows.`,
     'Design: `docs/superpowers/specs/2026-11-17-x3270-parity-checklist-design.md`.',
     '',
     '| status | rows |',
@@ -215,7 +238,7 @@ export function render(rows, names) {
     '',
   ];
   for (const area of AREAS) {
-    const these = rows.filter((r) => r.area === area).sort((a, b) => (a.id < b.id ? -1 : 1));
+    const these = list.filter((r) => r.area === area).sort((a, b) => (a.id < b.id ? -1 : 1));
     if (!these.length) continue;
     out.push(`## ${area}`, '', '| id | status | note | feature | our GUI | x3270 |', '|---|---|---|---|---|---|');
     for (const r of these) {
@@ -274,6 +297,14 @@ export function main(argv, io = { log: console.log, err: console.error }, deps =
       for (const p of problems) io.err(p);
       return problems.length ? 1 : 0;
     case 'gate': {
+      // A top-level shape problem (the checklist isn't even a list) makes `uncovered` and
+      // `blocking` meaningless noise -- hundreds of "not covered" lines when the real problem is
+      // that the YAML isn't a list at all. Report just the check() problem(s) and stop there.
+      if (!Array.isArray(rows)) {
+        for (const p of problems) io.err(p);
+        io.log(`parity gate: FAIL, ${problems.length} blocking`);
+        return 1;
+      }
       const lines = [...problems, ...uncovered.map((id) => `${id}: not covered by any row`), ...blocking(rows)];
       for (const l of lines) io.err(l);
       io.log(lines.length ? `parity gate: FAIL, ${lines.length} blocking` : 'parity gate: pass');
