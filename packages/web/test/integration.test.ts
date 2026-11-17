@@ -28,6 +28,18 @@ import { actionKinds, ACTION_KIND_FLOOR, ACTION_KIND_CANARIES }
 const trace = join(process.cwd(), 'packages/fixtures/traces/synthetic-ispf-like.trace');
 
 /**
+ * A REAL-HOST TRACE THAT RINGS THE ALARM, for the `alarm` message test below. MEASURED
+ * 2026-11-17, by replaying each of `packages/fixtures/traces/*.trace` through a bare `Session`
+ * and counting `'alarm'` emissions: every real capture (this one, `vm370-logon-logoff.trace` and
+ * `mvs-tk5-tso-ispf.trace`) carries exactly one, and the synthetic golden above carries none --
+ * which is exactly the plan's own measured note, re-verified rather than taken on faith. The
+ * smallest of the three, chosen only to keep the test fast.
+ */
+const alarmTrace = readFileSync(
+  join(process.cwd(), 'packages/fixtures/traces/mvs-tk5-vtam-logon.trace'), 'utf8',
+);
+
+/**
  * As much of a `DrawList` as the keypad cases read, spelled out rather than imported.
  *
  * These messages have been through `JSON.stringify` and `inflateSync`, so they are plain data and
@@ -536,7 +548,12 @@ describe('the gateway end to end', () => {
       // 'geometry' and 'connectSettled' since 2026-11-04: the picker's `geometryChoices` refresh.
       // 'geometry' keeps ONE: the factory's `printGeometryNotices`, registered once per SESSION
       // for stderr, not per socket -- so it stays at one however often the session reattaches.
-      for (const event of ['screen', 'connect', 'disconnect', 'geometry', 'connectSettled'] as const) {
+      // 'alarm' since 2026-11-17 (Task 4 of the blink/intensify/bell plan): the same leak this
+      // case exists to pin would reappear for it specifically if `stopListening` ever dropped its
+      // `mine.off('alarm', alarm)` -- and no OTHER case in this file would catch that, since this
+      // is the only place any session's listener counts are asserted after a reattach.
+      for (const event of
+        ['screen', 'connect', 'disconnect', 'geometry', 'connectSettled', 'alarm'] as const) {
         expect(session!.listenerCount(event), `${event} after close ${attempt + 1}`)
           .toBe(event === 'geometry' ? 1 : 0);
       }
@@ -579,6 +596,85 @@ describe('the gateway end to end', () => {
     }
     expect(registry.peek(id), 'the session must be detached and reaped after the grace').toBeUndefined();
     expect(registry.size()).toBe(0);
+  });
+
+  /*
+    THE HOST'S ALARM, 2026-11-17 (Task 4 of the blink/intensify/bell plan). Core's `Session`
+    emits `'alarm'` on a WCC sound-alarm bit; `main.ts` now forwards it as a new server message,
+    `{kind:'alarm', visual}`, the way it already forwards `'screen'`/`'connect'`/`'disconnect'`.
+
+    WHY THIS CANNOT USE THE `trace` THIS DESCRIBE ALREADY REPLAYS ON `hello`: `buildServer`'s
+    session factory calls `session.replay()` SYNCHRONOUSLY, inside `registry.attach`, which runs
+    and returns before `main.ts`'s `mine.on('alarm', ...)` is ever registered a few lines later in
+    the SAME `hello` handler -- the identical ordering `screen` and `connect` have, which is
+    harmless for THOSE because their state can be resent (the explicit `send()` right after
+    registering). An alarm is an instant, not a state, and nothing can un-ring a bell this socket
+    never heard -- so the FIRST hello's own trace alarm, if it had one, would be lost by
+    construction, and a test against it would prove nothing about the listener this task adds.
+
+    SO THE ALARM IS FIRED BY A SECOND, DIRECT CALL TO THE SESSION'S OWN PUBLIC `replay()`, after
+    `hello` has already wired the socket's listeners -- exactly the `registry.peek(id)!` pattern
+    already used above (`disconnect()`/`reconnect()`) and in the `-oversize auto` tests below, not
+    a new seam. `disconnect()` first because `replay()` refuses a connected session; it is a
+    no-op here (replay never sets `this.conn`) but costs nothing and matches that pattern.
+  */
+  it('rings the host\'s alarm in the browser: forwards a new {kind:"alarm",visual} message', async () => {
+    const args = parseWebArgs(['--replay', trace, '--listen', '0', '127.0.0.1:3270']);
+    const { server, registry } = buildServer(args);
+    await new Promise<void>((r) => { server.listen(0, '127.0.0.1', r); });
+    const port = (server.address() as { port: number }).port;
+    stop = () => { registry.closeAll(); server.close(); };
+
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    await new Promise((r) => ws.addEventListener('open', r, { once: true }));
+    const hello = collect(ws, 4);
+    ws.send(JSON.stringify({ kind: 'hello' }));
+    const id = (await hello)[0]!['id'] as string;
+
+    const after: Array<Record<string, unknown>> = [];
+    ws.addEventListener('message', (e) => {
+      after.push(JSON.parse(inflateSync(Buffer.from(e.data as ArrayBuffer)).toString()) as Record<string, unknown>);
+    });
+    const session = registry.peek(id)!;
+    session.disconnect();
+    session.replay(alarmTrace);
+
+    const deadline = Date.now() + 2000;
+    while (!after.some((m) => m['kind'] === 'alarm') && Date.now() < deadline) {
+      await new Promise((r) => { setTimeout(r, 10); });
+    }
+    expect(after.find((m) => m['kind'] === 'alarm'),
+      'the gateway must forward the session\'s alarm').toEqual({ kind: 'alarm', visual: false });
+    ws.close();
+  });
+
+  it('sends visual:true when the gateway was started with -visualbell', async () => {
+    const args = parseWebArgs(['--replay', trace, '--listen', '0', '-visualbell', '127.0.0.1:3270']);
+    const { server, registry } = buildServer(args);
+    await new Promise<void>((r) => { server.listen(0, '127.0.0.1', r); });
+    const port = (server.address() as { port: number }).port;
+    stop = () => { registry.closeAll(); server.close(); };
+
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    await new Promise((r) => ws.addEventListener('open', r, { once: true }));
+    const hello = collect(ws, 4);
+    ws.send(JSON.stringify({ kind: 'hello' }));
+    const id = (await hello)[0]!['id'] as string;
+
+    const after: Array<Record<string, unknown>> = [];
+    ws.addEventListener('message', (e) => {
+      after.push(JSON.parse(inflateSync(Buffer.from(e.data as ArrayBuffer)).toString()) as Record<string, unknown>);
+    });
+    const session = registry.peek(id)!;
+    session.disconnect();
+    session.replay(alarmTrace);
+
+    const deadline = Date.now() + 2000;
+    while (!after.some((m) => m['kind'] === 'alarm') && Date.now() < deadline) {
+      await new Promise((r) => { setTimeout(r, 10); });
+    }
+    expect(after.find((m) => m['kind'] === 'alarm')).toEqual({ kind: 'alarm', visual: true });
+    ws.close();
   });
 
   it('accepts a proxied browser Origin ONLY when --allow-origin names it', async () => {

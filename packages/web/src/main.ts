@@ -300,6 +300,23 @@ export function buildServer(args: WebArgs) {
         mine.on('screen', send);
         mine.on('connect', send);
         mine.on('disconnect', send);
+        /*
+          THE HOST'S ALARM (WCC bit; core emits 'alarm'), rung in the browser as x3270's
+          ring_bell does: a short WebAudio tone, or with -visualbell a flash instead --
+          `bridgecore.ts`'s `onFlash`/`tone`, which the GUI's `shell.beep()`/flash pair mirrors
+          for the same event. `visual` is this GATEWAY PROCESS's own `-visualbell` setting, not
+          a per-message choice, so every alarm on every session this process serves rings the
+          same way (see `args.ts` and `protocol.ts`'s `alarm` member).
+
+          UNCONDITIONAL ON STDOUT, like `selection`'s and `copy`'s own lines just below in this
+          file -- NOT gated behind `--log-actions`, which exists only because an `Action` can
+          carry typed text (a password). An alarm carries nothing an operator typed.
+        */
+        const alarm = (): void => {
+          conn.sendBinary(encodeServerMessage({ kind: 'alarm', visual: args.visualBell ?? false }));
+          process.stdout.write(`bell: ${args.visualBell ? 'visual' : 'audible'}\n`);
+        };
+        mine.on('alarm', alarm);
         const choiceEvents = ['geometry', 'connect', 'connectSettled', 'disconnect'] as const;
         for (const ev of choiceEvents) mine.on(ev, refreshChoices);
         // Paired with the lines above, in one place, so another event cannot be added to one
@@ -308,6 +325,7 @@ export function buildServer(args: WebArgs) {
           mine.off('screen', send);
           mine.off('connect', send);
           mine.off('disconnect', send);
+          mine.off('alarm', alarm);
           for (const ev of choiceEvents) mine.off(ev, refreshChoices);
         };
         repaint = send;

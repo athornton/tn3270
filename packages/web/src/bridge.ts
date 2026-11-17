@@ -391,6 +391,13 @@ const bridge = createBridge({
     width: document.documentElement.clientWidth, height: document.documentElement.clientHeight,
   }),
   onResize: (fn) => { window.addEventListener('resize', fn); },
+  /**
+   * THE HOST'S ALARM'S TONE, 2026-11-17. One real browser global, same bargain as `navigator`
+   * above: `bridgecore.ts`'s `tone` swallows a missing constructor, a refusing browser and a
+   * context that throws (a browser may block sound before this page has had a user gesture --
+   * documented, not handled), so nothing here needs to guard any of that itself.
+   */
+  audioContext: () => new AudioContext(),
 });
 
 (window as unknown as { tn3270: BridgeApi }).tn3270 = bridge;

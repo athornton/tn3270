@@ -217,6 +217,16 @@ describe('parseWebArgs', () => {
   });
 });
 
+describe('-visualbell', () => {
+  it('sets visualBell', () => {
+    expect(parseWebArgs(['-visualbell', 'vm:3270']).visualBell).toBe(true);
+  });
+
+  it('is absent by default', () => {
+    expect(parseWebArgs(['vm:3270']).visualBell).toBeUndefined();
+  });
+});
+
 describe('-oversize', () => {
   it('parses each form, and is absent by default', () => {
     expect(parseWebArgs(['-oversize', '160x62', 'vm:3270']).oversize)

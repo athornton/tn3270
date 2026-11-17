@@ -103,6 +103,18 @@ export interface WebArgs {
    * at each connect (`viewport.ts`). A combination a connect would refuse is refused at parse time.
    */
   readonly oversize?: Oversize;
+  /**
+   * `-visualbell`: ring the host's alarm (core's `'alarm'` event) as a flash in the browser
+   * instead of the default WebAudio tone -- x3270's `visualBell` resource (`screen.c:5457`), and
+   * the SAME SPELLING the GUI's `-visualbell` uses (`gui/src/args.ts`), since the spec calls for
+   * one flag across every front end. Absent means the default, which is the audible tone.
+   *
+   * ONE SETTING FOR THE WHOLE GATEWAY PROCESS, not a per-browser choice: every session this
+   * process serves rings the same way, because there is no per-connection equivalent of the GUI's
+   * own window to flash instead of beeping -- `main.ts` reads this once per alarm and sends it as
+   * the `visual` field of the `alarm` server message (`protocol.ts`).
+   */
+  readonly visualBell?: boolean;
 }
 
 /** One flag that takes a value, or throw naming the flag rather than the index. */
@@ -154,6 +166,7 @@ export function parseWebArgs(argv: readonly string[]): WebArgs {
   let ddm: boolean | undefined;
   let bindLimit: boolean | undefined;
   let devname: string | undefined;
+  let visualBell: boolean | undefined;
   const geometry: { oversize?: Oversize } = {};
 
   const args = [...argv];
@@ -212,6 +225,9 @@ export function parseWebArgs(argv: readonly string[]): WebArgs {
         continue;
       }
       case '-devname': devname = value(args, i, a); i += 1; continue;
+      // Bare, like the GUI's own `-visualbell` -- no `on`/`off` value, unlike the mainframe-client
+      // flags just above. See `WebArgs.visualBell` for why this is one flag across every front end.
+      case '-visualbell': visualBell = true; continue;
       default:
         if (a.startsWith('-')) throw new UsageError(`unknown flag ${a}`);
         rest.push(a);
@@ -306,6 +322,7 @@ export function parseWebArgs(argv: readonly string[]): WebArgs {
     ...(bindLimit === undefined ? {} : { bindLimit }),
     ...(devname === undefined ? {} : { devname }),
     ...(oversize === undefined ? {} : { oversize }),
+    ...(visualBell === undefined ? {} : { visualBell }),
   };
 }
 

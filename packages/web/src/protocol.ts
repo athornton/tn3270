@@ -98,7 +98,27 @@ export type ServerMessage =
     back where the session is. A MALFORMED `setGeometry` is still an `error`: it is refused at
     decode, below, like every other bad frame.
   */
-  | ({ kind: 'geometryChoices' } & GeometryChoices);
+  | ({ kind: 'geometryChoices' } & GeometryChoices)
+  /*
+    THE HOST'S ALARM, 2026-11-17 (Task 4 of the blink/intensify/bell plan). Core's `Session` emits
+    `'alarm'` on a WCC sound-alarm bit (`core/src/session.ts:1221`); the gateway's per-socket
+    wiring (`main.ts`, beside its `screen`/`connect`/`disconnect` listeners) forwards it here so
+    the browser can ring it the way the GUI's `main.ts` rings `shell.beep()` for the same event.
+
+    `visual` IS THE GATEWAY'S OWN `-visualbell` SETTING (`args.ts`), not a per-alarm choice: one
+    process rings every alarm the same way, matching x3270's `visualBell` resource and the GUI's
+    `-visualbell` (`gui/src/args.ts`). `true` means flash; `false` (the default) means a short
+    WebAudio tone, both in `bridgecore.ts`.
+
+    PLAIN JSON, NO BASE64 BRANCH, for `copyText`'s reason above: both fields are already values
+    JSON holds natively. NO DECODE HELPER HERE, like every other `ServerMessage` member except
+    `ClientMessage`'s: this file validates messages the GATEWAY receives from an untrusted
+    browser, never ones it sends, so nothing here shape-checks `alarm`. The bridge is what
+    receives this kind untrusted-remote-style in reverse -- `bridgecore.ts`'s `onmessage` shape-
+    checks `visual` the same way it already treats `selectionText`'s `seq` and `copyText`'s
+    `text`, and drops a malformed one rather than throwing.
+  */
+  | { kind: 'alarm'; visual: boolean };
 
 /** A browser viewport in CSS pixels, for `-oversize auto`. See `checkViewport`. */
 export interface Viewport { readonly width: number; readonly height: number }
