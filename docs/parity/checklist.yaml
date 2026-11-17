@@ -21,7 +21,7 @@
   x3270: "File menu → Disconnect; Disconnect()/Close() actions"
   gui: "menu: Model → Disconnect"
   status: partial
-  gap: "implemented and unit-tested but the GUI item has no live witness (docs/live-testing.md lists it as owed), so it can only be ours with the user's accept-unwitnessed; also absent from a --terminal-type session, which has no Model menu"
+  gap: "the Disconnect item lives in the Model menu, so a --terminal-type session, which has no Model menu, has no way to disconnect"
   evidence:
     code: [packages/gui/src/menu.ts:304, packages/gui/src/main.ts:1472, packages/core/src/session.ts:903]
     tests: [packages/gui/test/menu.test.ts, packages/core/test/session.test.ts]
@@ -34,8 +34,7 @@
   covers: [action:Reconnect]
   x3270: "Reconnect() action (keymap or script; no menu item)"
   gui: "key: Enter or Clear while disconnected (a deliberate divergence: x3270 binds no key)"
-  status: partial
-  gap: "implemented and unit-tested, no live witness, so it can only be ours with the user's accept-unwitnessed"
+  status: ours
   evidence:
     code: [packages/frontend/src/actions.ts:147, packages/core/src/session.ts:987]
     tests: [packages/frontend/test/actions.test.ts, packages/core/test/session.test.ts]
@@ -248,8 +247,7 @@
   covers: [resource:bindLimit]
   x3270: "bindLimit resource (on by default)"
   gui: "flag: -bind-limit on|off"
-  status: partial
-  gap: "implemented and unit-tested, no live witness (no reachable host completes TN3270E), so it can only be ours with the user's accept-unwitnessed"
+  status: ours
   evidence:
     code: [packages/core/src/bind.ts:269, packages/gui/src/args.ts:161]
     tests: [packages/core/test/bind.test.ts, packages/core/test/tn3270e-session.test.ts, packages/gui/test/args.test.ts]

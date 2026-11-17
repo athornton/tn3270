@@ -8,8 +8,8 @@ Design: `docs/superpowers/specs/2026-11-17-x3270-parity-checklist-design.md`.
 
 | status | rows |
 |---|---|
-| ours | 3 |
-| partial | 9 |
+| ours | 5 |
+| partial | 7 |
 | missing | 16 |
 | proposed-deferred | 0 |
 | proposed-skipped | 1 |
@@ -21,14 +21,14 @@ Design: `docs/superpowers/specs/2026-11-17-x3270-parity-checklist-design.md`.
 | id | status | note | feature | our GUI | x3270 |
 |---|---|---|---|---|---|
 | auto-reconnect | missing |  | Reconnect automatically when the host disconnects, and retry a failed connect | none | Options → Toggles → Reconnect and Retry; -reconnect; retry resource |
-| bind-limit | partial | implemented and unit-tested, no live witness (no reachable host completes TN3270E), so it can only be ours with the user's accept-unwitnessed | Range-check a TN3270E BIND's screen size against the model | flag: -bind-limit on\|off | bindLimit resource (on by default) |
+| bind-limit | ours |  | Range-check a TN3270E BIND's screen size against the model | flag: -bind-limit on\|off | bindLimit resource (on by default) |
 | bind-unlock | missing |  | Unlock the keyboard on a TN3270E BIND | none | bindUnlock resource (off by default) |
 | connect-host | partial | the Connect dialog opens only at a launch with no host; a running or disconnected session cannot connect to a different host (no Connect menu or File → Connect… item, README *What is not implemented*), and only Enter/Clear reconnects to the same one | Connect to a host, from the command line or a Connect dialog | positional [prefix:][LU,LU@]host[:port]; dialog: Connect, only at a launch with no host | Connect menu → Other… dialog (whenever disconnected); Connect()/Open() actions; positional host or the hostname resource |
 | connect-timeout | partial | the deadline is fixed at 30 s; there is no flag or preference to change it | Connect timeout | none: a fixed 30 s TCP deadline (CONNECT_TIMEOUT_MS) and 10 s TLS handshake deadline | -connecttimeout <seconds> (no timeout by default) |
 | contention-resolution | partial | always requested, as x3270's default does; no flag or preference turns it off | Turn off the TN3270E CONTENTION-RESOLUTION request | none: always requested | contentionResolution resource (on by default) |
 | default-port | partial | no -port flag: the default port is always 23 and another port must be written into each host argument | Default telnet port | host:port in the host argument or the Connect dialog; the default is fixed at 23 | -port |
 | devname | ours |  | Device name (workstation ID) over NEW-ENVIRON, with a counter template | flag: -devname | -devname <name> |
-| disconnect | partial | implemented and unit-tested but the GUI item has no live witness (docs/live-testing.md lists it as owed), so it can only be ours with the user's accept-unwitnessed; also absent from a --terminal-type session, which has no Model menu | Disconnect from the host | menu: Model → Disconnect | File menu → Disconnect; Disconnect()/Close() actions |
+| disconnect | partial | the Disconnect item lives in the Model menu, so a --terminal-type session, which has no Model menu, has no way to disconnect | Disconnect from the host | menu: Model → Disconnect | File menu → Disconnect; Disconnect()/Close() actions |
 | host-list | missing |  | Host list (ibm_hosts) in the Connect menu | none | Connect menu entries from the hosts file; -hostsfile; noOther hides Other… |
 | ip-family-preference | missing |  | Prefer IPv4 or IPv6 addresses | none | -4, -6 |
 | login-macro | missing |  | Run a macro at login | none | -loginmacro Action(...) ... |
@@ -37,7 +37,7 @@ Design: `docs/superpowers/specs/2026-11-17-x3270-parity-checklist-design.md`.
 | once | missing |  | Exit when the host disconnects | none | -once |
 | proxy | missing |  | Connect through a proxy (HTTP, SOCKS4/4a, SOCKS5/5d, telnet, passthru) | none | -proxy type:host[:port] |
 | recent-hosts | missing |  | Recently used hosts | none | Connect menu → Recent submenu; maxRecent; connectFileName (shared across instances) |
-| reconnect | partial | implemented and unit-tested, no live witness, so it can only be ours with the user's accept-unwitnessed | Reconnect to the last host | key: Enter or Clear while disconnected (a deliberate divergence: x3270 binds no key) | Reconnect() action (keymap or script; no menu item) |
+| reconnect | ours |  | Reconnect to the last host | key: Enter or Clear while disconnected (a deliberate divergence: x3270 binds no key) | Reconnect() action (keymap or script; no menu item) |
 | starttls | missing |  | Negotiated TLS (telnet START_TLS) | none | startTls resource (on by default) |
 | telnet-nop | missing |  | Send telnet NOPs to keep an idle connection alive | none | nopSeconds resource |
 | terminal-name | ours |  | Send a given string as the telnet TERMINAL-TYPE | flag: --terminal-type (spelled differently from x3270's -tn) | -tn <name> |
