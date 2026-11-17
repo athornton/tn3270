@@ -212,11 +212,17 @@ workflow; re-pinning the README's existing x3270 citations.
    list) are built at run time.
 6. **The extractor has no npm dependencies**, so the upstream workflow runs it with no
    `npm ci`; only `scripts/parity.mjs` uses `yaml`.
-7. **Linkage also reads `lib/3270/lib3270u_files.mk` and `lib/32xx/lib32xxu_files.mk`** (the
-   Unix-specific object lists for lib3270 and lib32xx), and adds the Unix-default TLS module
-   (`sio_openssl`, per `lib/configure.in:254-262`), resolving each object's `.c` through that
-   lib's VPATH (`lib/*/Makefile.in`'s `VPATH = $(this):$(top)/Common[:.../Nodisplay]`) rather than
-   assuming a fixed directory.
+7. **Linkage's library set is pinned, not read:** `scripts/parity-extract.mjs`'s `LIBS` table
+   hardcodes which `*_OBJECTS` variables -- including `lib/3270/lib3270u_files.mk` and
+   `lib/32xx/lib32xxu_files.mk` (the Unix-specific object lists for lib3270 and lib32xx) -- the
+   Unix-default TLS module (`sio_openssl`, per `lib/configure.in:254-262`), and the VPATH
+   (`lib/*/Makefile.in`'s `VPATH = $(this):$(top)/Common[:.../Nodisplay]`) make up each linked
+   group, resolving each object's `.c` through that VPATH rather than assuming a fixed directory.
+   `linkedSources()` checks this pinning against the real tree on every run -- that
+   `x3270/Makefile.obj.in`'s link line still names the same `$(LD...)` libraries, and that
+   `lib/configure.in`'s TLS module list still defaults to `sio_openssl` on Unix -- and throws a
+   clear "linkage changed" error, naming what differs, if either has drifted, rather than
+   silently producing a wrong inventory.
 8. **Options also come from `option_help[]`** (`x3270/x3270.c`; adds flag-only options with no
    Xrm entry of their own, such as `OptV`/`OptVersion`) **and from `main()`'s literal `strcmp`
    checks** (`OptHelp1`/`OptHelp2`, matched before any option table is consulted), merging sites

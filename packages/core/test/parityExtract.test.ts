@@ -1,6 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { extractNames, guardsByLine, linkedSources, makeVar, parseDefines } from '../../../scripts/parity-extract.mjs';
 
+// Real text (suite3270 4.5ga6): x3270/Makefile.obj.in:86 and lib/configure.in:260. linkedSources
+// checks the real tree against these before resolving anything, so every linkedSources fixture
+// below needs them, even when the test isn't about the check itself.
+const GOOD_MAKEFILE_OBJ_IN = '\t$(CC) -o $@ $(OBJS1) $(LDFLAGS) $(LD3270) $(LD3270I) $(LD32XX) $(LD3270STUBS) $(LIBS)\n';
+const GOOD_CONFIGURE_IN = 'else\tTLS_MODULES=sio_openssl.o\nfi\n';
+
 describe('parity-extract primitives', () => {
   it('makeVar joins continuation lines and strips .o', () => {
     const mk = '# c\nX3270_OBJECTS = a.o b.o \\\n\tc.o\nOTHER = z.o\n';
@@ -57,6 +63,8 @@ describe('parity-extract primitives', () => {
       'Common/lib3270i_files.mk': 'LIB3270I_OBJECTS = scroll.o\n',
       'Common/lib32xx_files.mk': 'LIB32XX_OBJECTS = proxy.o\n',
       'lib/32xx/lib32xxu_files.mk': 'LIB32XXU_OBJECTS = xpopen.o\n',
+      'x3270/Makefile.obj.in': GOOD_MAKEFILE_OBJ_IN,
+      'lib/configure.in': GOOD_CONFIGURE_IN,
     };
     // Resolution order per group matters: find_console (lib3270u) and xpopen (lib32xxu) are
     // declared under lib/, but their `.c` is placed in Common/ here, as in the real tree;
@@ -90,6 +98,8 @@ describe('parity-extract primitives', () => {
       'Common/lib3270i_files.mk': 'LIB3270I_OBJECTS =\n',
       'Common/lib32xx_files.mk': 'LIB32XX_OBJECTS =\n',
       'lib/32xx/lib32xxu_files.mk': 'LIB32XXU_OBJECTS =\n',
+      'x3270/Makefile.obj.in': GOOD_MAKEFILE_OBJ_IN,
+      'lib/configure.in': GOOD_CONFIGURE_IN,
     };
     const boom = Object.assign(new Error('boom'), { code: 'EACCES' });
     const read = (p: string) => {
@@ -98,6 +108,26 @@ describe('parity-extract primitives', () => {
       throw Object.assign(new Error(`ENOENT ${p}`), { code: 'ENOENT' });
     };
     expect(() => linkedSources(read)).toThrow(boom);
+  });
+
+  it("linkedSources throws a clear 'linkage changed' error if x3270's link line names a different set of $(LD...) libraries", () => {
+    const read = (p: string) => {
+      // LD3270I is missing from the link line -- a stand-in for a future suite3270 release
+      // restructuring how it links, which LIBS would then be silently wrong about.
+      if (p === 'x3270/Makefile.obj.in') return '\t$(CC) -o $@ $(OBJS1) $(LDFLAGS) $(LD3270) $(LD32XX) $(LD3270STUBS) $(LIBS)\n';
+      if (p === 'lib/configure.in') return GOOD_CONFIGURE_IN;
+      throw Object.assign(new Error(`ENOENT ${p}`), { code: 'ENOENT' });
+    };
+    expect(() => linkedSources(read)).toThrow(/x3270 linkage changed: update LIBS in scripts\/parity-extract\.mjs/);
+  });
+
+  it("linkedSources throws a clear 'linkage changed' error if lib/configure.in's TLS default is no longer sio_openssl", () => {
+    const read = (p: string) => {
+      if (p === 'x3270/Makefile.obj.in') return GOOD_MAKEFILE_OBJ_IN;
+      if (p === 'lib/configure.in') return 'else\tTLS_MODULES=sio_mock.o\nfi\n'; // the Unix default changed
+      throw Object.assign(new Error(`ENOENT ${p}`), { code: 'ENOENT' });
+    };
+    expect(() => linkedSources(read)).toThrow(/x3270 linkage changed: update LIBS in scripts\/parity-extract\.mjs/);
   });
 
   it('guardsByLine tracks #if/#else/#endif nesting, with /*[*/ markers stripped', () => {
@@ -111,7 +141,7 @@ describe('parity-extract primitives', () => {
 });
 
 const TREE: Record<string, string> = {
-  'include/names.h': '#define AnAttn "Attn"\n#define AnStepEfont "StepEfont"\n#define AnMonoCase "MonoCase"\n',
+  'include/names.h': '#define AnAttn "Attn"\n#define AnStepEfont "StepEfont"\n#define AnMonoCase "MonoCase"\n#define AnFoo "Foo"\n#define AnBar "Bar"\n',
   'include/resources.h': [
     '#define ResProxy "proxy"', '#define DotProxy "." ResProxy', '#define OptProxy "-proxy"',
     '#define ResModel "model"', '#define DotModel "." ResModel', '#define OptModel "-model"',
@@ -128,8 +158,16 @@ const TREE: Record<string, string> = {
     '    { AnAttn,\t\tAttn_action,\t\tACTION_KE },',
     '    { AnMonoCase,\tMonoCase_action,\tACTION_KE | ACTION_HIDDEN },',
     '    { RESUME_INPUT,\tResumeInput_action, 0 },',
+    '    { "a\\"b", Weird_action, 0 },', // escaped quote, not a bare identifier or plain literal
     '};',
     'x = ResHostsFile;',
+  ].join('\n'),
+  'Common/task.c': [
+    'static action_table_t task_actions[] = {',
+    '    { AnFoo, Foo_action, 0 },',
+    "#error don't", // a stray apostrophe: not a real char literal, must not swallow AnBar below
+    '    { AnBar, Bar_action, 0 },',
+    '};',
   ].join('\n'),
   'Common/glue.c': [
     'static opt_t base_opts[] = {',
@@ -167,6 +205,7 @@ const TREE: Record<string, string> = {
     '    { "Cut",\t\tCut_xaction },',
     '    { AnStepEfont,\tStepEfont_xaction },',
     '    { PA_PFX "ConfigureNotify",\tPA_ConfigureNotify_xaction },',
+    '    { "x\\"y", Weird_xaction },', // escaped quote, not a bare identifier or plain literal
     '};',
   ].join('\n'),
   'x3270/menubar.c': [
@@ -184,6 +223,7 @@ const TREE: Record<string, string> = {
     '    get_resource("proxy");',
     '    get_resource("extraResource");',
     '    y = DotKeypad;',
+    '    static Widget add_menu_itemv(const char *name, Widget menu, XtCallbackProc callback, XtPointer arg, bool *spaced, ...);',
   ].join('\n'),
 };
 const read = (p: string) => {
@@ -191,7 +231,7 @@ const read = (p: string) => {
   if (t === undefined) throw Object.assign(new Error(`ENOENT ${p}`), { code: 'ENOENT' });
   return t;
 };
-const FILES = ['Common/glue.c', 'Common/kybd.c', 'Common/toggles.c', 'x3270/menubar.c', 'x3270/x3270.c', 'x3270/xactions.c'];
+const FILES = ['Common/glue.c', 'Common/kybd.c', 'Common/task.c', 'Common/toggles.c', 'x3270/menubar.c', 'x3270/x3270.c', 'x3270/xactions.c'];
 
 describe('extractNames', () => {
   const out = extractNames(read, FILES);
@@ -215,6 +255,25 @@ describe('extractNames', () => {
     expect(ids).not.toContain('xaction:PA_PFXConfigureNotify');
     expect(out.unresolved).not.toContain('PA_PFX "ConfigureNotify" at x3270/xactions.c:4');
     expect(out.privateXactions).toBe(1);
+  });
+
+  it('does not let a stray apostrophe (not a real char literal) swallow the rest of a table', () => {
+    // Common/task.c: a `#error don't` line sits between two action_table_t entries. A quote/char
+    // literal that doesn't close before the line's end is not a literal at all here, so it can't
+    // consume the AnBar entry (and the table's closing brace) that follows.
+    expect(ids).toContain('action:Foo');
+    expect(ids).toContain('action:Bar');
+  });
+
+  it('sends a non-identifier, non-plain-literal action name field to unresolved, not nowhere', () => {
+    // `"a\"b"` has an escaped quote, so it's neither a bare identifier nor a plain `"[^"]*"`
+    // literal; it used to just vanish (fail the regex, `continue` silently, no trace anywhere).
+    expect(out.unresolved).toContain('"a\\"b" at Common/kybd.c:6');
+    expect(ids).not.toContain('action:undefined');
+  });
+
+  it('sends the same kind of malformed xaction name field to unresolved too', () => {
+    expect(out.unresolved).toContain('"x\\"y" at x3270/xactions.c:5');
   });
 
   it("takes options from x3270's Xrm table only, with the resource each sets", () => {
@@ -289,6 +348,15 @@ describe('extractNames', () => {
   it('skips a toggle_init prototype/definition line (its args start with a C type keyword)', () => {
     expect(ids).not.toContain('menu:menu'); // sanity: nothing spurious from the prototype line
     expect(out.nonLiteralMenuCalls).not.toContain('x3270/menubar.c:9');
+  });
+
+  it('skips an add_menu_itemv prototype/definition line (its args start with a C type keyword)', () => {
+    // Mutation-tested: toggle_init's call at line 9 never reaches the nonLiteralMenuCalls check
+    // either way (toggle_init's first arg isn't required to be a literal), so that line alone
+    // doesn't prove the skip does anything. This add_menu_itemv prototype's args ("const char
+    // *name, ...") have no string literal at all, so without the skip it WOULD land in
+    // nonLiteralMenuCalls as a false positive.
+    expect(out.nonLiteralMenuCalls).not.toContain('x3270/menubar.c:15');
   });
 
   it('takes every literal name from a toggle_init call that has two (name1 and name2)', () => {

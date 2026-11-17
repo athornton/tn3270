@@ -16,12 +16,22 @@
  * found the escaped quote as if it were the closing one, under-consumed the literal, and then
  * (closing-quote search failing, returning -1) looped forever. Every caller is bounded by
  * `text.length` for the same reason: an unterminated literal or comment must still end the scan.
+ *
+ * A quote or character literal is also bounded by the end of its own line: real C string/char
+ * literals can't span a physical line, so an unterminated one (a stray apostrophe, e.g.
+ * `#error don't`) is not a literal at all here -- `i` is returned unchanged, leaving the quote
+ * character to be scanned as ordinary text. Without this, that apostrophe would search for its
+ * "closing" quote arbitrarily far into the rest of the file, swallowing real `{`/`}`/`,` syntax
+ * (and whole table entries) along the way.
  */
 function skipAtom(text, i) {
   const c = text[i];
   if (c === '"' || c === "'") {
+    const nl = text.indexOf('\n', i);
+    const limit = nl === -1 ? text.length : nl;
     let j = i + 1;
-    while (j < text.length && text[j] !== c) { if (text[j] === '\\') j++; j++; }
+    while (j < limit && text[j] !== c) { if (text[j] === '\\') j++; j++; }
+    if (j >= limit) return i; // unterminated before end of line: not a real literal
     return Math.min(j + 1, text.length);
   }
   if (c === '/' && text[i + 1] === '*') {
@@ -49,6 +59,7 @@ function stripComments(text) {
     const c = joined[i];
     if (c === '"' || c === "'") {
       const skip = skipAtom(joined, i);
+      if (skip === i) { out += c; continue; } // unterminated before EOL: not a real literal
       out += joined.slice(i, skip);
       i = skip - 1;
       continue;
@@ -166,10 +177,40 @@ function existsAt(read, path) {
   catch (e) { if (e && e.code === 'ENOENT') return false; throw e; }
 }
 
+// LIBS above is pinned (hardcoded), not derived by reading x3270's build files each run -- so
+// drift between it and the real tree would otherwise be silent. These are the two facts LIBS
+// depends on: x3270/Makefile.obj.in's link line names exactly these $(LD...) libraries
+// (LD3270STUBS is deliberately excluded from LIBS: lib3270stubs contributes no feature names),
+// and lib/configure.in's Unix TLS default is sio_openssl.o. checkLinkageDrift() verifies both
+// against the real files on every run and throws loudly if either has changed.
+const EXPECTED_LD_LIBS = ['LD3270', 'LD3270I', 'LD32XX', 'LD3270STUBS'];
+const DRIFT = 'x3270 linkage changed: update LIBS in scripts/parity-extract.mjs';
+
+function checkLinkageDrift(read) {
+  const obj = read('x3270/Makefile.obj.in');
+  const linkLine = obj.split('\n').find((l) => /\$\(CC\)\s+-o\s+\$@\s+\$\(OBJS1\)/.test(l));
+  if (!linkLine) throw new Error(`${DRIFT} (x3270/Makefile.obj.in's link line was not found)`);
+  // `LD\d\w*` (not `LD\w+`): the library macros are LD3270/LD3270I/LD32XX/LD3270STUBS, always
+  // digit-after-LD; `$(LDFLAGS)` on the same line is a different thing entirely and must not match.
+  const found = [...linkLine.matchAll(/\$\((LD\d\w*)\)/g)].map((m) => m[1]);
+  const expected = EXPECTED_LD_LIBS;
+  if (found.length !== expected.length || !found.every((l) => expected.includes(l))) {
+    throw new Error(`${DRIFT} (link line now names [${found.join(', ')}], expected [${expected.join(', ')}])`);
+  }
+
+  const cfg = read('lib/configure.in');
+  if (!/TLS_MODULES\s*=\s*sio_openssl\.o/.test(cfg)) {
+    throw new Error(`${DRIFT} (lib/configure.in no longer defaults TLS_MODULES to sio_openssl.o on Unix)`);
+  }
+}
+
 /** The `.c` files linked, resolved through each group's VPATH, and the object basenames resolved
  * in none of them (`missingSources`; e.g. `favicon`, generated at build time -- not an error).
- * `read(path)` returns file text, or throws an ENOENT-coded error for a path that doesn't exist. */
+ * `read(path)` returns file text, or throws an ENOENT-coded error for a path that doesn't exist.
+ * Throws first if the real tree's linkage no longer matches what LIBS is pinned to (see
+ * `checkLinkageDrift()`). */
 export function linkedSources(read) {
+  checkLinkageDrift(read);
   const sources = new Set();
   const missingSources = new Set();
   for (const lib of LIBS) {
@@ -311,7 +352,8 @@ export function extractNames(read, files) {
 
     for (const e of tables(text, /\baction_table_t\s+\w+\s*\[\s*\]\s*=\s*\{/g)) {
       const f = fields(e.body);
-      if (!/^(\w+|"[^"]*")$/.test(f[0] ?? '') || /\bACTION_HIDDEN\b/.test(f[2] ?? '')) continue;
+      if (/\bACTION_HIDDEN\b/.test(f[2] ?? '')) continue;
+      if (!/^(\w+|"[^"]*")$/.test(f[0] ?? '')) { unresolved.push(`${f[0] ?? ''} at ${file}:${e.line}`); continue; }
       add('action', actionName(f[0], e.line), file, e.line, guards);
     }
     // The pure Xt actions (x3270/xactions.c): bindable in keymaps, so reachable by a user.
@@ -321,7 +363,8 @@ export function extractNames(read, files) {
     for (const e of tables(text, /\bXtActionsRec\s+xactions\s*\[\s*\]\s*=\s*\{/g)) {
       const [name] = fields(e.body);
       if (/^PA_\w+/.test(name ?? '')) { privateXactions++; continue; }
-      if (/^(\w+|"[^"]*")$/.test(name ?? '')) add('xaction', actionName(name, e.line), file, e.line, guards);
+      if (!/^(\w+|"[^"]*")$/.test(name ?? '')) { unresolved.push(`${name ?? ''} at ${file}:${e.line}`); continue; }
+      add('xaction', actionName(name, e.line), file, e.line, guards);
     }
     // Options: x3270's own Xrm table (base_options[]), option_help[] (adds flag-only OptV
     // and OptVersion, with no Xrm entry of their own), and OptHelp1/OptHelp2's main() literal
