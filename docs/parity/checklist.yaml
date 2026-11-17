@@ -624,8 +624,8 @@
 - id: keymaps
   area: keyboard
   title: Custom keymaps
-  covers: [option:-keymap, action:Keymap, action:TemporaryKeymap, menu:keymapOption, resource:serverKeymapList]
-  x3270: "-keymap; Options → Keymap… dialog; Keymap()/TemporaryKeymap() actions; serverKeymapList picks one by X server vendor"
+  covers: [option:-keymap, action:Keymap, action:TemporaryKeymap, menu:keymapOption, resource:serverKeymapList, resource:nvt]
+  x3270: "-keymap; Options → Keymap… dialog; Keymap()/TemporaryKeymap() actions; serverKeymapList picks one by X server vendor; a keymap's <name>.nvt variant applies only in NVT mode (x3270/keymap.c:336-337, :364, :390)"
   gui: "none: the key table is fixed"
   status: missing
   browser: "none"
@@ -654,6 +654,16 @@
   gui: none
   status: missing
   browser: "none"
+- id: x-input-method
+  area: keyboard
+  title: X input method and preedit style
+  covers: [option:-im, option:-pt]
+  x3270: "-im <name> picks the X input method and -pt <style> its preedit type (x3270/x3270.c:207-208, help :299-300)"
+  gui: "n/a"
+  status: proposed-skipped
+  category: x11-only
+  reason: "-im and -pt choose an X input method server (XIM) and its preedit style, which exist only under X11; on macOS and Windows the input method is the platform's."
+  browser: "n/a"
 # --- display ---
 - id: screen-model
   area: display
@@ -1107,8 +1117,8 @@
 - id: print-window
   area: files
   title: Print the window as a bitmap
-  covers: [action:PrintWindow, menu:printWindowOption, resource:printWindowCommand]
-  x3270: "File → Print Window Bitmap (x3270/menubar.c:1194), a dialog for the command; PrintWindow() action (x3270/print_window.c:215), Alt-B; printWindowCommand, default xwd -id %d | xpr | lpr (x3270/fb-x3270:179)"
+  covers: [action:PrintWindow, menu:printWindowOption, resource:printWindowCommand, resource:doConfirms]
+  x3270: "File → Print Window Bitmap (x3270/menubar.c:1194), a dialog for the command; PrintWindow() action (x3270/print_window.c:215), Alt-B; printWindowCommand, default xwd -id %d | xpr | lpr (x3270/fb-x3270:179); doConfirms, default true (x3270/resources.c:334-335), pops up \"Bitmap printed.\" when it finishes (x3270/print_window.c:84), its only use on Unix (its other reader, Common/print_screen.c:585, is under _WIN32)"
   gui: "none. Store: the x3270 route pipes through other processes, which needs a store-probe check (docs/releasing.md:808)"
   status: missing
   browser: "none: the browser's own print prints the page"
@@ -1164,6 +1174,16 @@
   gui: "none: there is no preferences store (README *Using the GUI*, *Staging* item 15). Store: a profile outside the app's data would need a store-probe check (docs/releasing.md:808)"
   status: missing
   browser: "none"
+- id: local-codepage
+  area: files
+  title: Windows ANSI code page for local text conversion
+  covers: [resource:localCp]
+  x3270: "localCp is read only under _WIN32: as the file transfer's default Windows code page (Common/ft.c:335-336, :1227-1274) and as the local code page (Common/codepage.c:64-65, :139); on Unix LOCAL_CODEPAGE is 0 (Common/codepage.c:67) and the locale's codeset is used instead (Common/codepage.c:127-134)"
+  gui: "n/a"
+  status: proposed-skipped
+  category: n/a
+  reason: "x3270 on Unix never reads localCp (it is wc3270's, under _WIN32 only, like ftWindowsCodePage), so a Unix x3270 user has no such setting to miss."
+  browser: "n/a"
 # --- scripting ---
 - id: script-stdin
   area: scripting
@@ -1351,3 +1371,180 @@
   status: missing
   browser: "none"
   others: {cli: "none"}
+- id: exit
+  area: other
+  title: Exit the emulator, confirming first when connected
+  covers: [action:Quit, action:Exit, menu:exitOption, menu:exitReallyOption]
+  x3270: "File → Exit x3270, which while connected becomes a pullright whose Disconnect and Exit item confirms (x3270/menubar.c:653-679, :1255-1272; labels x3270/fb-x3270:907-908); Quit()/Exit() actions (Common/xio.c:209-210), refused from a keymap while connected unless -force (Common/xio.c:181-192), with Alt-Q bound to Quit(-force) (x3270/fb-x3270:266)"
+  gui: "keystroke: Ctrl-] quits at once; menu: the macOS app menu's Quit only; closing the last window quits"
+  status: partial
+  gap: "no Exit menu item on Linux or Windows (the app menu, which carries Quit, is built only on macOS), and nothing confirms before quitting a connected session as x3270's Disconnect and Exit does."
+  evidence:
+    code: [packages/canvas/src/keys.ts:126, packages/gui/src/main.ts:1629, packages/gui/src/menu.ts:418, packages/gui/src/main.ts:3158]
+    tests: [packages/canvas/test/keys.test.ts, packages/gui/test/menu.test.ts]
+    live: n/a
+  browser: "n/a: closing the tab ends the session"
+  others: {tui: "Ctrl-]", cli: "Quit()"}
+- id: about-version
+  area: other
+  title: About dialog with the version and copyright
+  covers: [menu:aboutOption, menu:aboutCopyright]
+  x3270: "File → About x3270 → Copyright, a popup with the build string, copyright and licence text (x3270/menubar.c:1103-1124, x3270/about.c:183)"
+  gui: "menu: macOS app menu → About (Electron's standard panel, from the appMenu role); none on Linux or Windows"
+  status: partial
+  gap: "the About item exists only on macOS, as Electron's default panel (main.ts never calls setAboutPanelOptions), so Linux and Windows have no About at all and no licence text is shown anywhere."
+  evidence:
+    code: [packages/gui/src/menu.ts:418]
+    tests: [packages/gui/test/menu.test.ts]
+    live: n/a
+  browser: "none"
+- id: about-config
+  area: other
+  title: About → Configuration (model, terminal name, fonts, code page, keymap)
+  covers: [menu:aboutConfig]
+  x3270: "File → About x3270 → Configuration: process and window id, model and size, colour and data-stream mode, terminal name, fonts, character sets, code page and CGCSGIDs, input method, locale codeset, keymaps and compose map (x3270/about.c:301-490)"
+  gui: none
+  status: missing
+  browser: "none"
+- id: about-status
+  area: other
+  title: About → Connection Status, optionally hiding the host name
+  covers: [menu:aboutStatus, resource:suppressHost]
+  x3270: "File → About x3270 → Connection Status: host, port, LU, TLS, mode and traffic counts (x3270/about.c:496); suppressHost, default false (x3270/resources.c:262-263), leaves the host name out of it (x3270/about.c:547)"
+  gui: "none: the status line is not a status dialog"
+  status: missing
+  browser: "none"
+- id: online-help
+  area: other
+  title: Online help
+  covers: [menu:helpOption]
+  x3270: "File → Help opens the version's help pages at x3270.bgp.nu in a browser (x3270/menubar.c:1094-1100, :938-945, Common/util.c:1008-1027)"
+  gui: none
+  status: missing
+  browser: "none"
+- id: cmdline-help
+  area: other
+  title: Print command-line usage
+  covers: [option:--help, option:-?]
+  x3270: "a lone --help or -? prints the option list and exits (x3270/x3270.c:502-506)"
+  gui: "none: --help is refused as an unrecognized argument (packages/gui/src/args.ts:176-177)"
+  status: missing
+  browser: "n/a"
+- id: version-flag
+  area: other
+  title: Print the version and build options
+  covers: [option:-v, option:--version]
+  x3270: "a lone -v or --version prints the build, build options, TLS provider, code pages and copyright, then exits (x3270/x3270.c:497-501, Common/util.c:944-956)"
+  gui: "none: --version is refused as an unrecognized argument (packages/gui/src/args.ts:176-177)"
+  status: missing
+  browser: "n/a"
+- id: min-version
+  area: other
+  title: Refuse to start below a given version
+  covers: [option:-minversion]
+  x3270: "-minversion <version>: fail unless at this version or newer (x3270/x3270.c:182, :268; Common/min_version.c:119)"
+  gui: none
+  status: missing
+  browser: "n/a"
+- id: local-process
+  area: other
+  title: Run a local process instead of connecting to a host
+  covers: [option:-e]
+  x3270: "-e <command> [arg...] runs the command on a pty instead of connecting (x3270/x3270.c:165-167, :250-252, Common/telnet.c:838; LOCAL_PROCESS, on by default, include/globals.h:145-146, x3270/configure.in:137)"
+  gui: none
+  status: missing
+  browser: "n/a"
+- id: secure-mode
+  area: other
+  title: Secure mode (lock down file, trace and save features)
+  covers: [option:-secure]
+  x3270: "-secure (x3270/x3270.c:199) hides File → File Transfer, Trace, Save Screen Contents, Save Changed Options, Save/Restore Input and Options → Idle Command (x3270/menubar.c:1129, :1176-1179, :1199, :1218, :2561), refuses traces (Common/trace.c:886), restricts printing (Common/print_screen.c:206, x3270/print_window.c:154) and turns on disconnectClear (x3270/x3270.c:740-742)"
+  gui: none
+  status: missing
+  browser: "none"
+- id: suppress-items
+  area: other
+  title: Hide menu items and disable actions by resource
+  covers: [resource:suppress, resource:suppressActions]
+  x3270: "<menu>.<item>.suppress: true hides that menu item (x3270/menubar.c:993-1007); suppressActions lists actions to disable (x3270/resources.c:111-112, Common/actions.c:85-135)"
+  gui: none
+  status: missing
+  browser: "none"
+- id: rpq-names
+  area: other
+  title: RPQ Names query reply and its self-defining terms
+  covers: [resource:rpq]
+  x3270: "x3270 answers Query with an RPQ Names reply, QCODE 0xA1 (Common/sf.c:91); the rpq resource, or X3270RPQ in the environment, selects which self-defining terms (timezone, user, address, version) it carries (Common/rpq.c:241-245), and is settable at run time (Common/rpq.c:811)"
+  gui: "none: the query reply has no RPQ Names unit (packages/core/src/queryreply.ts: summary, usable area, implicit partition, colour, highlighting, DDM, null)"
+  status: missing
+  browser: "none"
+- id: xrm
+  area: other
+  title: Set any resource on the command line
+  covers: [option:-xrm]
+  x3270: "-xrm 'x3270.<resource>: <value>' (x3270/x3270.c:213, :308)"
+  gui: "n/a"
+  status: proposed-skipped
+  category: x11-only
+  reason: "-xrm is the X Toolkit's way of setting a resource database entry, and ours has no X resource database for it to write to."
+  browser: "n/a"
+- id: unit-test-env
+  area: other
+  title: Allow unit-test options in the environment
+  covers: [option:-utenv]
+  x3270: "-utenv (x3270/x3270.c:210, :302) lets environment variables such as ORDER change internal behaviour (Common/util.c:1059, Common/sched.c:321, :559)"
+  gui: "n/a"
+  status: proposed-skipped
+  category: n/a
+  reason: "-utenv is a hook for x3270's own test suite, not a user feature, and ours has its own test seams."
+  browser: "n/a"
+- id: app-defaults-version
+  area: other
+  title: App-defaults file version check
+  covers: [resource:adVersion]
+  x3270: "adVersion, compiled only with --enable-app-defaults (x3270/resources.c:295-298, x3270/configure.in:74), must match the binary or x3270 refuses to start (x3270/x3270.c:707-716)"
+  gui: "n/a"
+  status: proposed-skipped
+  category: x11-only
+  reason: "adVersion checks that an installed X app-defaults file matches the binary, and ours has no app-defaults file."
+  browser: "n/a"
+- id: app-alias
+  area: other
+  title: Application alias
+  covers: [resource:alias]
+  x3270: "alias is in the generic resource table (Common/glue.c:858), but its only reader is Windows print code (Common/Win32/gdi_print.c:570-571); nothing in a Unix x3270 reads it"
+  gui: "n/a"
+  status: proposed-skipped
+  category: n/a
+  reason: "x3270 on Unix never reads alias (its only reader is wc3270's print code, under Common/Win32), so a Unix x3270 user has no such setting to miss."
+  browser: "n/a"
+- id: message-text
+  area: other
+  title: Override the text of x3270's messages
+  covers: [resource:message]
+  x3270: "every popup and About label is looked up as the resource message.<key> (Common/util.c:396-403), so a resource file can reword them"
+  gui: "none: our messages are compiled in"
+  status: proposed-skipped
+  category: declined
+  reason: "message.<key> is x3270's catalogue of its own UI text, reworded only through X resources; ours compiles its text in, and rewording it is a localization feature nobody has asked for."
+  browser: "n/a"
+- id: value-constants
+  area: other
+  title: The values true and false
+  covers: [resource:true, resource:false]
+  x3270: "ResTrue and ResFalse are listed under Miscellaneous values (include/resources.h:600-602), used as option values (x3270/x3270.c:164) and compared against (Common/util.c:1074-1076), and no resource is named true or false"
+  gui: "n/a"
+  status: proposed-skipped
+  category: n/a
+  reason: "these are extraction artefacts: true and false are value strings that x3270 compares resources against, not resources a user can set."
+  browser: "n/a"
+- id: window-id
+  area: other
+  title: Attach to a given window id
+  covers: [resource:windowId]
+  x3270: "windowId is in the generic resource table (Common/glue.c:949), but only Windows code reads it (Common/Win32/main_window.c:98, :131)"
+  gui: "n/a"
+  status: proposed-skipped
+  category: n/a
+  reason: "x3270 on Unix never reads windowId (its only reader is wc3270's main-window code, under Common/Win32)."
+  browser: "n/a"

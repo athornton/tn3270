@@ -313,6 +313,10 @@ describe('the committed checklist', () => {
     expect(check({ rows: committed, names, root }).problems).toEqual([]);
   });
 
+  it('covers every x3270 name (list them: node scripts/parity.mjs uncovered)', () => {
+    expect(check({ rows: committed, names, root }).uncovered).toEqual([]);
+  });
+
   it('docs/parity.md is exactly what render produces (run: node scripts/parity.mjs render)', () => {
     expect(readFileSync(`${root}docs/parity.md`, 'utf8')).toBe(render(committed, names));
   });
