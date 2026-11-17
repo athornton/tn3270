@@ -654,3 +654,371 @@
   gui: none
   status: missing
   browser: "none"
+# --- display ---
+- id: screen-model
+  area: display
+  title: Screen model (3278/3279 model 2, 3, 4 or 5)
+  covers: [option:-model, menu:modelsOption, menu:model2Option, menu:model3Option, menu:model4Option, menu:model5Option]
+  x3270: "Options → Models → Model 2/3/4/5 (disabled while connected); -model [327{8,9}-]<n>; default model 3279-4, with -E from extendedDataStream (x3270/resources.c:63-64, Common/model.c:137)"
+  gui: "flag: -model; menu: Model → the eight 3278-N and 3278-N-E radios (disabled while connected or connecting, applied at the next connect). Live: the GUI at -model 3278-4-E against VM drew 43 rows"
+  status: partial
+  gap: "only 3278 names are accepted: -model 3279-4, 3279-4-E and a bare 4 are refused as unknown models (core/src/termtype.ts:48), so no 3279 terminal type can be advertised; and the default is 3278-2-E (24x80 alternate), where x3270's is 3279-4-E (43x80 alternate)"
+  evidence:
+    code: [packages/gui/src/args.ts:117, packages/gui/src/menu.ts:310, packages/core/src/termtype.ts:48]
+    tests: [packages/gui/test/args.test.ts, packages/gui/test/menu.test.ts, packages/core/test/termtype.test.ts]
+    live: "The Electron GUI against both hosts — verified 2026-09-14"
+  browser: "the gateway's -model flag and the Alt-M picker"
+  others: {tui: "-model, or the no-host prompt's Model question", cli: "-model; Set(model,...)"}
+- id: oversize
+  area: display
+  title: Oversize screen dimensions
+  covers: [option:-oversize, menu:oversizeOption]
+  x3270: "Options → Models → Oversize… dialog, where any <cols>x<rows> is typed (enabled only with the extended data stream, x3270/menubar.c:2440-2444, :1728); -oversize <cols>x<rows>"
+  gui: "flag: -oversize <cols>x<rows>|auto|none; menu: Model → Oversize → None, Auto, or the size given at startup"
+  status: partial
+  gap: "no dialog to type a new size: the menu offers only None, Auto and the -oversize size given at startup. And a non -E model with -oversize is refused at startup, where x3270 drops the oversize silently (README Oversize)"
+  evidence:
+    code: [packages/gui/src/args.ts:102, packages/gui/src/menu.ts:316, packages/frontend/src/geometryChoice.ts:64]
+    tests: [packages/gui/test/args.test.ts, packages/gui/test/menu.test.ts, packages/core/test/geometry.test.ts, packages/frontend/test/geometryChoice.test.ts]
+    live: unwitnessed
+  browser: "-oversize on the gateway, and the Alt-M picker's oversize choices; witnessed live at 160x62 and auto in Firefox and Safari"
+  others: {tui: "-oversize", cli: "-oversize; Set(oversize,...)"}
+- id: extended-data-stream
+  area: display
+  title: Extended data stream on or off
+  covers: [menu:extendedDsOption, resource:extendedDataStream]
+  x3270: "Options → Toggles → Extended Data Stream (disabled while connected; turning it off drops the oversize, x3270/menubar.c:2153-2171); extendedDataStream resource, on by default (x3270/resources.c:366-367)"
+  gui: "flag: -model with or without -E; menu: Model → 3278-N (off) or 3278-N-E (on); a non -E choice drops the oversize to None and says so, as x3270's toggle drops it"
+  status: ours
+  evidence:
+    code: [packages/gui/src/menu.ts:310, packages/core/src/termtype.ts:48, packages/frontend/src/geometryChoice.ts:64]
+    tests: [packages/gui/test/menu.test.ts, packages/core/test/termtype.test.ts, packages/frontend/test/geometryChoice.test.ts]
+    live: unwitnessed
+  browser: "the same -E and non -E models in the Alt-M picker"
+  others: {tui: "-model with or without -E", cli: "-model with or without -E"}
+- id: color-mode
+  area: display
+  title: 3278 monochrome or 3279 color mode, and -mono
+  covers: [menu:m3278Option, menu:m3279Option, option:-mono, resource:normalColor, resource:inputColor, resource:boldColor]
+  x3270: "Options → Toggles → 3278 (mono) / 3279 (color) radio, disabled while connected (x3270/menubar.c:2310-2328); -mono (no color at all, and those items hidden); 3278 mode draws in normalColor/inputColor/boldColor, green by default (x3270/resources.c:234-239), and reports no colors in Query Reply (Common/sf.c:747-753)"
+  gui: "none: the canvas always draws a 3279 in color; -scheme green is a green palette, not 3278 mode"
+  status: missing
+  browser: "none"
+  others: {tui: "--colors 0 draws monochrome"}
+- id: color-scheme
+  area: display
+  title: Color scheme
+  covers: [option:-scheme, menu:colorsOption, resource:schemeList]
+  x3270: "Options → Color Scheme menu, switching live (enabled only in 3279 mode, x3270/menubar.c:2466-2498); -scheme; schemeList names the menu's schemes (default, reverse, bright, cpe, GreenScreen and the old-* set, x3270/fb-x3270:49-105)"
+  gui: "flag: -scheme default|3279|x3270|green (greenscreen accepted). Live: all three of default, 3279 and green drawn by the GUI connected to VM"
+  status: partial
+  gap: "flag only: no menu or preference, so the scheme cannot change while running; no reverse, bright, cpe or user-defined (colorScheme.<name>, schemeList) schemes; and our 'default' is a different palette from x3270's 'default', which is our 'x3270'"
+  evidence:
+    code: [packages/gui/src/args.ts:122, packages/frontend/src/palette.ts:184, packages/canvas/src/drawlist.ts:103]
+    tests: [packages/gui/test/args.test.ts, packages/frontend/test/palette.test.ts, packages/canvas/test/drawlist.test.ts]
+    live: "The three color schemes, live against VM at `-model 3278-4-E`"
+  browser: "the gateway's -scheme flag"
+  others: {tui: "-scheme"}
+- id: custom-colors
+  area: display
+  title: Screen and selection background colors
+  covers: [resource:colorBackground, resource:selectBackground]
+  x3270: "colorBackground (black) and selectBackground (dim gray) resources (x3270/resources.c:230-233), also set by a scheme's fields 17-18 (x3270/screen.c:4174-4177)"
+  gui: "none: the background comes from the -scheme table and the selection is drawn by inverting (difference compositing)"
+  status: missing
+  browser: "none"
+- id: highlight-bold
+  area: display
+  title: Draw intensified text bold (highlightBold)
+  covers: [resource:highlightBold]
+  x3270: "highlightBold resource, off by default (x3270/resources.c:346-347): in 3279 mode intensified fields are bold only if set; in 3278 mode always (x3270/screen.c:706-712)"
+  gui: "none: an intensified field is drawn in its color (red or white) and never bold, which is x3270's 3279 default"
+  status: partial
+  gap: "matches x3270's 3279-mode default (not bold); there is no flag or preference to turn bold on"
+  evidence:
+    code: [packages/core/src/render.ts:188, packages/canvas/src/blit.ts:129]
+    tests: [packages/core/test/render.test.ts, packages/canvas/test/blit.test.ts]
+  browser: "the same canvas"
+- id: field-highlight-colors
+  area: display
+  title: Color modified fields and light-pen-selectable fields
+  covers: [resource:modifiedSel, resource:modifiedSelColor, resource:visualSelect, resource:visualSelectColor]
+  x3270: "modifiedSel (Common/glue.c:909) with modifiedSelColor (10) and visualSelect with visualSelectColor (6), all off by default (x3270/resources.c:260-261, :274-277; used at x3270/screen.c:4373-4378)"
+  gui: none
+  status: missing
+  browser: "none"
+- id: emulator-font
+  area: display
+  title: Choose the emulator font
+  covers: [option:-efont, action:SetFont, menu:fontsOption, menu:otherFontOption, menu:entry, resource:emulatorFontList, resource:suppressFontMenu]
+  x3270: "Options → Font menu, built from emulatorFontList, with Other… to type a font name (x3270/menubar.c:2111, :2364-2400; menu:entry is the font menu's template item); -efont; SetFont() action (x3270/screen.c:4631); suppressFontMenu hides the menu"
+  gui: "none: one built-in font, x3270's own 3270 bitmap font baked into an atlas"
+  status: missing
+  browser: "none"
+- id: window-size-and-font-scale
+  area: display
+  title: Resize the window, step the font size, snap the window to the font
+  covers: [xaction:StepEfont, resource:allowResize, resource:fixedSize, menu:snapOption]
+  x3270: "allowResize (on by default, x3270/resources.c:266-267): a window resize picks the font that fits; Ctrl-+/Ctrl-- run StepEfont(bigger|smaller) (x3270/fb-x3270:275-278, x3270/screen.c:2082); Options → Snap fits the window to the screen (x3270/menubar.c:2407); fixedSize pins the window size"
+  gui: "the window sizes itself to the screen the host sets, and a manual resize redraws at the largest whole-number scale that fits"
+  status: partial
+  gap: "no key to step the font bigger or smaller, no Snap item (a resized window letterboxes rather than fitting), and no fixed-size setting"
+  evidence:
+    code: [packages/canvas/src/renderer.ts:735, packages/canvas/src/blit.ts:99, packages/gui/src/main.ts:1326]
+    tests: [packages/canvas/test/blit.test.ts, packages/gui/test/measure.test.ts]
+    live: unwitnessed
+  browser: "the page redraws at the largest whole-number scale for the viewport"
+- id: x11-display-tuning
+  area: display
+  title: X display DPI override and the XQuartz workaround
+  covers: [resource:dpi, resource:xQuartzHack]
+  x3270: "dpi resource overriding Xft.dpi (x3270/screen.c:583-593); xQuartzHack, an XQuartz workaround in the status line (x3270/status.c:956)"
+  gui: "n/a"
+  status: proposed-skipped
+  category: x11-only
+  reason: "both tune x3270 for a particular X server, and the GUI draws through Chromium, which takes the scale factor from the platform."
+- id: code-page
+  area: display
+  title: Host code page
+  covers: [option:-codepage, option:-charset, menu:codepageOption, resource:charset, resource:charsetList, resource:sbcsCgcsgid]
+  x3270: "Options → Code Page menu, from charsetList (x3270/menubar.c:2502-2538, x3270/fb-x3270:107); -codepage, with -charset an alias (x3270/x3270.c:156, :159); sbcsCgcsgid overrides the reported CGCSGID"
+  gui: "none: cp037 only (core/src/codepages/cp037.ts; README Staging item 16)"
+  status: missing
+  browser: "none"
+- id: dbcs
+  area: display
+  title: DBCS (Japanese, Chinese and Korean) host character sets
+  covers: [resource:dbcsCgcsgid]
+  x3270: "a DBCS code page, with dbcsCgcsgid overriding its CGCSGID (x3270/resources.c:149-150)"
+  gui: none
+  status: proposed-deferred
+  reason: "README Staging item 16 calls DBCS a separate, larger item than the single-byte code pages and leaves it unscheduled."
+- id: cursor-shape
+  area: display
+  title: Block or underline cursor
+  covers: [toggle:altCursor, action:AltCursor, menu:underlineCursorOption, menu:blockCursorOption]
+  x3270: "Options → Toggles → Underline Cursor / Block Cursor (x3270/menubar.c:2298); altCursor toggle, off (block) by default (x3270/resources.c:371-372); AltCursor() action (x3270/xkybd.c:91); an unfocused block cursor is drawn as an empty box (x3270/screen.c:3874-3880)"
+  gui: "none: a fixed bar over the bottom quarter of the cell (canvas/src/blit.ts:145), neither x3270's block nor its underline, the same in or out of focus"
+  status: missing
+  browser: "none"
+- id: cursor-blink
+  area: display
+  title: Blinking cursor
+  covers: [toggle:cursorBlink, menu:cursorBlinkOption]
+  x3270: "Options → Toggles → Blinking Cursor; cursorBlink toggle, off by default (x3270/resources.c:373-374)"
+  gui: "none: the cursor never blinks"
+  status: partial
+  gap: "matches x3270's default (steady), but there is no menu item, flag or preference to make it blink"
+  evidence:
+    code: [packages/canvas/src/blit.ts:145]
+    tests: [packages/canvas/test/blit.test.ts]
+  browser: "the same canvas"
+- id: cursor-color
+  area: display
+  title: Fixed cursor color
+  covers: [resource:cursorColor, resource:useCursorColor]
+  x3270: "useCursorColor (off by default) draws the cursor in cursorColor (red) (x3270/resources.c:240-241, :258-259); otherwise it takes the cell's own color"
+  gui: "none: the cursor bar is the cell's foreground color, x3270's default"
+  status: partial
+  gap: "matches x3270's default (the cell's color), but there is no flag or preference for a fixed cursor color"
+  evidence:
+    code: [packages/canvas/src/blit.ts:145]
+    tests: [packages/canvas/test/blit.test.ts]
+  browser: "the same canvas"
+- id: crosshair
+  area: display
+  title: Crosshair cursor
+  covers: [toggle:crosshair, menu:crosshairOption, resource:crosshairColor]
+  x3270: "Options → Toggles → Crosshair Cursor; crosshair toggle, off by default (x3270/resources.c:391-392), drawn in crosshairColor (purple, :113-114)"
+  gui: none
+  status: missing
+  browser: "none"
+- id: mouse-pointer-state
+  area: display
+  title: Mouse pointer shows a waiting or locked keyboard
+  covers: [resource:normalCursor, resource:waitCursor, resource:lockedCursor]
+  x3270: "the pointer over the screen is normalCursor (an arrow), waitCursor (a watch) while waiting for the host, and lockedCursor (an X) while locked (x3270/resources.c:223-228, x3270/screen.c:1344-1350)"
+  gui: "none: the pointer never changes"
+  status: missing
+  browser: "none"
+- id: show-timing
+  area: display
+  title: Show host response time in the status line
+  covers: [toggle:showTiming, menu:showTimingOption]
+  x3270: "Options → Toggles → Show Timing; showTiming toggle, off by default (x3270/resources.c:375-376)"
+  gui: none
+  status: missing
+  browser: "none"
+- id: scrollback
+  area: display
+  title: Scroll back through earlier screens, and the scroll bar
+  covers: [action:Scroll, option:-sb, option:+sb, option:-sl, toggle:scrollBar, menu:scrollBarOption]
+  x3270: "Options → Toggles → Scroll Bar; scrollBar toggle, ON by default (x3270/resources.c:379-380); -sb/+sb; -sl and saveLines (4096, :49-50); Prior/Next run Scroll(backward|forward) (x3270/fb-x3270:272-273, Common/scroll.c:575)"
+  gui: "none: no saved screens and no scroll bar"
+  status: missing
+  browser: "none: a screen taller than the viewport scrolls the page, which is not scrollback"
+- id: monocase
+  area: display
+  title: Monocase (show and type upper case only)
+  covers: [toggle:monoCase, menu:monocaseOption]
+  x3270: "Options → Toggles → Monocase; monoCase toggle, off by default (x3270/resources.c:369-370)"
+  gui: none
+  status: missing
+  browser: "none"
+- id: visible-control
+  area: display
+  title: Show field attributes and control characters
+  covers: [toggle:visibleControl, menu:visibleControlOption]
+  x3270: "Options → Toggles → Visible Control Characters; visibleControl toggle, off by default (x3270/resources.c:393-394)"
+  gui: none
+  status: missing
+  browser: "none"
+- id: bell
+  area: display
+  title: The bell, audible or visual
+  covers: [action:Bell, resource:visualBell, resource:bellVolume]
+  x3270: "a WCC Sound Alarm rings the bell (Common/ctlr.c:2176), as does the Bell() action (Common/task.c:610); visualBell (off by default) flashes the screen instead, and bellVolume sets the volume (x3270/resources.c:270-271, :304-305; x3270/screen.c:5458-5470)"
+  gui: "none: core records the alarm and emits 'alarm' (core/src/session.ts:1219-1221), and no front end listens"
+  status: missing
+  browser: "none"
+- id: window-title
+  area: display
+  title: Window title naming the model and host, and the Title action
+  covers: [action:Title]
+  x3270: "the title is x3270-<model> <host> when connected (x3270/x3270.c:922-955); Title() replaces it (x3270/screen.c:6732)"
+  gui: "none: the terminal window's title is always tn3270 (packages/gui/index.html)"
+  status: missing
+  browser: "none"
+- id: window-state
+  area: display
+  title: Iconify or restore the window
+  covers: [action:WindowState]
+  x3270: "WindowState(Iconic|Normal), from a keymap or a script (x3270/screen.c:6746)"
+  gui: "the window manager's own minimise control only"
+  status: partial
+  gap: "no action, key or script command iconifies or restores the window; only the platform's own title-bar control"
+  browser: "n/a: a page cannot minimise its browser window"
+- id: icon
+  area: display
+  title: Icon name, position, live miniature and label font
+  covers: [option:-iconname, option:-iconx, option:-icony, option:-activeicon, resource:labelIcon, resource:iconFont, resource:iconLabelFont]
+  x3270: "-iconname, -iconx, -icony, -activeicon (x3270/x3270.c:147, :171-173); labelIcon, iconFont, iconLabelFont (x3270/resources.c:250-253, :278-281)"
+  gui: "n/a: the dock or taskbar shows the app icon"
+  status: proposed-skipped
+  category: x11-only
+  reason: "these place and draw an X11 icon window, which macOS's dock and Windows' taskbar do not have."
+- id: disconnect-clear
+  area: display
+  title: Clear the screen on disconnect (disconnectClear)
+  covers: [resource:disconnectClear]
+  x3270: "disconnectClear resource, off by default (x3270/resources.c:344-345): the last screen stays up after a disconnect"
+  gui: "none: the last screen stays up, x3270's default"
+  status: partial
+  gap: "matches x3270's default (the screen is kept), but there is no flag or preference to clear it"
+  evidence:
+    code: [packages/core/src/session.ts:1018]
+  browser: "the same core behaviour"
+- id: menu-bar
+  area: display
+  title: Hide the menu bar, and pop up menus with a mouse chord
+  covers: [resource:menuBar, xaction:HandleMenu]
+  x3270: "menuBar resource, on by default (x3270/resources.c:302-303); Ctrl-Button1/2/3 pop up the File, Options and Connect/Macros menus (HandleMenu, x3270/fb-x3270:195-197)"
+  gui: "menu bar always shown; Alt-M pops up the Model menu alone"
+  status: partial
+  gap: "the menu bar is always shown (x3270's default) and cannot be hidden, and no mouse chord pops up a menu; only Alt-M, for the Model menu"
+  evidence:
+    code: [packages/gui/src/main.ts:1559, packages/gui/src/main.ts:1718, packages/gui/src/menu.ts:417]
+    tests: [packages/gui/test/menu.test.ts]
+  browser: "no menu bar of its own; the Alt-M picker"
+- id: select-copy
+  area: display
+  title: Select screen text with the mouse and copy it
+  covers: [xaction:SelectDown, xaction:SelectMotion, xaction:SelectUp, xaction:select-start, xaction:select-end, xaction:set-select]
+  x3270: "Button1 drag selects (SelectDown/SelectMotion/SelectUp, x3270/fb-x3270:198-208), rectangular on a 3270 screen (x3270/select.c:524), and the release owns PRIMARY; SelectUp's single click MOVES THE CURSOR, a double click selects a word and a triple click a line (x3270/select.c:749-757); select-start/select-end/set-select are xterm-style alternatives"
+  gui: "mouse: a primary-button drag selects a rectangle, then menu: Edit → Copy (Cmd-C on macOS, Ctrl-Shift-C elsewhere). Offline witness only: select.mjs under Xvfb, clipboard read back"
+  status: partial
+  gap: "a click does not move the cursor, double and triple clicks select nothing, and a selection is copied only by Edit → Copy (no PRIMARY selection on Linux)"
+  evidence:
+    code: [packages/canvas/src/renderer.ts:603, packages/canvas/src/selection.ts:105, packages/gui/src/main.ts:1752, packages/gui/src/menu.ts:340]
+    tests: [packages/canvas/test/selection.test.ts, packages/gui/test/menu.test.ts]
+    live: unwitnessed
+  browser: "the same drag, with the browser's Edit → Copy, Cmd-C or Ctrl-Shift-C"
+- id: select-extend
+  area: display
+  title: Extend, keyboard-select, select all and unselect
+  covers: [xaction:start-extend, xaction:select-extend, xaction:move-select, xaction:KybdSelect, xaction:SelectAll, xaction:Unselect]
+  x3270: "Button3 extends the selection (start-extend/select-extend, x3270/fb-x3270:205-206); Shift-arrows run KybdSelect (:211-214, x3270/select.c:1109); SelectAll, Unselect and move-select are bindable (x3270/select.c:480, :1191, :1201)"
+  gui: none
+  status: missing
+  browser: "none"
+- id: word-select-char-class
+  area: display
+  title: Word boundaries for double-click selection (charClass)
+  covers: [option:-cc]
+  x3270: "-cc and charClass set which characters a double-click word selection spans (x3270/select.c:249)"
+  gui: "none: there is no double-click word selection"
+  status: missing
+  browser: "none"
+- id: cut
+  area: display
+  title: Cut (copy the selection and blank its unprotected cells)
+  covers: [xaction:Cut]
+  x3270: "Cut() copies the selection and erases its unprotected cells, setting MDT (x3270/select.c:1044)"
+  gui: none
+  status: missing
+  browser: "none"
+- id: rectangle-select
+  area: display
+  title: Rectangular selection in NVT mode
+  covers: [toggle:rectangleSelect, menu:rectangleSelectOption]
+  x3270: "Options → Toggles → Select by Rectangles; rectangleSelect toggle, off by default (x3270/resources.c:389-390), which matters only on a screen that has never been in 3270 mode: a 3270 screen is always selected by rectangles (x3270/select.c:524)"
+  gui: "n/a: selection is always rectangular"
+  status: proposed-skipped
+  category: n/a
+  reason: "the toggle only changes selection on an NVT screen, which this client never displays, and our 3270-screen selection is already rectangular as x3270's is."
+- id: select-url
+  area: display
+  title: Open a selected URL in the browser
+  covers: [toggle:selectUrl, menu:selectUrlOption]
+  x3270: "Options → Toggles → Select URLs; selectUrl toggle, ON by default (x3270/resources.c:411-412): a word selection starting http:// or https:// is opened with xdg-open/open/start (x3270/select.c:1830-1842)"
+  gui: none
+  status: missing
+  browser: "none"
+- id: paste
+  area: display
+  title: Paste text into the screen
+  covers: [xaction:insert-selection]
+  x3270: "Button2 or Shift-Insert runs insert-selection(PRIMARY) (x3270/fb-x3270:202-209); by default with overlayPaste, so newline drops to the next row at the starting column and protected cells are skipped (Common/kybd.c:1215-1227, :3781-3790)"
+  gui: "menu: Edit → Paste (Cmd-V on macOS, Ctrl-Shift-V elsewhere), from the clipboard"
+  status: partial
+  gap: "follows x3270's overlayPaste-off rules, not its default (see paste-modes): a newline goes to the next unprotected field and a protected cell stops the paste with a warning; no middle-click or PRIMARY paste. No live paste witness"
+  evidence:
+    code: [packages/gui/src/menu.ts:349, packages/frontend/src/paste.ts:52, packages/frontend/src/pasteAction.ts:55]
+    tests: [packages/frontend/test/paste.test.ts, packages/frontend/test/pasteAction.test.ts, packages/gui/test/menu.test.ts]
+    live: unwitnessed
+  browser: "the page's own paste event (Ctrl-V/Cmd-V; Ctrl-Shift-V in Chromium)"
+- id: paste-modes
+  area: display
+  title: Overlay paste and margined paste
+  covers: [toggle:overlayPaste, menu:overlayPasteOption, toggle:marginedPaste, menu:marginedPasteOption]
+  x3270: "Options → Toggles → Overlay Paste (ON by default, x3270/resources.c:397-398) and Margined Paste (off, :387-388); either keeps pasted lines at the starting column (Common/kybd.c:80)"
+  gui: "none: frontend/src/paste.ts implements only the overlay-off, unmargined rules"
+  status: missing
+  browser: "none"
+- id: mouse-light-pen
+  area: display
+  title: Light-pen select with the mouse
+  covers: [xaction:MouseSelect]
+  x3270: "Ctrl-Shift-Button1 runs MouseSelect, a light-pen selection at the pointer (x3270/fb-x3270:289, x3270/xkybd.c:106)"
+  gui: "none: no light pen (README What is not implemented; Staging item 17)"
+  status: missing
+  browser: "none"
+- id: redraw
+  area: display
+  title: Redraw the window
+  covers: [xaction:Redraw]
+  x3270: "Alt-L runs Redraw(), repainting the X window (x3270/fb-x3270:264-265)"
+  gui: "n/a: every frame repaints the whole canvas from the draw list"
+  status: proposed-skipped
+  category: n/a
+  reason: "Redraw repairs a damaged X window, and our canvas repaints the whole screen on every host frame and every resize."
