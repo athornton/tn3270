@@ -664,6 +664,26 @@ feature parity with x3270. Until then, every CI run builds a **stand-in** for ea
 confines it the way that store would, and launches it. A feature that breaks under the App Sandbox
 or inside an MSIX then fails the PR that adds it, not the submission months later.
 
+**The parity gate.** Feature parity is tracked in `docs/parity.md` (generated from
+`docs/parity/checklist.yaml` and `docs/parity/x3270-names.json` by `scripts/parity.mjs`); store
+submission requires `node scripts/parity.mjs gate` to exit 0, which it does only when `check`
+reports no problem, every name in `docs/parity/x3270-names.json` is covered by a row, and every
+row is `ours` (with a `docs/live-testing.md` heading or `n/a` as its live evidence, or
+`unwitnessed` that the user has accepted), `deferred` or `skipped`. The weekly
+`.github/workflows/parity-upstream.yml` workflow re-runs `scripts/parity-extract.mjs` against
+x3270's newest tagged GA and fails if it is newer than the committed
+`docs/parity/x3270-names.json`, or, if it is the same tag, if re-extracting that tag does not
+give exactly the committed file; it runs only from the default branch. To check by hand, run
+`node scripts/parity-extract.mjs --upstream docs/parity/x3270-names.json` (exit 1 means a newer
+GA exists, or the committed file no longer matches its own tag). To regenerate on that new GA:
+1. run `node scripts/parity-extract.mjs --tag <tag>`;
+2. cross-check by hand against the x3270 wiki (https://x3270.miraheze.org: its command-line
+   options page and `Category:Actions`), since `x3270.man` is only a stub pointing there; the wiki
+   tracks the development release, so names newer than the GA are expected differences (parity
+   spec, Amendment 3b);
+3. cover whatever new names it adds to `docs/parity/x3270-names.json` with rows in
+   `docs/parity/checklist.yaml`.
+
 **Nothing is uploaded or submitted.** No `upload-artifact` path names `.appx` or `mas-universal`,
 the `gui-*` upload is exactly the five one-level globs (`*.AppImage *.deb *.dmg *.zip *.exe`), and
 `packages/core/test/workflow.test.ts` pins both. If an `.appx` ever reached a release anyway,

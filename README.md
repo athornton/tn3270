@@ -315,9 +315,10 @@ page, because a tab cannot open an OS window.
 is non-modal by construction, so it can be left open beside the terminal while you work. Pressing
 `Ctrl-K` again brings the window forward rather than stacking a second one.
 
-**It is not remembered between runs.** x3270 does remember, through its `keypadOn` resource, and
-this does not: reopening is one keystroke, and a keypad that reappears unbidden costs window space
-to someone who did not want it this session. That is a decision rather than a missing feature, and
+**It is not remembered between runs.** x3270 can remember: Save Changed Options writes its
+`keypadOn` resource once the keypad has been toggled (`x3270/save.c:688-691`), as does a session
+manager's WM_SAVE_YOURSELF. This does not: reopening is one keystroke, and a keypad that
+reappears unbidden costs window space to someone who did not want it this session. That is a decision rather than a missing feature, and
 it is explicitly not on the list of things a preferences store should bring.
 
 **Every button carries a tooltip** naming what the key does, from the `BINDING_INTENT` table of
@@ -383,8 +384,9 @@ usefully; interior spaces are kept, because they carry the panel's alignment.
 out, by construction rather than by convention — the check is mutation-verified in the test suite.
 
 **Paste types the text in; it never presses Enter.** A newline in pasted text means *next field*,
-not *submit* — which is what x3270's own paste does (`Common/kybd.c:3928`, where `\n` becomes
-`Enter_action` only when **not** pasting). Quietly submitting a half-filled panel to a live host is
+not *submit* — which is what x3270's paste does with `overlayPaste` off (`Common/kybd.c:3928`,
+where `\n` becomes `Enter_action` only when **not** pasting). x3270 defaults `overlayPaste` on,
+which this does not implement. Quietly submitting a half-filled panel to a live host is
 not a trade this makes. A form feed types a space, where outside a paste it would be Clear and would
 wipe the screen; a carriage return is dropped, so CRLF text does not gain a stray character per
 line. If a field fills up or refuses a character the paste stops and the status line says how much
@@ -474,6 +476,10 @@ version is an overlay over the page, whose files are on the browser's machine.)
 > This is the second deliberate divergence from x3270 in the same keyword block. The other is
 > `Mode`, which defaults to `binary` where x3270 sets `ascii_flag` true: a wrong ascii default
 > silently corrupts a load module, while a wrong explicit choice is visible in the command.
+
+**`Mode=ascii` does no local line-end conversion yet.** It asks the host to translate (`ASCII`,
+and `CRLF` unless `Cr=keep`), but a received file keeps the host's CRLF line ends and any trailing
+`^Z`, and an LF-only file is sent without CRs, where x3270 strips and adds them itself.
 
 **It is a second `BrowserWindow` with real HTML controls, not a canvas view** — so inside it the
 mouse and the keyboard behave as they do in any window, which is the whole reason it is not drawn on
@@ -1390,6 +1396,9 @@ own client. Unscheduled, and much larger than this project.
 
 Stated plainly, because a 3270 emulator that quietly does three-quarters of the job is
 worse than one that says which quarter is missing.
+
+The complete feature-by-feature comparison with x3270 is **[docs/parity.md](docs/parity.md)**,
+generated from `docs/parity/checklist.yaml`; the items below are the ones worth prose.
 
 - **`Attn` SENDS TELNET BREAK EVEN ON A TN3270E SESSION, WHERE x3270 SENDS `IAC IP`.** Found
   2026-10-06, while reviewing a *comment* about Attn during the keypad work — so it is an

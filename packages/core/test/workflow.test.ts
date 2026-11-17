@@ -370,3 +370,36 @@ describe('package.yml release wiring', () => {
     expect(loop![1]!.trim().split(/\s+/).sort()).toEqual(harnesses);
   });
 });
+
+describe('parity-upstream.yml', () => {
+  const up = readFileSync(fileURLToPath(new URL('../../../.github/workflows/parity-upstream.yml', import.meta.url)), 'utf8');
+
+  it('runs weekly and on demand', () => {
+    expect(up).toMatch(/schedule:\s*\n\s*- cron: '[0-9]+ [0-9]+ \* \* [0-6]'/);
+    expect(up).toMatch(/workflow_dispatch:/);
+  });
+
+  it('can only read, and uses no secrets (github.token is not a secret)', () => {
+    expect(up).toMatch(/permissions:\s*\n\s*contents: read\s*\n/);
+    expect(up).not.toMatch(/: write\b/);
+    expect(up).not.toMatch(/secrets\./);
+  });
+
+  it('runs the extractor against the committed inventory, with no npm install', () => {
+    expect(up).toMatch(/run: node scripts\/parity-extract\.mjs --upstream docs\/parity\/x3270-names\.json$/m);
+    expect(up).not.toMatch(/npm (ci|install)/);
+  });
+
+  it('passes GITHUB_TOKEN as github.token, so it is not rate-limited alongside everyone else', () => {
+    expect(up).toMatch(/env:\s*\{\s*GITHUB_TOKEN:\s*'\$\{\{\s*github\.token\s*\}\}'\s*\}/);
+  });
+
+  it('has a job timeout, so a hung download cannot run for the default six hours', () => {
+    expect(up).toMatch(/^  upstream:\n    runs-on: [^\n]+\n    timeout-minutes: 15$/m);
+  });
+
+  it('documents the exit codes a failure can mean', () => {
+    expect(up).toMatch(/exit 1/);
+    expect(up).toMatch(/exit 3/);
+  });
+});

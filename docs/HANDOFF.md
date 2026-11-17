@@ -1,13 +1,80 @@
-# Handoff — state as of 2026-11-13 (0.1.4 RELEASED: npm by the tag workflow with provenance, and the first GitHub release with the seven installers, SHA256SUMS and scriv notes; macOS CODE SIGNING MERGED (`db5a93d`; released installers up to 0.1.4 are UNSIGNED), Windows CI signing DROPPED for the Microsoft Store; STORE PROBE MERGED (`559ea78`); README AUDIT + FIXES MERGED (`ae8724f`); WEB RECEIVE DOWNLOADS ON COMPLETION (`4a940fe`, live-verified); `Exist` PER DIRECTION (`f533bff`); next: the x3270 parity checklist, the store gate)
+# Handoff — state as of 2026-11-17 (x3270 PARITY CHECKLIST BUILT on branch `parity-checklist` (from `8693176`, not merged): 413 x3270 names, 158 checklist rows, `parity.mjs gate` FAIL 157 blocking; 0.1.4 RELEASED: npm by the tag workflow with provenance, and the first GitHub release with the seven installers, SHA256SUMS and scriv notes; macOS CODE SIGNING MERGED (`db5a93d`; released installers up to 0.1.4 are UNSIGNED), Windows CI signing DROPPED for the Microsoft Store; STORE PROBE MERGED (`559ea78`); README AUDIT + FIXES MERGED (`ae8724f`); WEB RECEIVE DOWNLOADS ON COMPLETION (`4a940fe`, live-verified); `Exist` PER DIRECTION (`f533bff`); next: the user triages the parity checklist's proposed-* and unwitnessed `ours` rows, then the store roadmap)
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log). For the most recent work, read the spec and plan the
 latest START HERE entry names. Each finished feature has its own pair under `docs/superpowers/`.
 
-## START HERE — LATEST FIRST; NEXT IS THE x3270 PARITY CHECKLIST, THEN README *Remaining* 15-22
+## START HERE — LATEST FIRST; NEXT: TRIAGE THE PARITY CHECKLIST'S proposed-* AND unwitnessed `ours` ROWS, THEN THE STORE ROADMAP (REPLACES README *Remaining* 15-22)
 
-**2026-11-13, LATEST: NEXT IS THE x3270 PARITY CHECKLIST** (piece 2 of the store plan below; the
+**2026-11-17, LATEST: THE x3270 PARITY CHECKLIST IS BUILT, NOT YET MERGED** (piece 2 of the
+three-piece store plan below; branch `parity-checklist`, commits from `8693176` (`git log --oneline main..parity-checklist`);
+spec `docs/superpowers/specs/2026-11-17-x3270-parity-checklist-design.md`, plan
+`docs/superpowers/plans/2026-11-17-x3270-parity-checklist.md`, Tasks 0-14 done). `scripts/parity-extract.mjs`
+reads the x3270 source tree as text only (never built: `make`/`configure` are never run on it, and
+it is never a cwd) and writes a name inventory to `docs/parity/x3270-names.json`, as `--dir <tree>`,
+`--tag <tag>` (downloads that GitHub tag's tarball) or `--upstream <committed.json>` (checks the
+committed tag against x3270's newest tagged GA and, if it is current, that re-extracting it gives
+exactly the committed file); exit 0 current/success, 1 newer GA found upstream (or its linkage
+changed, or the committed file doesn't match its own tag), 2 usage error, 3 other error. Against x3270 **4.5ga6** that is **413 names**: 100 actions, 65 menu
+items, 69 options, 134 resources, 24 toggles, 21 xactions. `scripts/parity.mjs` (`check` / `render`
+/ `uncovered` / `gate`) checks the 158 hand-written rows of `docs/parity/checklist.yaml` against
+that inventory and renders `docs/parity.md`: **8 ours, 37 partial, 84 missing, 3 proposed-deferred,
+26 proposed-skipped, 0 deferred, 0 skipped.** `node scripts/parity.mjs gate` is currently **FAIL,
+157 blocking** — from here that count is the store gate (*Store probe*/*the parity gate*,
+`docs/releasing.md`). Tests: `packages/core/test/parityExtract.test.ts` and
+`packages/core/test/parity.test.ts`. The latter checks the committed checklist (no problems, every
+name covered, `docs/parity.md` exactly as rendered); the former checks that the committed
+`x3270-names.json` is in canonical form (what `renderInventory` writes) with sorted, unique ids --
+not that it is complete against a tree, which is `--upstream`'s weekly content check.
+`.github/workflows/parity-upstream.yml` runs weekly but only from the default branch, so it does
+nothing until this is merged. README now points at `docs/parity.md` from *What is not
+implemented*'s opening paragraph; `docs/releasing.md`'s *Store probe* section gained a paragraph on
+the gate and how to regenerate on a new GA.
+
+**Next, in order:** (1) the user triages the 29 `proposed-*` rows (26 `proposed-skipped`, 3
+`proposed-deferred`) area by area; (2) the user accepts or rejects the 7 `ours` rows whose only
+evidence is `live: unwitnessed` — `reconnect`, `devname`, `bind-limit`, `tls-verify`, `sysreq`,
+`dup`, `field-mark`; (3) whatever is still `missing`/`partial` after that is the store roadmap, which
+replaces README *Remaining* 15-22 (separate work, no spec yet).
+
+### FOUND, NOT FIXED
+
+Found while populating the checklist and confirmed by an independent reviewer, mostly with a
+probe; none of these are fixed by this branch.
+
+1. **GUI, HIGH, blocks any store build:** `packages/gui/src/main.ts:510` uses
+   `process.argv.slice(2)`, but a packaged Electron's argv is `[exe, ...userArgs]`, so the first
+   user argument is dropped. `TN3270 host` opens the Connect dialog. Package smoke misses it
+   because its first argument is `--disable-gpu` (`scripts/package-checks.mjs:99,173`). Likely
+   fix: `slice(process.defaultApp ? 2 : 1)`, plus a package-smoke case with a host as the first
+   argument.
+2. **GUI, MEDIUM:** Ctrl-] is registered with `globalShortcut` (`main.ts:480,501`), which is
+   system-wide, so Ctrl-] in another app (e.g. telnet's escape) quits TN3270, per Electron's docs
+   (not run).
+3. **Core:** AID keys are sent while the keyboard is locked (`Session.sendAID` has no lock check;
+   x3270 queues or drops them).
+4. **Core:** editing and cursor keys change the screen while host-locked.
+5. **Core:** insert mode survives an AID, a keyboard restore and Reset (x3270 resets it).
+6. **Core:** Backspace nulls the cell instead of closing up the field; Delete and EraseEOF are
+   no-ops on an unformatted screen.
+7. **Canvas:** blink and intensify are never drawn (`drawlist.ts:114-115` set them; `blit.ts`
+   never reads them).
+8. **GUI:** the host's alarm is never rung (core emits `'alarm'` at `session.ts:1221`; nothing
+   listens).
+9. **Code page:** x3270 defaults to `bracket`, not cp037, so `[ ]` map differently at defaults;
+   the canvas glyph path (`canvas/src/cg.ts:89`) is cp037-fixed.
+10. **Transfer:** `Mode=ascii` does no local CR/LF or `^Z` conversion (proven by probe; README now
+    says so).
+11. **CLI:** `Wait` takes its timeout last (s3270 has it first; `Wait(10,Unlock)` is refused);
+    Enter/Clear/PF/PA don't wait for unlock (s3270's `aidWait` defaults on); `Snap` prints the
+    screen; `Ascii(r,c,rows,cols)` silently returns a wrong answer. README calls the CLI
+    "s3270-compatible" in its status paragraph.
+12. **GUI:** no About or Quit menu on Linux/Windows; `--help`/`--version` are rejected.
+13. **GUI:** arg parsing accepts unknown models (`-model bogus`); the refusal comes later, from
+    `buildSession` (`main.ts:812`).
+
+**2026-11-13, PREVIOUS: NEXT IS THE x3270 PARITY CHECKLIST** (piece 2 of the store plan below; the
 user will start it in a new session; brainstorm it first, no spec yet). Merged since the store probe,
 all `--no-ff`, each with CI green on the branch and on `main`, and `main` is the only branch:
 - `ae8724f`: the README audited claim by claim (history moved verbatim to `docs/readme-history.md`);
@@ -52,8 +119,11 @@ check, and its PR names the entitlement or capability.** The identity values (`T
   feature parity with x3270; the 026 punch is optional for parity.
 - **The three-piece store plan:**
   1. **the probe: DONE** (merged `559ea78`);
-  2. **the parity checklist: NEXT.** Each x3270 feature marked ours, missing or deliberately
-     skipped; it is the store gate. Its own spec, not yet written;
+  2. **the parity checklist: BUILT** (branch `parity-checklist`; spec
+     `docs/superpowers/specs/2026-11-17-x3270-parity-checklist-design.md`). Each x3270 feature is a
+     row in `docs/parity/checklist.yaml`, rendered to `docs/parity.md`, and
+     `node scripts/parity.mjs gate` is the store gate; see START HERE for its state and the triage
+     that comes next;
   3. **submission: at parity.** Name reservation, the real identities, the `mas` target's
      certificates and provisioning profile, listings. The tag run builds the store packages and
      the user uploads them by hand; the stores get a chosen subset of the GitHub releases, not

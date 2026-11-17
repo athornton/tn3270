@@ -13,7 +13,8 @@ export interface PasteOptions {
 }
 
 /**
- * Paste text into the screen, with x3270's measured semantics.
+ * Paste text into the screen, with x3270's measured semantics for overlayPaste OFF (x3270 itself
+ * defaults overlayPaste ON, `x3270/resources.c:397-398`; that mode is not implemented here).
  *
  * ## IT LIVES IN `frontend` BECAUSE EVERY FRONT END WANTS THE SAME RULES
  *
@@ -39,7 +40,8 @@ export interface PasteOptions {
  * as Clear would WIPE the screen mid-paste. `\r` is dropped so that CRLF text does not gain a
  * stray character per line -- the `\n` after it carries the meaning.
  *
- * This is the `auto_skip` default path; OVERLAY-PASTE MODE IS NOT IMPLEMENTED, and not asking for
+ * This is the `auto_skip` path, x3270's overlayPaste-off mode, NOT x3270's default (it defaults
+ * overlayPaste on); OVERLAY-PASTE MODE IS NOT IMPLEMENTED, and not asking for
  * it is what keeps that branch unreachable -- the same reasoning that kept BIND-IMAGE unrequested
  * in stage 2b.
  *
