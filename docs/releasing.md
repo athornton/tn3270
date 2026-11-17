@@ -48,7 +48,9 @@ eight trusted-publisher entries above — they name this file and that environme
   categories, and deletes the fragments. Read the entry, edit it if it needs it, commit it with the
   version bump.
 
-`uvx` is uv's (`~/.local/bin/uvx` here); CI installs `scriv==1.8.1` with `pipx`.
+`uvx` is uv's (`~/.local/bin/uvx` here); CI installs `scriv==1.8.1` with `pipx`. Where only a system
+`uv` exists (the RSP lab after a user-environment reset, which moves `~/.local` aside), `uv tool run
+scriv` is the same command: `uvx` is its shorthand.
 
 ## Procedure
 
