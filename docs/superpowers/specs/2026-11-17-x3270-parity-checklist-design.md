@@ -44,9 +44,12 @@ x3270 source tree and writes `docs/parity/x3270-names.json`.
   extractor re-reads this list for every tag, because a new release may change it.
 - **Five kinds of name, each with `file:line`:**
   - `action`: `An*` entries in `action_table_t` arrays (~98 in 4.5ga6);
-  - `option`: entries of the `opts[]` table, each paired with the `Res*` it sets (~88). Covering
-    either name covers the pair;
-  - `resource`: `#define Res*` in `include/resources.h` that a linked source uses (≤248);
+  - `option`: entries of the `opts[]` table, each paired with the `Res*` it sets (~88). The pair
+    is **one** entry, named by the option, and a resource that has an option is not listed again
+    under `resource`. So a row lists `OptProxy`, not `ResProxy`, and "exactly once" stays
+    well defined;
+  - `resource`: `#define Res*` in `include/resources.h` that a linked source uses and no option
+    sets (≤248);
   - `toggle`: `toggle_names[]` in `Common/toggles.c` (24);
   - `menu`: widget names passed to `add_menu_itemv`, `toggle_init` and
     `XtVaCreateManagedWidget` in `x3270/menubar.c` and the other linked x3270 popups (~45; spacers
@@ -78,7 +81,7 @@ runtime dependencies of its own).
 ```yaml
 - id: proxy                       # unique, kebab-case
   title: Connect through a proxy (HTTP, SOCKS4/4a, SOCKS5/5d, telnet, passthru)
-  covers: [OptProxy, ResProxy, proxyOption]   # names from x3270-names.json
+  covers: [OptProxy, proxyOption]   # names from x3270-names.json
   x3270: "Options menu → Proxy…; -proxy"      # how x3270 reaches it
   gui: "flag only: -proxy"                    # how ours does
   status: partial
