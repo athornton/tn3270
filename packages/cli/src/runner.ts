@@ -5,6 +5,7 @@ import {
 } from '@tn3270/core';
 import {
   tcpConnect, DEFAULT_TLS, resolveHostSpec, transferCommand, describeNonStart, screenRows,
+  convertsLineEnds, withLineEnds,
   type TlsOptions, type TransferFiles, type TransferRequest,
 } from '@tn3270/frontend';
 import { parseCommand } from './commands.js';
@@ -548,7 +549,13 @@ export class Runner {
     // Same drain as `transfer.warnings` below, so the two read alike in a reply.
     for (const warning of request.warnings ?? []) data.push(`Transfer(): ${warning}`);
 
-    const files = this.requireFiles();
+    // Ascii line ends, converted as x3270 does (`frontend/src/lineEnds.ts`): ONE wrap here, so
+    // the send's read below and the receive's write/append both go through it. `startTransfer`
+    // (`transferRun.ts`) wraps the same way; this method does not call `startTransfer` at all —
+    // it builds its own engines and does its own file I/O, which is why the wiring had to be
+    // duplicated here rather than inherited.
+    const rawFiles = this.requireFiles();
+    const files = convertsLineEnds(request) ? withLineEnds(rawFiles) : rawFiles;
 
     if (!this.session.is3270Mode()) {
       // x3270's `ftUnableNot3270`, "not in 3270 mode" (fb-common:47).

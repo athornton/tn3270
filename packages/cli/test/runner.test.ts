@@ -1915,3 +1915,73 @@ describe('Transfer(): a transfer that NEVER STARTED', () => {
     expect(cliLine).toBe(`data: Transfer(): ${done.error}`);
   });
 });
+
+/**
+ * Ascii line ends (x3270 `cr_flag`), through the CLI's OWN `transfer()` method.
+ *
+ * `startTransfer` (frontend/src/transferRun.ts) got this wiring in the previous commit, but
+ * `Runner.transfer` (this file's subject) builds its own `CutTransfer`/`DftTransfer`, reads the
+ * source directly (`runner.ts:573`) and writes the received bytes directly (`:640-641`) — it
+ * never calls `startTransfer` at all, so an ascii CLI transfer still asked the host for `CRLF`
+ * and converted nothing locally. Found in review after Task 2, not predicted by the plan.
+ *
+ * One CUT case and one DFT case, since nothing before this pinned CUT through the conversion:
+ * every existing ascii-line-end test (`frontend/test/lineEnds.test.ts`,
+ * `tui/test/transferRun.test.ts`) drove DFT only.
+ */
+describe('ascii line ends (x3270 cr_flag), through Runner.transfer', () => {
+  const CRLF_TEXT = Uint8Array.from([0x41, 0x0d, 0x0a, 0x42, 0x0d, 0x0a, 0x1a]);
+
+  it('a CUT ascii receive strips CR and ^Z', async () => {
+    const { runner, conn, files } = await transferRunner();
+    const encoded = Array.from(localToHost(CRLF_TEXT));
+
+    const pending = runner.run(
+      'Transfer(Direction=receive,LocalFile=/tmp/ascii.txt,HostFile=FOO,Mode=ascii)');
+    await new Promise((r) => setTimeout(r, 20));
+
+    controlCode(conn, StatusCode.HOST_ACK);
+    await new Promise((r) => setTimeout(r, 20));
+    dataFrame(conn, encoded, 1);
+    await new Promise((r) => setTimeout(r, 20));
+    dataFrame(conn, [EOF_DATA1, EOF_DATA2], 2);
+    await new Promise((r) => setTimeout(r, 20));
+    controlCode(conn, StatusCode.XFER_COMPLETE);
+
+    const reply = await pending;
+    expect(reply.split('\n').pop()).toBe('ok');
+    // THE ASSERTION THE TEST EXISTS FOR: every CR and the trailing ^Z are gone, not the raw
+    // bytes the CUT codec decoded off the wire.
+    expect(Array.from(files.store.get('/tmp/ascii.txt')!)).toEqual([0x41, 0x0a, 0x42, 0x0a]);
+  });
+
+  it('a DFT ascii send puts a CR before each bare LF on the wire', async () => {
+    const { runner, conn, files } = await transferRunnerAt(24, 80, { transferFrameSeconds: 0.5 });
+    files.store.set('/tmp/up.txt', Uint8Array.of(0x41, 0x0a, 0x42, 0x0a));
+
+    const pending = runner.run(
+      'Transfer(Direction=send,LocalFile=/tmp/up.txt,HostFile=A.TXT,Mode=ascii)');
+    await new Promise((r) => setTimeout(r, 20));
+
+    dftWsf(conn, dftOpen());
+    await new Promise((r) => setTimeout(r, 20));
+    conn.sent = [];
+    dftWsf(conn, [0x46, 0x11]);                      // TR_GET_REQ: the whole 6 converted bytes fit one frame
+    await new Promise((r) => setTimeout(r, 20));
+    const hex = conn.sent.map((x) => x.toString(16).padStart(2, '0')).join(' ');
+    expect(hex).toContain('41 0d 0a 42 0d 0a');
+
+    dftWsf(conn, [0x46, 0x11]);                      // second GET: EOF
+    await new Promise((r) => setTimeout(r, 20));
+    dftWsf(conn, [0x41, 0x12]);                      // Close
+    await new Promise((r) => setTimeout(r, 20));
+    dftWsf(conn, dftOpen('FT:MSG'));
+    await new Promise((r) => setTimeout(r, 20));
+    dftWsf(conn, dftData([...'TRANS03'].map((c) => c.charCodeAt(0))));
+
+    const reply = await pending;
+    expect(reply.split('\n').pop()).toBe('ok');
+    // And the local file itself is untouched: the conversion is on the way out, not a rewrite.
+    expect(Array.from(files.store.get('/tmp/up.txt')!)).toEqual([0x41, 0x0a, 0x42, 0x0a]);
+  });
+});

@@ -23,6 +23,10 @@ export function convertsLineEnds(request: Pick<TransferRequest, 'mode' | 'cr'>):
 
 /** Received bytes with every CR and ^Z removed, wherever they are (ft_cut.c:190, ft_dft.c:301). */
 export function fromHost(bytes: Uint8Array): Uint8Array {
+  // SAME SHORTCUT `toHost` TAKES: most received bytes carry neither, and returning the input
+  // unchanged (rather than a copy `filter` would always allocate) avoids an allocation per
+  // frame/file for the common case.
+  if (!bytes.some((c) => c === CR || c === SUB)) return bytes;
   return bytes.filter((c) => c !== CR && c !== SUB);
 }
 
@@ -42,8 +46,12 @@ export function toHost(bytes: Uint8Array): Uint8Array {
 
 /**
  * `files` with the conversion applied: `read` (a send's source) through `toHost`, `write` and
- * `append` (a receive's result) through `fromHost`. `startTransfer` swaps this in once, so both
- * engines' reads and writes go through it and cannot diverge.
+ * `append` (a receive's result) through `fromHost`. `startTransfer` (transferRun.ts) swaps this
+ * in once for the TUI, GUI and web gateway, so both engines' reads and writes there go through
+ * it and cannot diverge. The CLI's `Runner.transfer` (`cli/src/runner.ts`) does not call
+ * `startTransfer` -- it has its own blocking loop and its own file I/O -- so it calls this
+ * function itself, at its own one wrapping point; either caller reads the same two rules
+ * (`convertsLineEnds`, `withLineEnds`), which is what keeps them from disagreeing.
  */
 export function withLineEnds(files: TransferFiles): TransferFiles {
   return {

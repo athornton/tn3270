@@ -17,9 +17,13 @@ describe('convertsLineEnds: x3270 cr_flag (Common/ft.c:322, :941-951)', () => {
     expect(convertsLineEnds(req('ascii', 'keep'))).toBe(false);
     for (const cr of ['auto', 'remove', 'add', 'keep'] as const) expect(convertsLineEnds(req('binary', cr)), cr).toBe(false);
   });
-  it('is exactly when the IND$FILE command carries CRLF, for both hosts and directions', () => {
-    // The command's CRLF and the local conversion are ONE rule: a command that asks the host for
-    // CRLF with no local conversion was the bug this module fixes.
+  it('pins that transferCommand emits CRLF exactly when convertsLineEnds holds, for both hosts and directions', () => {
+    // NOT an independent agreement test any more: `wantsCrlf` (transfer.ts) now DELEGATES to
+    // `convertsLineEnds` (`return convertsLineEnds(req);`), so this can no longer catch the two
+    // rules drifting apart -- there is only one rule. What it still pins is that the command
+    // BUILDER (`buildIndFileCommand`, which reads `wantsCrlf`) actually emits `CRLF` in exactly
+    // the cases `convertsLineEnds` says it should, over every host/direction/mode/cr combination
+    // -- i.e. that nothing between the one rule and the string on the wire has gone stale.
     //
     // Departure from the plan's literal test: `parseTransferKeywords` requires every argument as
     // `keyword=value` (transfer.ts:446-451); a bare `direction` token throws

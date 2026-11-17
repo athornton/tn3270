@@ -80,3 +80,11 @@ options, and any change to which `Cr` value is the default.
 holds. Same behaviour as the design above, one wiring point instead of three, and CUT and DFT
 cannot diverge because they write through the same object. `wantsCrlf` delegates to
 `convertsLineEnds`, which replaces the planned agreement test with a single definition.
+
+## Amendment 2026-11-17, from the Tasks 0-2 review
+
+**The CLI does not go through `startTransfer`.** This spec said every front end does; the CLI runs
+its own blocking loop (`packages/cli/src/runner.ts`, `Transfer()`), reading and writing the local
+file itself, while still taking its command (with `CRLF`) from `transferCommand`. So it gets the
+same one-line wrap with `withLineEnds`, and tests of its own. The GUI, the TUI and the web gateway
+do go through `startTransfer`.
