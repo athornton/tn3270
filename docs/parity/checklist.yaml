@@ -112,12 +112,12 @@
   title: Verify the host certificate, or not, against the system store or a CA file
   covers: [option:-verifycert, option:-noverifycert, option:-cafile]
   x3270: "-verifycert, -noverifycert, -cafile"
-  gui: "flags: -verifycert, -noverifycert (or -no-verify), -cafile; TLS itself is on by default (Connect dialog: TLS checkbox). Live: the default chain-verified path from the GUI against pubvm.org (cited); -cafile via the CLI in 'TLS against both hosts — verified 2026-08-25'; -noverifycert has no live witness (socket test only)"
+  gui: "flags: -verifycert, -noverifycert (or -no-verify), -cafile; TLS itself is on by default (Connect dialog: TLS checkbox). The GUI's live connect to pubvm.org ('Packaging and TLS against a real TLS host') had a valid chain, so it would also have succeeded with verification off: not a witness that verification is on. The only proof of that, a refusal of a self-signed proxy without -cafile, is a CLI run ('TLS against both hosts — verified 2026-08-25'; not a GUI witness), as is -cafile; -noverifycert has no live witness (socket test only)"
   status: ours
   evidence:
     code: [packages/frontend/src/tls.ts:94, packages/frontend/src/tls.ts:325]
     tests: [packages/frontend/test/tls.test.ts, packages/cli/test/tls.test.ts]
-    live: "Packaging and TLS against a real TLS host — reported by the user 2026-11-08"
+    live: unwitnessed
   browser: "the gateway's own command line has the same TLS flags"
   others: {tui: "same flags", cli: "same flags"}
 - id: tls-ca-dir
