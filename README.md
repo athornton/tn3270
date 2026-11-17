@@ -80,7 +80,7 @@ A failure is shown on that same line, never in the terminal window (the wordings
 SAME session** with whatever you changed. **Quit, Escape and closing the dialog all quit the app
 until a connect has succeeded**, including mid-attempt. Once connected the dialog closes for the
 rest of the run: a dropped connection goes through the ordinary reconnect, and switching host
-mid-session (`File` → `Connect…`) is not built (*Staging*, item 15). With `--terminal-type` on the
+mid-session (`File` → `Connect…`) is not built (*Staging*, item 15b). With `--terminal-type` on the
 command line the terminal type is fixed for the run, so after the first attempt the dialog's Model
 control is disabled (its title says why). A launch given a host takes it from the command line,
 exactly as the other front ends do.
@@ -1301,23 +1301,51 @@ Done (numbers are the ones the rest of the docs cite):
   signing and notarization (merged `db5a93d`; what is signed is under *Installing*), and the CI
   store probe (merged `559ea78`). `docs/releasing.md`.
 
-Item 10, Programmed Symbols, is now item 19.
+Item 10, Programmed Symbols, is now item 19. Items 15-17 of the 2026-11-06 list (the rest of the
+GUI, code pages, the mouse) are now milestones 15b-15d.
 
 Remaining, in the order the author wants it (agreed 2026-11-06; the stores added 2026-11-11):
 
-**Next: x3270 parity, then the stores.** A checklist of x3270 features marked ours, missing or
-deliberately skipped; it gates any submission. Then the Mac App Store and the Microsoft Store as an
-MSIX (Microsoft signs it). Nothing is submitted before parity.
+**Next: x3270 parity, then the stores.** The checklist is **[docs/parity.md](docs/parity.md)**:
+every x3270 4.5ga6 feature marked ours, partial, missing, deferred or skipped, and
+`node scripts/parity.mjs gate` must pass before anything is submitted to the Mac App Store or the
+Microsoft Store (as an MSIX, which Microsoft signs). Item 15 is what stands between here and that
+gate, in the order agreed 2026-11-17; each milestone gets its own spec, plan and build. Row ids in
+`docs/parity/checklist.yaml` are given in parentheses.
 
-15. **The rest of the GUI ("milestone B").** `File` → `Connect…` in a running window, recent
-   hosts, a config file and preferences, light and dark modes, font choice. See *What is not
-   implemented*.
-16. **Code pages.** Only `cp037` exists (`packages/core/src/codepages/cp037.ts`), which is wrong for
-   any host outside the US: 273 (Germany/Austria), 285 (UK), 297 (France), 500 (international),
-   1047 (z/OS Unix), the 1140-family euro pages, and so on. Self-contained, and a correctness gap
-   rather than a feature. **DBCS** (Japanese, Chinese and Korean hosts) is a separate, larger item
-   and is not scheduled.
-17. **Click-to-place-cursor, then the light pen.** Own spec; see *What is not implemented*.
+15. **Store parity with x3270**, in eight milestones:
+   - **15a. Correctness first.** Behaviour bugs the checklist found in core, which every front end
+     shares: AID and editing keys act while the keyboard is locked, where x3270 queues them
+     (`typeahead`, `aid-keys`, `cursor-movement`, the erase keys); insert mode survives an AID and
+     Reset (`insert-mode`, `reset-key`); `oerr-lock`, `numeric-lock`; `attn` sends BREAK on TN3270E
+     where x3270 sends IP. Also blink and intensify are never drawn (`highlight-bold`), the host's
+     alarm never rings (`bell`), ascii transfers do no local CR/LF conversion (`file-transfer`), and
+     x3270's default code page is `bracket`, not cp037 (`code-page`).
+   - **15b. The rest of the GUI ("milestone B").** `File` → `Connect…` and Disconnect in a running
+     window (`connect-host`, `disconnect`), recent hosts and a host list, a config file and
+     preferences (`save-options`), color scheme, model and font menus, light and dark modes, the
+     window title, About, and `--help`/`--version`. See *What is not implemented*.
+   - **15c. Code pages.** Only `cp037` exists (`packages/core/src/codepages/cp037.ts`), which is
+     wrong for any host outside the US: 273 (Germany/Austria), 285 (UK), 297 (France), 500
+     (international), 1047 (z/OS Unix), the 1140-family euro pages, and so on. The canvas draws
+     through a cp037-fixed glyph table (`canvas/src/cg.ts`), so it changes too. A correctness gap
+     rather than a feature. **DBCS** (Japanese, Chinese and Korean hosts) is a separate, larger item,
+     deferred in the checklist.
+   - **15d. The mouse: click-to-place-cursor, then the light pen** (`move-cursor`,
+     `mouse-light-pen`, `cursor-select`), and the selection extras (`select-extend`, `cut`,
+     `select-url`, `paste-modes`). See *What is not implemented*.
+   - **15e. Printing the screen and traces** (`print-text`, `print-window`, `trace`,
+     `screen-trace`, `save-restore-input`). Printer sessions are item 18.
+   - **15f. Connection and TLS:** client certificates, a CA directory, accept-hostname, protocol
+     policy, START_TLS, proxies, IPv4/IPv6 preference, connect timeout and default port, keep-alive,
+     auto-reconnect and `-once`.
+   - **15g. Display fidelity:** cursor shape and crosshair, monocase, visible control characters,
+     scrollback, response timing, custom and field colors, the emulator font.
+   - **15h. Keyboard extras:** keymaps and their display, string actions, Field End and word moves,
+     Delete Word/Field, always-insert, blank fill, compose, APL mode.
+
+   Deferred in the checklist, so not store blockers: printer sessions (item 18), DBCS, right-to-left
+   input, and GUI scripting (a script port and the actions that need it).
 18. **Text printing**: a printer-LU session, SCS and LU3, to a file, a PDF or the print dialog;
    reference x3270's `pr3287`. See *What is not implemented*.
 19. **Programmed Symbols, tested with our own `gif2ps`.** See *Graphics* below and *What is not

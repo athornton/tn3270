@@ -927,6 +927,107 @@ and the Recording log says what happened when they were run.
   we hardcode.** Not a TN3270E problem — `IBM-3278-2-E` reaches TSO with the TN3270E
   option never negotiated. See the Recording log. `record-mvs.txt` remains a draft.
 
+## The four keys and reconnect, from the GUI against VM/370 and TK5 — 2026-11-17
+
+**Dup, Field Mark and Sys Req now have live witnesses from the Electron GUI on both hosts, and
+reconnect has one on VM**, closing the parity checklist's `ours` + `unwitnessed` rows for them. The
+September witnesses above were CLI runs, which the checklist does not count for the GUI. **Sys Req
+was clicked on the real keypad button** (`TN3270_GUI_CLICKS=SysRq` after a real `Ctrl+K`), so the
+"no keypad button has been clicked at a host" gap is closed too. Dup and Field Mark went through
+`TN3270_GUI_KEYS` (`Control+D`, `Control+F`), which is `sendInputEvent` into the renderer's own
+`keydown` listener, the path a keypress takes.
+
+**METHOD: a recording relay between the GUI and the host.** The GUI has no trace seam, so a TCP relay
+on a free local port forwards to `127.0.0.1:3270` (VM) or `:3271` (TK5) and logs both directions in
+hex. The GUI is the real client and the host is the real host; the relay only records, except in the
+reconnect run below, where it drops the line on purpose. No logon was attempted in any run.
+
+| key | path | host | inbound record | CLI record (above) |
+|---|---|---|---|---|
+| Dup | `Control+D`, `Enter` | VM/370 | `7d 5b 60 11 5b 60 1c ff ef` | (TK5 only in September) |
+| Dup | `Control+D`, `Enter` | MVS TK5 | `7d 5b 6b 11 5b 6b 1c 40 40 …` | identical |
+| Field Mark | `Control+F`, `Enter` | VM/370 | `7d 5b 61 11 5b 60 1e ff ef` | identical |
+| Field Mark | `Control+F`, `Enter` | MVS TK5 | `7d 5b 6c 11 5b 6b 1e 40 40 …` | identical |
+| Sys Req | keypad button | VM/370 | `01 6c 61 02 11 5b 60 ff ef` | identical |
+| Sys Req | keypad button | MVS TK5 | `01 6c 61 02 ff ef` | identical |
+
+The controls are the September ones (Enter alone on VM is `7d 5b 60 11 5b 60 ff ef`, on TK5 `7d 5b
+6b ff ef`), so the `1c`, the `1e` and the TEST REQUEST READ heading are the differences. **Host
+reactions** match September: VM answered Dup with a Read Partition and a `CP READ` repaint, and Sys
+Req with a **second** Read Partition, the sign it processed the test request; TK5 ignored Sys Req.
+**Dup's TAB is still unobserved**, for the reason given above: both logon panels have one input field.
+
+**RECONNECT, ON VM, WITH A CONTROL.** The relay closes both ends when the client sends a Clear AID
+(`6d`), which the GUI sees as a dropped line. Keys: wait for `VM/370`, `Control+C` (Clear), `Enter`,
+wait for `VM/370` again.
+
+- **Run:** `c1 > 6d ff ef`, the relay drops `c1`, and **150 ms later** (the seam's key spacing, when
+  it sends Enter) the GUI opens `c2`, over which VM repaints its `VM/370` logo. **No `7d` is sent on
+  either connection**: Enter reconnected rather than sending an AID.
+- **Control:** the same keys without `Enter`. The drop happens, **no second connection opens in 25
+  s**, and the wait for `VM/370` times out. So the reconnect is the Enter key's doing.
+
+**VM IS SLOW TO FREE A TERMINAL BETWEEN SESSIONS.** Four times a VM run that followed a successful
+one painted only Hercules' own connection banner and never the VM/370 logo, timing out at 40 s (once
+at 120 s); the next run worked each time. The stall is before any key is sent, so it does not touch
+the results, but a harness driving VM back to back should expect it.
+
+**Reproduce:** start Xvfb as in *Typed input, proved end to end* above, `npm run build`, then save
+the script below as `run.mjs` in a scratch directory, `mkdir -p /tmp/witness`, and run it from
+there (it names this checkout's path, `/home/a/athor/git/tn3270`; change `repo` for another), for
+example:
+
+```bash
+node run.mjs vm-dup 3270 'wait:VM/370|CP READ,Control+D,Enter'
+node run.mjs tk5-sysreq 3271 'wait:Logon|LOGON,Control+K' 'SysRq'
+node run.mjs vm-reconnect 3270 'wait:VM/370|CP READ,Control+C,Enter,wait:VM/370|CP READ' '' 6d
+```
+
+Each writes `NAME.log` in `/tmp/witness/`: the seam lines, then every chunk on the wire with a
+timestamp, the connection number and `>` (to the host) or `<` (from it).
+
+```js
+// Live GUI witness: Electron GUI -> recording relay -> live Hercules host. The relay only logs;
+// with DROP_ON_AID set it closes BOTH ends when the client sends that AID (a simulated network drop).
+import net from 'node:net';
+import { spawn } from 'node:child_process';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { displayEnv } from '/home/a/athor/git/tn3270/scripts/smoke-lib.mjs';
+const repo = '/home/a/athor/git/tn3270';
+const [name, upstreamPort, keys, clicks = '', dropAid = ''] = process.argv.slice(2);
+const log = []; const t0 = Date.now(); let conn = 0;
+const rec = (c, dir, buf) => log.push(`${((Date.now() - t0) / 1000).toFixed(3)} c${c} ${dir} ${buf.toString('hex').replace(/(..)/g, '$1 ').trim()}`);
+const relay = net.createServer((client) => {
+  const c = ++conn; log.push(`${((Date.now() - t0) / 1000).toFixed(3)} c${c} OPEN`);
+  const host = net.connect(Number(upstreamPort), '127.0.0.1');
+  let dropped = false;
+  client.on('data', (b) => {
+    rec(c, '>', b);
+    if (dropAid && !dropped && b[0] === parseInt(dropAid, 16)) { dropped = true; log.push(`c${c} DROP on AID ${dropAid}`); client.destroy(); host.destroy(); return; }
+    host.write(b);
+  });
+  host.on('data', (b) => { rec(c, '<', b); client.write(b); });
+  const end = () => { client.destroy(); host.destroy(); };
+  client.on('close', end); host.on('close', end); client.on('error', end); host.on('error', end);
+});
+await new Promise((r) => relay.listen(0, '127.0.0.1', r));
+const port = relay.address().port;
+const electron = createRequire(`${repo}/packages/gui/package.json`)('electron');
+const d = mkdtempSync('/tmp/witness/ud-');
+const env = await displayEnv({ ...process.env });
+const p = spawn(electron, [`${repo}/packages/gui/dist/main.js`, '--no-sandbox', '--disable-gpu', `--user-data-dir=${d}`, '-insecure', '-model', '3278-2-E', `127.0.0.1:${port}`],
+  { env: { ...env, TN3270_GUI_KEYS: keys, TN3270_GUI_CLICKS: clicks, TN3270_GUI_KEYS_MS: '3000', TN3270_GUI_WAIT_MS: process.env.WAIT_MS ?? '40000' }, cwd: d });
+let out = ''; p.stdout.on('data', (b) => { out += b; }); p.stderr.on('data', (b) => { out += b; });
+const timer = setTimeout(() => p.kill('SIGTERM'), 200000);
+const code = await new Promise((r) => p.on('exit', (c, s) => r(c ?? s)));
+clearTimeout(timer); relay.close();
+const seam = out.split('\n').filter((l) => /^(keys|clicks|wait|shot|action)|FAIL|rror/.test(l) && !/dbus|OOM|Security/.test(l));
+writeFileSync(`/tmp/witness/${name}.log`, `exit ${code}\n${seam.join('\n')}\n--- wire ---\n${log.join('\n')}\n`);
+console.log(`${name}: exit ${code}, ${conn} connection(s), ${log.length} wire lines`);
+process.exit(0);
+```
+
 ## Step 1 — Confirm the host is reachable
 
 Substitute the real host and port (do not guess; get these from whoever
