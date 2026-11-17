@@ -102,7 +102,7 @@ runtime dependencies of its own).
 | status | requires | gate |
 |---|---|---|
 | `ours` | `evidence.code`, `evidence.tests` (files exist), `gui` equivalent to `x3270` (below), `evidence.live` a heading or `n/a` | passes |
-| `ours` + `live: unwitnessed` | as above, plus `accept-unwitnessed: <reason>` | passes only with that field |
+| `ours` + `live: unwitnessed` | as above; `accept-unwitnessed: <reason>` is legal but not required -- only the user may write it | blocks until the user adds `accept-unwitnessed` |
 | `partial` | `gap` | blocks |
 | `missing` | none | blocks |
 | `proposed-deferred` / `proposed-skipped` | `reason` | blocks |

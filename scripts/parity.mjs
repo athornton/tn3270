@@ -148,7 +148,10 @@ export function check({ rows, names, root }) {
       if (!code.length) say('ours needs evidence.code');
       if (!tests.length) say('ours needs evidence.tests');
       if (!ev.live) say('ours needs evidence.live (a heading, unwitnessed or n/a)');
-      if (ev.live === 'unwitnessed' && !row['accept-unwitnessed']) say('live: unwitnessed needs accept-unwitnessed');
+      // An unaccepted `live: unwitnessed` is legal here -- only the user may write
+      // accept-unwitnessed, so an honest agent-written `ours` row must be able to say
+      // "unwitnessed" without failing check(). It still blocks at the gate (see blocking()),
+      // the same way a proposed-* row is legal in the file but blocks until decided.
     }
     if (row['accept-unwitnessed'] !== undefined) {
       if (!(row.status === 'ours' && ev.live === 'unwitnessed')) say('accept-unwitnessed only on ours with live: unwitnessed');

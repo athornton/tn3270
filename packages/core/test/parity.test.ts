@@ -65,7 +65,6 @@ describe('parity check', () => {
     ['a dead file', [ours({ evidence: { code: ['src/nope.ts'], tests: ['src/a.test.ts'], live: 'n/a' } })], 'thing: src/nope.ts does not exist'],
     ['a line past the end', [ours({ evidence: { code: ['src/a.ts:9'], tests: ['src/a.test.ts'], live: 'n/a' } })], 'thing: src/a.ts:9 is past the end (3 lines)'],
     ['a dead live heading', [ours({ evidence: { code: ['src/a.ts'], tests: ['src/a.test.ts'], live: 'No such heading' } })], 'thing: live heading not in docs/live-testing.md: No such heading'],
-    ['unwitnessed without acceptance', [ours({ evidence: { code: ['src/a.ts'], tests: ['src/a.test.ts'], live: 'unwitnessed' } })], 'thing: live: unwitnessed needs accept-unwitnessed'],
     ['acceptance where witnessed', [ours({ 'accept-unwitnessed': 'x' })], 'thing: accept-unwitnessed only on ours with live: unwitnessed'],
     ['partial without gap', [ours({ status: 'partial' })], 'thing: partial needs gap'],
     ['deferred without decided', [ours({ status: 'deferred', reason: 'later' })], 'thing: deferred needs decided'],
@@ -129,6 +128,10 @@ describe('parity check', () => {
     expect(run([ours({ status: 'deferred', reason: 'r', decided: '2026-11-17, user' })]).problems).toEqual([]);
   });
 
+  it('an ours row with an unaccepted unwitnessed live passes check() -- only the user may write accept-unwitnessed, so an honest agent-written row must not fail check() for lacking one; it still blocks at the gate (see "main (gate, injected)" below)', () => {
+    expect(run([ours({ evidence: { code: ['src/a.ts'], tests: ['src/a.test.ts'], live: 'unwitnessed' } })]).problems).toEqual([]);
+  });
+
   it('matches a live heading exactly, asterisks and all, and matches a closing-hashes heading', () => {
     expect(run([ours({ evidence: { code: ['src/a.ts'], tests: ['src/a.test.ts'], live: 'Reached *AND ACTIVE* now' } })]).problems).toEqual([]);
     expect(run([ours({ evidence: { code: ['src/a.ts'], tests: ['src/a.test.ts'], live: 'Closer' } })]).problems).toEqual([]);
@@ -188,9 +191,9 @@ describe('render and gate', () => {
   });
 
   it('blocks an ours row with an unaccepted unwitnessed live, directly (not via check())', () => {
-    // This is a direct unit test on blocking(), independent of check()'s own (separate) rule
-    // that an unaccepted `live: unwitnessed` is a shape problem -- so it still catches a
-    // regression in blocking()'s own allow-list even if check()'s rule were ever relaxed.
+    // check() deliberately does NOT flag this (only the user may write accept-unwitnessed, so
+    // an honest agent-written row must pass check() unaccepted) -- blocking() is the only place
+    // this rule is enforced now, so this direct unit test is what actually guards it.
     expect(blocking([
       ours({ id: 'unaccepted', covers: [], evidence: { code: ['src/a.ts'], tests: ['src/a.test.ts'], live: 'unwitnessed' } }),
     ])).toEqual(['unaccepted: ours but unwitnessed, not accepted']);
@@ -232,7 +235,7 @@ describe('main (gate, injected)', () => {
     expect(main(['gate'], captured().io, { rows, names, root })).toBe(1);
   });
 
-  it('exits 1 for an unaccepted unwitnessed ours', () => {
+  it('exits 1 for an unaccepted unwitnessed ours (check() passes it; the gate is where it blocks)', () => {
     const rows = [ours({ covers: ['action:A', 'option:-b'], evidence: { code: ['src/a.ts'], tests: ['src/a.test.ts'], live: 'unwitnessed' } })];
     expect(main(['gate'], captured().io, { rows, names, root })).toBe(1);
   });
