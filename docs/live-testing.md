@@ -1079,8 +1079,9 @@ are from after the restore.
 converted send. MECAFF's IND$FILE and TK5's FFTP both split records on a bare LF. So **the byte
 compare fails on the receive half alone**, and the CMS listing does not judge our send either. The
 send half's only live witness is its wire count, 251 bytes where the control sent 244, and the
-harness now scores that as its own check (`the SEND put a CR before each LF (wire count)`), which
-the control fails. **`^Z` stripping was not exercised live**: neither host sent one (251 = 244 + 7
+harness now scores that as its own check (`the SEND put a CR before each LF (wire count)`). The
+controls above ran before that check existed (they scored 9/11 and 8/10); with 244 bytes sent they
+would fail it. **`^Z` stripping was not exercised live**: neither host sent one (251 = 244 + 7
 CRs, with nothing extra), so its only cover is the unit and fake-wire tests.
 
 **Command lines** (Xvfb starts itself; `npm run build` first; the relays run from a scratch directory
