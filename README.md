@@ -479,9 +479,10 @@ version is an overlay over the page, whose files are on the browser's machine.)
 > `Mode`, which defaults to `binary` where x3270 sets `ascii_flag` true: a wrong ascii default
 > silently corrupts a load module, while a wrong explicit choice is visible in the command.
 
-**`Mode=ascii` does no local line-end conversion yet.** It asks the host to translate (`ASCII`,
-and `CRLF` unless `Cr=keep`), but a received file keeps the host's CRLF line ends and any trailing
-`^Z`, and an LF-only file is sent without CRs, where x3270 strips and adds them itself.
+**`Mode=ascii` converts line ends as x3270 does.** A receive drops every CR and `^Z`, wherever they
+appear; a send puts a CR before each LF that does not already follow one. `Cr=keep` turns both off
+(and binary mode never converts). **The `Cr` names are not directional**: `remove` also adds CRs on
+a send, and `add` also strips them on a receive, because x3270 has one flag, not two.
 
 **It is a second `BrowserWindow` with real HTML controls, not a canvas view** — so inside it the
 mouse and the keyboard behave as they do in any window, which is the whole reason it is not drawn on

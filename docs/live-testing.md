@@ -1028,6 +1028,183 @@ console.log(`${name}: exit ${code}, ${conn} connection(s), ${log.length} wire li
 process.exit(0);
 ```
 
+## Ascii transfers convert line ends, from the GUI against VM/370 and TK5 — 2026-11-17
+
+**`Mode=ascii` round-trips an LF-only text file byte-identically from the Electron GUI's transfer
+window, over CUT to VM/370 and over DFT to TK5**, and with the conversion removed it does not. This
+is the live witness for the local line-end conversion (`packages/frontend/src/lineEnds.ts`, wired
+once in `startTransfer`): a receive drops every CR and `^Z`, a send puts a CR before each LF that
+does not already follow one.
+
+**METHOD.** `packages/gui/scripts/live-transfer.py --ascii` logs on, sends a 244-byte, 7-line,
+LF-only, LF-terminated printable-ASCII file with `Mode=ascii` (`Cr` left at its default, auto),
+receives it back with `Mode=ascii` to a different path and compares the bytes. On CMS it also runs
+`LISTFILE GUIXA TEST A (DATE` between the two transfers. The host files are `GUIXA TEST A` and
+`'HERC01.GUIXFER.TXT'`, so they never collide with the binary runs' `GUIX TEST A` and
+`GUIXFER.BIN`. **The protocol of each run comes from the wire, not from the host's name.** The GUI
+prints no engine and its status line reads `done: N bytes` on both, so each run went through a
+counting relay (below, pointed at with the harness's new `TN3270_TARGET`) that records only record
+counts, never bytes. A DFT transfer shows `client> SF DFT (d0)` frames; a run with none moved its
+file over CUT.
+
+| run | host | protocol, from the relay | send `done` | receive `done` | local file | checks |
+|---|---|---|---|---|---|---|
+| `vm --ascii` | VM/370 | CUT: 0 DFT SFs either way, 65 Write/EW from the host | 251 bytes | 251 bytes | 244 B, `cmp` identical, 0 CR, 0 `^Z`, 7 LF | 12/12 |
+| `tso --ascii` | TK5 | DFT: 11 `d0` SFs from the host, 11 from the client | 251 bytes | 251 bytes | 244 B, `cmp` identical, 0 CR, 0 `^Z`, 7 LF | 11/11 |
+| `vm` (binary) | VM/370 | CUT: 0 DFT SFs, 61 Write/EW | 249 bytes | 249 bytes | 249 B, `cmp` identical | 9/9 |
+| `tso` (binary) | TK5 | DFT: 11 `d0` SFs from the client | 249 bytes | 249 bytes | 249 B, `cmp` identical | 9/9 |
+
+**THE CMS LISTING:** `host listfile GUIXA TEST A (date -> saw "GUIXA TEST A1 V 64 7"`, which is
+`V` format, a longest record of 64 (line 5) and 7 records, one per line. The `251 bytes` are
+244 + 7: the status count is what crossed the wire, so the send put up one CR per line and the
+receive brought one back per line, which the local file no longer has. Every run logged off in the
+run (`host #cp logoff -> saw "LOGOFF AT"` on VM, `host LOGOFF -> saw "Logon"` on TSO), so no
+account was left held. **No VM retry was needed**: none of the six VM runs this session stalled on
+Hercules' banner, though *The four keys and reconnect* above saw it four times today.
+
+**THE CONTROL, ON BOTH HOSTS.** The wrap in `transferRun.ts` was replaced with
+`const files = opts.files;`, the tree rebuilt (`dist/transferRun.js` checked), and one ascii flow run
+on each host:
+
+| control | send `done` | receive `done` | local file | result |
+|---|---|---|---|---|
+| `vm --ascii` (CUT) | **244 bytes** | 251 bytes | 251 B, 7 CR | `FAIL BYTES ARE IDENTICAL: expected 244B, got 251B`, 9/11 |
+| `tso --ascii` (DFT) | **244 bytes** | 251 bytes | 251 B, 7 CR (`od -c`: `\r \n` per line) | same FAIL, 8/10 |
+
+The line was then restored with `git checkout`, rebuilt, and the two ascii runs in the first table
+are from after the restore.
+
+**WHAT THE CONTROL FOUND: NEITHER HOST NEEDS THE SEND HALF.** With no CRs sent, CMS still listed
+`GUIXA TEST A1 V 64 7`, and both hosts sent back the same seven CRLF lines (251 bytes) as after a
+converted send. MECAFF's IND$FILE and TK5's FFTP both split records on a bare LF. So **the byte
+compare fails on the receive half alone**, and the CMS listing does not judge our send either. The
+send half's only live witness is its wire count, 251 bytes where the control sent 244, and the
+harness now scores that as its own check (`the SEND put a CR before each LF (wire count)`). The
+controls above ran before that check existed (they scored 9/11 and 8/10); with 244 bytes sent they
+would fail it. **`^Z` stripping was not exercised live**: neither host sent one (251 = 244 + 7
+CRs, with nothing extra), so its only cover is the unit and fake-wire tests.
+
+**Command lines** (Xvfb starts itself; `npm run build` first; the relays run from a scratch directory
+holding `relay.py` below):
+
+```bash
+python3 -I relay.py 23270 3270 /tmp/ascii-witness/vm.txt &
+TN3270_TARGET=127.0.0.1:23270 TN3270_PASSWORD=CMSUSER \
+  python3 packages/gui/scripts/live-transfer.py vm --ascii
+python3 -I relay.py 23271 3271 /tmp/ascii-witness/tso.txt &
+TN3270_TARGET=127.0.0.1:23271 TN3270_PASSWORD=CUL8TR \
+  python3 packages/gui/scripts/live-transfer.py tso --ascii
+# and the binary defaults: the same, without --ascii
+```
+
+Without `TN3270_TARGET` the harness dials the host directly and the transfers behave the same; the
+first `vm --ascii` run was made that way (11/11, before the wire-count check existed). The relay
+was refined during the session, and the two TSO runs before the refinement counted only the first
+structured field in each host WSF (it reported `40`, an Outbound 3270DS ahead of the `d0`); their
+client-side `d0` counts, 11 each, were the same as after. The final `relay.py`, used for the last
+VM run above (12/12, the same counts):
+
+```python
+#!/usr/bin/env python3
+"""Counting relay: GUI -> here -> Hercules. Logs NO payload bytes, only per-record counts.
+
+usage: relay.py LISTEN_PORT UPSTREAM_PORT SUMMARY_FILE
+Splits each direction into 3270 records at IAC EOR (ff ef), undoes IAC doubling, drops telnet
+negotiation, and on each connection's close appends one line of counts to SUMMARY_FILE:
+  host> WSF (f3/11) records carrying a DFT structured field (id d0), and those without one
+  host> Write / Erase-Write records (the CUT carrier, and every ordinary screen)
+  client> AID 0x88 records whose first structured field is DFT (id d0)
+  client> Query Replies carrying DDM (81 95)
+"""
+import socket, sys, threading
+lp, up, out = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3]
+lock = threading.Lock()
+conn_no = 0
+
+
+def records(buf):
+    """Yield complete records from a bytearray, leaving the remainder in place."""
+    while True:
+        i = 0; rec = bytearray(); found = False
+        while i < len(buf) - 1:
+            if buf[i] == 0xff:
+                if buf[i+1] == 0xef:
+                    found = True; break
+                if buf[i+1] == 0xff:
+                    rec.append(0xff); i += 2; continue
+                cmd = buf[i+1]
+                if cmd in (0xfb, 0xfc, 0xfd, 0xfe):      # WILL/WONT/DO/DONT option
+                    i += 3; rec.clear(); continue
+                if cmd == 0xfa:                          # SB ... IAC SE
+                    j = buf.find(b'\xff\xf0', i)
+                    if j < 0: return
+                    i = j + 2; rec.clear(); continue
+                i += 2; continue
+            rec.append(buf[i]); i += 1
+        if not found: return
+        del buf[:i+2]
+        yield bytes(rec)
+
+
+def bump(counts, k):
+    counts[k] = counts.get(k, 0) + 1
+
+
+def pump(src, dst, direction, counts):
+    buf = bytearray()
+    try:
+        while True:
+            b = src.recv(65536)
+            if not b: break
+            dst.sendall(b)
+            buf += b
+            for r in records(buf):
+                if not r: continue
+                bump(counts, direction + ' records')
+                if direction == 'host>' and r[0] in (0xf3, 0x11) and len(r) > 3:
+                    # every structured field in the WSF, not just the first
+                    i = 1; ids = []
+                    while i + 3 <= len(r):
+                        ln = (r[i] << 8) | r[i+1]
+                        ids.append(r[i+2])
+                        if ln < 3: break
+                        i += ln
+                    bump(counts, 'host> WSF with a DFT (d0) SF' if 0xd0 in ids else 'host> WSF without d0')
+                elif direction == 'host>' and r[0] in (0xf1, 0xf5, 0x7e, 0x01, 0x05, 0x0d):
+                    bump(counts, 'host> Write/EW')
+                elif direction == 'client>' and r[0] == 0x88:
+                    if len(r) > 3 and r[3] == 0xd0:
+                        bump(counts, 'client> SF DFT (d0)')
+                    if b'\x81\x95' in r:
+                        bump(counts, 'client> Query Reply DDM (81 95)')
+    except OSError:
+        pass
+    finally:
+        for s in (src, dst):
+            try: s.shutdown(socket.SHUT_RDWR)
+            except OSError: pass
+
+
+def handle(c):
+    global conn_no
+    with lock:
+        conn_no += 1; n = conn_no
+    h = socket.create_connection(('127.0.0.1', up))
+    counts = {}
+    t1 = threading.Thread(target=pump, args=(c, h, 'client>', counts))
+    t2 = threading.Thread(target=pump, args=(h, c, 'host>', counts))
+    t1.start(); t2.start(); t1.join(); t2.join()
+    with lock, open(out, 'a') as f:
+        f.write(f"conn {n} upstream :{up}: " + ", ".join(f"{k}={v}" for k, v in sorted(counts.items())) + "\n")
+
+
+s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(('127.0.0.1', lp)); s.listen(4)
+while True:
+    c, _ = s.accept()
+    threading.Thread(target=handle, args=(c,), daemon=True).start()
+```
+
 ## Step 1 — Confirm the host is reachable
 
 Substitute the real host and port (do not guess; get these from whoever

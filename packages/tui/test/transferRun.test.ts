@@ -1277,3 +1277,44 @@ describe('a transfer that NEVER STARTED says so, in x3270\'s words and the host\
     }
   });
 });
+
+describe('ascii line ends, end to end through startTransfer (x3270 cr_flag)', () => {
+  const ascii = (r: TransferRequest, cr: TransferRequest['cr'] = 'auto'): TransferRequest => ({ ...r, mode: 'ascii', cr });
+
+  async function receive(request: TransferRequest, payload: number[]): Promise<number[]> {
+    const { session, conn } = await connected();
+    const files = fakeFiles();
+    let settle!: (r: { ok: boolean }) => void;
+    const done = new Promise<{ ok: boolean }>((r) => { settle = r; });
+    startTransfer({ session, files, request, command: 'IND$FILE GET A.TXT', onProgress: () => {}, onDone: settle });
+    for (const record of wholeDftDownload(payload)) conn.host(...record);
+    await expect(done).resolves.toMatchObject({ ok: true });
+    return [...(files.files.get(request.localFile) ?? [])];
+  }
+
+  const CRLF_TEXT = [0x41, 0x0d, 0x0a, 0x42, 0x0d, 0x0a, 0x1a];
+
+  it('a DFT ascii receive strips CR and ^Z, for Cr=auto, remove and add alike', async () => {
+    for (const cr of ['auto', 'remove', 'add'] as const) {
+      expect(await receive(ascii(aReceive('/tmp/t.txt'), cr), CRLF_TEXT), cr).toEqual([0x41, 0x0a, 0x42, 0x0a]);
+    }
+  });
+
+  it('Cr=keep and binary mode write the bytes untouched', async () => {
+    expect(await receive(ascii(aReceive('/tmp/k.txt'), 'keep'), CRLF_TEXT)).toEqual(CRLF_TEXT);
+    expect(await receive(aReceive('/tmp/b.bin'), CRLF_TEXT)).toEqual(CRLF_TEXT);
+  });
+
+  it('a DFT ascii send puts a CR before each bare LF on the wire', async () => {
+    const { session, conn } = await connected();
+    const files = fakeFiles({ '/tmp/up.txt': Uint8Array.of(0x41, 0x0a, 0x42, 0x0a) });
+    startTransfer({ session, files, request: ascii(aSend('/tmp/up.txt')), command: 'IND$FILE PUT A.TXT', onProgress: () => {}, onDone: () => {} });
+    conn.host(...wsfBytes(openPayload()));
+    conn.sent = [];
+    conn.host(...wsfBytes([0x46, 0x11]));                 // DftRequest.GET (core/src/ft/dftFrames.ts)
+    const hex = conn.sent.map((x) => x.toString(16).padStart(2, '0')).join(' ');
+    expect(hex).toContain('41 0d 0a 42 0d 0a');
+    // And the local file itself is untouched: the conversion is on the way out, not a rewrite.
+    expect([...files.files.get('/tmp/up.txt')!]).toEqual([0x41, 0x0a, 0x42, 0x0a]);
+  });
+});

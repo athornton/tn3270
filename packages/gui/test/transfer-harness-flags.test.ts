@@ -240,3 +240,57 @@ describe('the transfer harness', () => {
     expect(code).toMatch(/TN3270_GUI_CLICKS:\s*''/);
   });
 });
+
+/**
+ * `live-transfer.py --ascii`, the LIVE witness for the ascii line-end conversion
+ * (`frontend/src/lineEnds.ts`). Same rule as the block above: `npm test` cannot dial a mainframe,
+ * so this pins the invocation as TEXT -- the things whose loss would turn the witness into a binary
+ * run that still prints PASS. The behaviour is the by-hand run in `docs/live-testing.md`.
+ */
+describe('live-transfer.py --ascii', () => {
+  const live = readFileSync(join(guiDir, 'scripts', 'live-transfer.py'), 'utf8');
+
+  it('takes the flag, and keeps binary the default', () => {
+    expect(live).toContain('ascii_mode = "--ascii" in sys.argv[2:]');
+    // Without the flag nothing is added to the form: an empty `mode_field` leaves the binary
+    // scenario exactly as it was.
+    expect(live).toContain('mode_field = "mode=ascii," if ascii_mode else ""');
+    expect(live).toContain('payload = big_payload() if big else ASCII_PAYLOAD if ascii_mode else PAYLOAD');
+  });
+
+  it('sets Mode=ascii on BOTH transfers, on both hosts', () => {
+    // A send-only `mode=ascii` would leave the receive binary, so the CRs would come back and the
+    // compare would fail for a reason that is not the conversion's.
+    expect(live).toContain('send_fields = f"{mode_field}localFile={src},hostFile={host_file},');
+    expect(live).toContain('recv_fields = f"{mode_field}localFile={back},hostFile={host_file},');
+    expect(live).toContain('f"direction=send,{mode_field}localFile={src},hostFile={ds_plain},"');
+    expect(live).toContain('f"direction=receive,{mode_field}localFile={back},hostFile={ds_full},"');
+  });
+
+  it('sends an LF-only, LF-terminated text file', () => {
+    // Every line gets exactly one `\n` and no `\r`: the send must ADD the CRs, or there is nothing
+    // for the conversion to do and the witness would pass on a no-op.
+    expect(live).toContain('ASCII_PAYLOAD = "".join(f"{l}\\n" for l in ASCII_LINES).encode("ascii")');
+    const lines = /^ASCII_LINES = \[([\s\S]*?)^\]/m.exec(live);
+    expect(lines, 'no ASCII_LINES list').not.toBeNull();
+    const body = lines![1] ?? '';
+    const count = (body.match(/^\s+"/gm) ?? []).length;
+    expect(count).toBeGreaterThanOrEqual(5);
+    expect(count).toBeLessThanOrEqual(10);
+    expect(body).not.toMatch(/\\r|\\n|\\t/);
+  });
+
+  it('scores the SEND half by its wire count, because neither host needs the CRs', () => {
+    // MEASURED 2026-11-17: with the conversion removed, both hosts still stored and returned seven
+    // lines, so the compare fails on the receive half alone. The send's `done: N bytes` is what
+    // crossed the wire, and it is the one place the inserted CRs can be seen.
+    expect(live).toContain('want_sent = len(payload) + lines');
+    expect(live).toContain('checks.append(report("the SEND put a CR before each LF (wire count)", sent == want_sent,');
+  });
+
+  it('scores the bytes AND the CMS listing, not just the status line', () => {
+    expect(live).toContain('checks.append(report("BYTES ARE IDENTICAL", got == payload,');
+    expect(live).toMatch(/host:listfile \{host_file\} \(date\|\{listing_needle\},/);
+    expect(live).toContain('"-> saw" in list_line');
+  });
+});

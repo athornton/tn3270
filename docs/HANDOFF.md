@@ -91,8 +91,9 @@ probe. Items 1-2 were fixed afterwards in `a5aa71e`; the rest are open.
    listens).
 9. **Code page:** x3270 defaults to `bracket`, not cp037, so `[ ]` map differently at defaults;
    the canvas glyph path (`canvas/src/cg.ts:89`) is cp037-fixed.
-10. **Transfer:** `Mode=ascii` does no local CR/LF or `^Z` conversion (proven by probe; README now
-    says so).
+10. ~~**Transfer:** `Mode=ascii` did no local CR/LF or `^Z` conversion.~~ **FIXED on branch
+    `ascii-line-ends` (2026-11-17)**: `frontend/src/lineEnds.ts`, as x3270 converts; live round trips
+    from the GUI on VM (CUT) and TSO (DFT), *docs/live-testing.md*.
 11. **CLI:** `Wait` takes its timeout last (s3270 has it first; `Wait(10,Unlock)` is refused);
     Enter/Clear/PF/PA don't wait for unlock (s3270's `aidWait` defaults on); `Snap` prints the
     screen; `Ascii(r,c,rows,cols)` silently returns a wrong answer. README calls the CLI

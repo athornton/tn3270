@@ -121,10 +121,20 @@ export type {
   FtHostType, FtMode, FtCr, FtExist, FtRecfm,
 } from './transfer.js';
 
+// Ascii line ends, converted locally exactly as x3270 does: the one rule
+// (`convertsLineEnds`, which `wantsCrlf` above delegates to), the two byte transforms, and the
+// `TransferFiles` wrapper. `startTransfer` (transferRun.ts) applies it once for the TUI, GUI and
+// web gateway; the CLI's OWN blocking loop (`cli/src/runner.ts`, `transfer()`) does not call
+// `startTransfer` at all (see the comment below), so it wraps with the same two functions itself
+// -- same rule, two call sites, because `convertsLineEnds`/`withLineEnds` are the one definition
+// either can drift from.
+export { convertsLineEnds, fromHost, toHost, withLineEnds } from './lineEnds.js';
+
 // The event-driven transfer driver. Here rather than in `tui` because its own header's
 // reason for existing -- "a TUI cannot block" -- applies equally to the GUI and the web
-// gateway, and both already depend on this package. The CLI keeps its own blocking loop:
-// collapsing the two would change the s3270 line protocol's behavior.
+// gateway, and both already depend on this package. The CLI keeps its own blocking loop AND ITS
+// OWN FILE I/O (`runner.ts`'s `transfer()` builds its own engines and reads/writes `files`
+// directly): collapsing the two would change the s3270 line protocol's behavior.
 export { startTransfer } from './transferRun.js';
 export type { TransferRun, StartTransferOptions } from './transferRun.js';
 // The text for a transfer that never started, shared with the CLI's own loop so the two cannot drift.

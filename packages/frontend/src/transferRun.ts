@@ -53,6 +53,7 @@ import {
 } from '@tn3270/core';
 import type { TransferFiles, TransferRequest } from './transfer.js';
 import { describeNonStart, screenRows } from './transferStart.js';
+import { convertsLineEnds, withLineEnds } from './lineEnds.js';
 
 /** The CLI's own defaults (`runner.ts:43-44`), so the two front ends wedge alike. */
 const FRAME_TIMEOUT_MS = 30_000;
@@ -86,7 +87,10 @@ export interface StartTransferOptions {
  * which the outcome arrives through `onDone` exactly once.
  */
 export function startTransfer(opts: StartTransferOptions): TransferRun {
-  const { session, files, request, command, onProgress, onDone } = opts;
+  const { session, request, command, onProgress, onDone } = opts;
+  // Ascii line ends, converted as x3270 does (lineEnds.ts): ONE wrap here, so a send's read and
+  // both engines' receive writes all go through it and the CUT and DFT arms cannot diverge.
+  const files = convertsLineEnds(request) ? withLineEnds(opts.files) : opts.files;
   const frameMs = opts.frameMs ?? FRAME_TIMEOUT_MS;
   const totalMs = opts.totalMs ?? TOTAL_TIMEOUT_MS;
 

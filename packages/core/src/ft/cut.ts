@@ -26,15 +26,17 @@
  * misread. The words "upload" and "download" appear nowhere in an identifier
  * here, only in citations that state the real direction.
  *
- * ## SCOPE: binary mode only, for now
+ * ## SCOPE: the engine moves bytes; ascii line ends are converted OUTSIDE it
  *
- * ASCII mode is DEFERRED. `upload_convert` also does CR/EOF suppression when
- * `ascii_flag && cr_flag` (`ft_cut.c:190-192`), a remap through the local
+ * `upload_convert` also does CR/EOF suppression when `ascii_flag && cr_flag`
+ * (`ft_cut.c:190-192`), and `download_convert` the mirror image. THAT PART IS
+ * DONE, but not here: since 2026-11-17 `frontend/src/lineEnds.ts` converts the
+ * local file's bytes on the way in and out (`withLineEnds`, applied by
+ * `startTransfer` and by the CLI's `Runner.transfer`), so this engine still sees
+ * and returns raw bytes. STILL NOT IMPLEMENTED: the remap through the local
  * multi-byte encoding when `ascii_flag && remap_flag` (`ft_cut.c:193-262`), and
- * DBCS shift-in/shift-out state (`ft_cut.c:206-236`); `download_convert` has
- * the mirror image (`ft_cut.c:336-380`). None of that is implemented. The
- * design doc makes binary the default precisely because a wrong default
- * silently corrupts a MODULE, so binary is also the honest first delivery.
+ * DBCS shift-in/shift-out state (`ft_cut.c:206-236`). Binary remains the
+ * default, because a wrong default silently corrupts a MODULE.
  */
 
 /** Number of quadrants. `#define NQ 4` (ft_cut.c:56). */
