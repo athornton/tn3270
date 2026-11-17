@@ -384,8 +384,9 @@ usefully; interior spaces are kept, because they carry the panel's alignment.
 out, by construction rather than by convention — the check is mutation-verified in the test suite.
 
 **Paste types the text in; it never presses Enter.** A newline in pasted text means *next field*,
-not *submit* — which is what x3270's own paste does (`Common/kybd.c:3928`, where `\n` becomes
-`Enter_action` only when **not** pasting). Quietly submitting a half-filled panel to a live host is
+not *submit* — which is what x3270's paste does with `overlayPaste` off (`Common/kybd.c:3928`,
+where `\n` becomes `Enter_action` only when **not** pasting). x3270 defaults `overlayPaste` on,
+which this does not implement. Quietly submitting a half-filled panel to a live host is
 not a trade this makes. A form feed types a space, where outside a paste it would be Clear and would
 wipe the screen; a carriage return is dropped, so CRLF text does not gain a stray character per
 line. If a field fills up or refuses a character the paste stops and the status line says how much

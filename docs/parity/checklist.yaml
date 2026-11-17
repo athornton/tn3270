@@ -230,7 +230,7 @@
 - id: nvt-mode
   area: connection
   title: NVT (ANSI) mode, line and character mode, and their line-editing characters
-  covers: [option:-nvt, menu:lineModeOption, menu:characterModeOption, resource:icrnl, resource:inlcr, resource:onlcr, resource:eof, resource:erase, resource:intr, resource:kill, resource:lnext, resource:quit, resource:rprnt, resource:werase, resource:noTelnetInputMode]
+  covers: [option:-nvt, menu:lineModeOption, menu:characterModeOption, resource:icrnl, resource:inlcr, resource:onlcr, resource:eof, resource:erase, resource:intr, resource:kill, resource:lnext, resource:quit, resource:rprnt, resource:werase, resource:noTelnetInputMode, toggle:lineWrap, menu:lineWrapOption]
   x3270: "Options → Toggles → Line Mode / Character Mode (NVT only); -nvt; line-mode resources; noTelnetInputMode (T: hosts)"
   gui: none
   status: missing
@@ -660,12 +660,12 @@
   title: Screen model (3278/3279 model 2, 3, 4 or 5)
   covers: [option:-model, menu:modelsOption, menu:model2Option, menu:model3Option, menu:model4Option, menu:model5Option]
   x3270: "Options → Models → Model 2/3/4/5 (disabled while connected); -model [327{8,9}-]<n>; default model 3279-4, with -E from extendedDataStream (x3270/resources.c:63-64, Common/model.c:137)"
-  gui: "flag: -model; menu: Model → the eight 3278-N and 3278-N-E radios (disabled while connected or connecting, applied at the next connect). Live: the GUI at -model 3278-4-E against VM drew 43 rows"
+  gui: "flag: -model; the startup Connect dialog's model dropdown (the same eight models); menu: Model → the eight 3278-N and 3278-N-E radios (disabled while connected or connecting, applied at the next connect). Live: the GUI at -model 3278-4-E against VM drew 43 rows"
   status: partial
-  gap: "only 3278 names are accepted: -model 3279-4, 3279-4-E and a bare 4 are refused as unknown models (core/src/termtype.ts:48), so no 3279 terminal type can be advertised; and the default is 3278-2-E (24x80 alternate), where x3270's is 3279-4-E (43x80 alternate)"
+  gap: "only 3278 names are accepted (3279-N and a bare N are refused, core/src/termtype.ts:48), so the IBM-3279-2/3 types x3270 sends in color mode cannot be advertised; and the default is 3278-2-E (24x80 alternate), where x3270's 3279-4 goes out as IBM-3278-4-E (43x80) (Common/telnet.c:2103-2104)"
   evidence:
-    code: [packages/gui/src/args.ts:117, packages/gui/src/menu.ts:310, packages/core/src/termtype.ts:48]
-    tests: [packages/gui/test/args.test.ts, packages/gui/test/menu.test.ts, packages/core/test/termtype.test.ts]
+    code: [packages/gui/src/args.ts:117, packages/gui/src/connectDialog.ts:17, packages/gui/src/menu.ts:310, packages/core/src/termtype.ts:48]
+    tests: [packages/gui/test/args.test.ts, packages/gui/test/connectDialog.test.ts, packages/gui/test/menu.test.ts, packages/core/test/termtype.test.ts]
     live: "The Electron GUI against both hosts — verified 2026-09-14"
   browser: "the gateway's -model flag and the Alt-M picker"
   others: {tui: "-model, or the no-host prompt's Model question", cli: "-model; Set(model,...)"}
@@ -689,9 +689,10 @@
   covers: [menu:extendedDsOption, resource:extendedDataStream]
   x3270: "Options → Toggles → Extended Data Stream (disabled while connected; turning it off drops the oversize, x3270/menubar.c:2153-2171); extendedDataStream resource, on by default (x3270/resources.c:366-367)"
   gui: "flag: -model with or without -E; menu: Model → 3278-N (off) or 3278-N-E (on); a non -E choice drops the oversize to None and says so, as x3270's toggle drops it"
-  status: ours
+  status: partial
+  gap: "under a non -E model, Model → Oversize → Auto stays enabled and, when chosen, is refused with the command-line remedy text (gui/src/menu.ts:235-236, core/src/geometry.ts:144), where x3270 greys the Oversize item out (x3270/menubar.c:2162-2166)"
   evidence:
-    code: [packages/gui/src/menu.ts:310, packages/core/src/termtype.ts:48, packages/frontend/src/geometryChoice.ts:64]
+    code: [packages/gui/src/menu.ts:310, packages/gui/src/menu.ts:236, packages/core/src/geometry.ts:144, packages/core/src/termtype.ts:48, packages/frontend/src/geometryChoice.ts:64]
     tests: [packages/gui/test/menu.test.ts, packages/core/test/termtype.test.ts, packages/frontend/test/geometryChoice.test.ts]
     live: unwitnessed
   browser: "the same -E and non -E models in the Alt-M picker"
@@ -701,7 +702,7 @@
   title: 3278 monochrome or 3279 color mode, and -mono
   covers: [menu:m3278Option, menu:m3279Option, option:-mono, resource:normalColor, resource:inputColor, resource:boldColor]
   x3270: "Options → Toggles → 3278 (mono) / 3279 (color) radio, disabled while connected (x3270/menubar.c:2310-2328); -mono (no color at all, and those items hidden); 3278 mode draws in normalColor/inputColor/boldColor, green by default (x3270/resources.c:234-239), and reports no colors in Query Reply (Common/sf.c:747-753)"
-  gui: "none: the canvas always draws a 3279 in color; -scheme green is a green palette, not 3278 mode"
+  gui: "none: the canvas always draws a 3279 in color; -scheme green is a green palette, not 3278 mode. x3270's choice also changes the advertised terminal type for models 2 and 3 (IBM-3279-N, Common/telnet.c:2103-2104). Core's resolve has mode3279 (core/src/render.ts:161), which the TUI passes (tui/src/app.ts:583) and the GUI never does"
   status: missing
   browser: "none"
   others: {tui: "--colors 0 draws monochrome"}
@@ -709,10 +710,10 @@
   area: display
   title: Color scheme
   covers: [option:-scheme, menu:colorsOption, resource:schemeList]
-  x3270: "Options → Color Scheme menu, switching live (enabled only in 3279 mode, x3270/menubar.c:2466-2498); -scheme; schemeList names the menu's schemes (default, reverse, bright, cpe, GreenScreen and the old-* set, x3270/fb-x3270:49-105)"
+  x3270: "Options → Color Scheme menu, switching live (enabled only in 3279 mode, x3270/menubar.c:2466-2498), listing schemeList's Default 3279 and Reverse (x3270/fb-x3270:104-105); -scheme takes any colorScheme.<name> resource, including bright, cpe, GreenScreen and the old-* set (x3270/fb-x3270:49-103)"
   gui: "flag: -scheme default|3279|x3270|green (greenscreen accepted). Live: all three of default, 3279 and green drawn by the GUI connected to VM"
   status: partial
-  gap: "flag only: no menu or preference, so the scheme cannot change while running; no reverse, bright, cpe or user-defined (colorScheme.<name>, schemeList) schemes; and our 'default' is a different palette from x3270's 'default', which is our 'x3270'"
+  gap: "flag only, no menu, so the scheme cannot change while running; no reverse, cpe or user-defined (colorScheme.<name>, schemeList) schemes; our 'default' is not x3270's, and our 'x3270' is c3270's rgbmap, which differs from x3270's colorScheme.default (x3270/fb-x3270:49-54) at F4 (limegreen against X11 lime)"
   evidence:
     code: [packages/gui/src/args.ts:122, packages/frontend/src/palette.ts:184, packages/canvas/src/drawlist.ts:103]
     tests: [packages/gui/test/args.test.ts, packages/frontend/test/palette.test.ts, packages/canvas/test/drawlist.test.ts]
@@ -722,9 +723,9 @@
 - id: custom-colors
   area: display
   title: Screen and selection background colors
-  covers: [resource:colorBackground, resource:selectBackground]
-  x3270: "colorBackground (black) and selectBackground (dim gray) resources (x3270/resources.c:230-233), also set by a scheme's fields 17-18 (x3270/screen.c:4174-4177)"
-  gui: "none: the background comes from the -scheme table and the selection is drawn by inverting (difference compositing)"
+  covers: [resource:colorBackground, resource:selectBackground, resource:qrBgColor]
+  x3270: "colorBackground (black) and selectBackground (dim gray) resources (x3270/resources.c:230-233), also set by a scheme's fields 17-18 (x3270/screen.c:4174-4177); qrBgColor adds a default background color to Query Reply (Color) (Common/sf.c:756-765)"
+  gui: "none: the background comes from the -scheme table and the selection is drawn by inverting (difference compositing); Query Reply deliberately omits the background color (core/src/queryreply.ts:368-371)"
   status: missing
   browser: "none"
 - id: highlight-bold
@@ -734,9 +735,9 @@
   x3270: "highlightBold resource, off by default (x3270/resources.c:346-347): in 3279 mode intensified fields are bold only if set; in 3278 mode always (x3270/screen.c:706-712)"
   gui: "none: an intensified field is drawn in its color (red or white) and never bold, which is x3270's 3279 default"
   status: partial
-  gap: "matches x3270's 3279-mode default (not bold); there is no flag or preference to turn bold on"
+  gap: "matches x3270's 3279-mode default for intensified FIELDS (not bold), but has no flag to turn bold on; and x3270 always draws the extended Intensify highlight (SA/SFE) bold by overstrike, whatever highlightBold says (x3270/screen.c:2917-2921), where ours never draws it: drawlist.ts:115 sets intensify and blit.ts never reads it"
   evidence:
-    code: [packages/core/src/render.ts:188, packages/canvas/src/blit.ts:129]
+    code: [packages/core/src/render.ts:188, packages/canvas/src/drawlist.ts:115, packages/canvas/src/blit.ts:129]
     tests: [packages/core/test/render.test.ts, packages/canvas/test/blit.test.ts]
   browser: "the same canvas"
 - id: field-highlight-colors
@@ -782,7 +783,7 @@
   title: Host code page
   covers: [option:-codepage, option:-charset, menu:codepageOption, resource:charset, resource:charsetList, resource:sbcsCgcsgid]
   x3270: "Options → Code Page menu, from charsetList (x3270/menubar.c:2502-2538, x3270/fb-x3270:107); -codepage, with -charset an alias (x3270/x3270.c:156, :159); sbcsCgcsgid overrides the reported CGCSGID"
-  gui: "none: cp037 only (core/src/codepages/cp037.ts; README Staging item 16)"
+  gui: "none: cp037 only, where x3270 defaults to 'bracket' (Common/codepage.c:358); the canvas glyph path (canvas/src/cg.ts:89) is cp037-fixed and bypasses core's CodePage. At the defaults the two clients disagree on [ and ]: bracket puts them at 0xAD/0xBD (Common/unicode.c:293), ours at 0xBA/0xBB. README Staging item 16"
   status: missing
   browser: "none"
 - id: dbcs
@@ -894,9 +895,8 @@
   title: Iconify or restore the window
   covers: [action:WindowState]
   x3270: "WindowState(Iconic|Normal), from a keymap or a script (x3270/screen.c:6746)"
-  gui: "the window manager's own minimise control only"
-  status: partial
-  gap: "no action, key or script command iconifies or restores the window; only the platform's own title-bar control"
+  gui: "none: no action, key or script command; only the platform's own title-bar minimise control"
+  status: missing
   browser: "n/a: a page cannot minimise its browser window"
 - id: icon
   area: display
@@ -921,8 +921,8 @@
 - id: menu-bar
   area: display
   title: Hide the menu bar, and pop up menus with a mouse chord
-  covers: [resource:menuBar, xaction:HandleMenu]
-  x3270: "menuBar resource, on by default (x3270/resources.c:302-303); Ctrl-Button1/2/3 pop up the File, Options and Connect/Macros menus (HandleMenu, x3270/fb-x3270:195-197)"
+  covers: [resource:menuBar, xaction:HandleMenu, menu:togglesOption]
+  x3270: "menuBar resource, on by default (x3270/resources.c:302-303); the Options → Toggles submenu (x3270/menubar.c:2354-2357); Ctrl-Button1/2/3 pop up the File, Options and Connect/Macros menus (HandleMenu, x3270/fb-x3270:195-197)"
   gui: "menu bar always shown; Alt-M pops up the Model menu alone"
   status: partial
   gap: "the menu bar is always shown (x3270's default) and cannot be hidden, and no mouse chord pops up a menu; only Alt-M, for the Model menu"
@@ -934,7 +934,7 @@
   area: display
   title: Select screen text with the mouse and copy it
   covers: [xaction:SelectDown, xaction:SelectMotion, xaction:SelectUp, xaction:select-start, xaction:select-end, xaction:set-select]
-  x3270: "Button1 drag selects (SelectDown/SelectMotion/SelectUp, x3270/fb-x3270:198-208), rectangular on a 3270 screen (x3270/select.c:524), and the release owns PRIMARY; SelectUp's single click MOVES THE CURSOR, a double click selects a word and a triple click a line (x3270/select.c:749-757); select-start/select-end/set-select are xterm-style alternatives"
+  x3270: "Button1 drag selects (SelectDown/SelectMotion/SelectUp, x3270/fb-x3270:198-208), rectangular on a 3270 screen (x3270/select.c:524), and the release owns PRIMARY; SelectUp's single click MOVES THE CURSOR, a double click selects a word and a triple click a line (x3270/select.c:749-757); Ctrl-C runs set-select(CLIPBOARD), x3270's own copy key (x3270/fb-x3270:327); select-start/select-end are xterm-style alternatives"
   gui: "mouse: a primary-button drag selects a rectangle, then menu: Edit → Copy (Cmd-C on macOS, Ctrl-Shift-C elsewhere). Offline witness only: select.mjs under Xvfb, clipboard read back"
   status: partial
   gap: "a click does not move the cursor, double and triple clicks select nothing, and a selection is copied only by Edit → Copy (no PRIMARY selection on Linux)"
@@ -947,7 +947,7 @@
   area: display
   title: Extend, keyboard-select, select all and unselect
   covers: [xaction:start-extend, xaction:select-extend, xaction:move-select, xaction:KybdSelect, xaction:SelectAll, xaction:Unselect]
-  x3270: "Button3 extends the selection (start-extend/select-extend, x3270/fb-x3270:205-206); Shift-arrows run KybdSelect (:211-214, x3270/select.c:1109); SelectAll, Unselect and move-select are bindable (x3270/select.c:480, :1191, :1201)"
+  x3270: "Button3 extends the selection (start-extend/select-extend, x3270/fb-x3270:205-206); Shift-arrows run KybdSelect (:211-214, x3270/select.c:1109); Ctrl-A runs SelectAll and Alt-U/Meta-U Unselect by default (x3270/fb-x3270:324-326); move-select is bindable (x3270/select.c:480)"
   gui: none
   status: missing
   browser: "none"
@@ -963,7 +963,7 @@
   area: display
   title: Cut (copy the selection and blank its unprotected cells)
   covers: [xaction:Cut]
-  x3270: "Cut() copies the selection and erases its unprotected cells, setting MDT (x3270/select.c:1044)"
+  x3270: "Ctrl-X runs Cut(CLIPBOARD) by default (x3270/fb-x3270:333): it copies the selection and erases its unprotected cells, setting MDT (x3270/select.c:1044)"
   gui: none
   status: missing
   browser: "none"
@@ -971,11 +971,11 @@
   area: display
   title: Rectangular selection in NVT mode
   covers: [toggle:rectangleSelect, menu:rectangleSelectOption]
-  x3270: "Options → Toggles → Select by Rectangles; rectangleSelect toggle, off by default (x3270/resources.c:389-390), which matters only on a screen that has never been in 3270 mode: a 3270 screen is always selected by rectangles (x3270/select.c:524)"
+  x3270: "Options → Toggles → Select by Rectangles; rectangleSelect toggle, off by default (x3270/resources.c:389-390), which matters only while the connection has not been in 3270 mode (!ever_3270, x3270/select.c:524, :1688); otherwise selection is always by rectangles"
   gui: "n/a: selection is always rectangular"
   status: proposed-skipped
   category: n/a
-  reason: "the toggle only changes selection on an NVT screen, which this client never displays, and our 3270-screen selection is already rectangular as x3270's is."
+  reason: "the toggle only changes selection while a connection has not yet been in 3270 mode, a screen this client never displays, and our selection is always rectangular as x3270's is once in 3270 mode."
 - id: select-url
   area: display
   title: Open a selected URL in the browser
@@ -988,7 +988,7 @@
   area: display
   title: Paste text into the screen
   covers: [xaction:insert-selection]
-  x3270: "Button2 or Shift-Insert runs insert-selection(PRIMARY) (x3270/fb-x3270:202-209); by default with overlayPaste, so newline drops to the next row at the starting column and protected cells are skipped (Common/kybd.c:1215-1227, :3781-3790)"
+  x3270: "Ctrl-V runs insert-selection(CLIPBOARD) (x3270/fb-x3270:331); Button2 or Shift-Insert runs insert-selection(PRIMARY) (:202-209). overlayPaste is on by default: a character landing on a protected cell is discarded and the cursor moves on (Common/kybd.c:1215-1227), and a newline drops to the next row (:3932-3950), at the starting column (:3781-3790)"
   gui: "menu: Edit → Paste (Cmd-V on macOS, Ctrl-Shift-V elsewhere), from the clipboard"
   status: partial
   gap: "follows x3270's overlayPaste-off rules, not its default (see paste-modes): a newline goes to the next unprotected field and a protected cell stops the paste with a warning; no middle-click or PRIMARY paste. No live paste witness"
@@ -1022,3 +1022,12 @@
   status: proposed-skipped
   category: n/a
   reason: "Redraw repairs a damaged X window, and our canvas repaints the whole screen on every host frame and every resize."
+- id: underscore-toggle
+  area: display
+  title: Underscore toggle (c3270's underlining in curses)
+  covers: [toggle:underscore]
+  x3270: "registered as a toggle (Common/toggles.c:101), but x3270 never reads it; only c3270/wc3270 do (c3270/screen.c:1406)"
+  gui: "n/a"
+  status: proposed-skipped
+  category: n/a
+  reason: "x3270 never reads it; only c3270/wc3270 do (c3270/screen.c:1406)."
