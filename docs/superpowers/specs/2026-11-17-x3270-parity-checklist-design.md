@@ -165,3 +165,29 @@ point at checklist rows, so there is one backlog. HANDOFF's store plan points at
 
 Building any feature; the store submission (piece 3); any change to `package.yml` or the tag
 workflow beyond printing the verdict; moving the pinned x3270 version.
+
+## Amendment 2026-11-17: what measuring 4.5ga6 changed
+
+Measured with a prototype extractor while writing the plan:
+
+- **`x3270.man` cannot be the cross-check.** In 4.5ga6 it is a 24-line stub that points to the
+  x3270 Wiki (https://x3270.miraheze.org). The wiki is the cross-check instead, run by hand when
+  the inventory is generated: its command-line options page and `Category:Actions`. Each
+  difference is explained in `docs/parity/x3270-inventory-crosscheck.md` (committed). The wiki
+  tracks 4.6, so names newer than 4.5 are expected differences, not extractor errors.
+- **x3270's options are `base_options[]` and `option_help[]` in `x3270/x3270.c`.** In x3270,
+  `register_opts()` is a no-op (`x3270/x3270.c:1356`), so the `opt_t` tables other modules register
+  do not reach it. The Xt toolkit options (`-geometry`, `-display`, `-fg`, …) are libXt's, not
+  x3270's. They are in no x3270 table, so the crosscheck file lists them as X11-only. They are not
+  inventory names.
+- **A fifth kind, `xaction:`**: the pure Xt actions in `x3270/xactions.c` (`Cut`,
+  `insert-selection`, `select-start`, …). They are bindable in keymaps, so a user can reach them.
+  x3270's private `PA-` actions are left out.
+- **`action:` leaves out `ACTION_HIDDEN` entries**, which x3270 itself hides from its action
+  list. Action names are resolved through `include/names.h` and the few `#define`s a source makes
+  for itself (`Common/task.c`).
+- **The linked sources** are the objects in `x3270/x3270_files.mk` and in `Common/`'s
+  `lib3270_files.mk`, `lib3270i_files.mk` and `lib32xx_files.mk`, resolved to `x3270/*.c` or
+  `Common/*.c`. The stubs library is left out. `favicon.o` is generated and has no source.
+- **Measured: 129 sources, 470 names**: 100 `action`, 21 `xaction`, 67 `option`, 209 `resource`
+  and 73 `menu`. The plan and the tests must not hard-code these counts.
