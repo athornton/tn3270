@@ -50,7 +50,7 @@ export function toHost(bytes: Uint8Array): Uint8Array {
  * in once for the TUI, GUI and web gateway, so both engines' reads and writes there go through
  * it and cannot diverge. The CLI's `Runner.transfer` (`cli/src/runner.ts`) does not call
  * `startTransfer` -- it has its own blocking loop and its own file I/O -- so it calls this
- * function itself, at its own one wrapping point; either caller reads the same two rules
+ * function itself, at its own one wrapping point; either caller uses the same rule and wrapper
  * (`convertsLineEnds`, `withLineEnds`), which is what keeps them from disagreeing.
  */
 export function withLineEnds(files: TransferFiles): TransferFiles {

@@ -1921,7 +1921,7 @@ describe('Transfer(): a transfer that NEVER STARTED', () => {
  *
  * `startTransfer` (frontend/src/transferRun.ts) got this wiring in the previous commit, but
  * `Runner.transfer` (this file's subject) builds its own `CutTransfer`/`DftTransfer`, reads the
- * source directly (`runner.ts:573`) and writes the received bytes directly (`:640-641`) — it
+ * source directly (`runner.ts:580`) and writes the received bytes directly (`:647-648`) — it
  * never calls `startTransfer` at all, so an ascii CLI transfer still asked the host for `CRLF`
  * and converted nothing locally. Found in review after Task 2, not predicted by the plan.
  *
