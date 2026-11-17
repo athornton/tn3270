@@ -3,11 +3,18 @@
 // (docs/superpowers/specs/2026-11-17-x3270-parity-checklist-design.md, section 1 and its
 // amendment). Reads an x3270 source tree as TEXT ONLY: nothing in it is built or run.
 // No npm dependencies, so parity-upstream.yml runs this without `npm ci`.
+//
+// Exit codes (`main`'s return value, and `process.exitCode` when run as a script):
+//   0  success: --dir/--tag wrote the inventory, or --upstream found the recorded tag current.
+//   1  --upstream found a newer GA upstream: a notification, printed with the name/site diff.
+//   2  usage error (bad or missing arguments).
+//   3  any other error: network failure, a non-OK GitHub response, malformed JSON, an invalid
+//      --tag, or a curl/tar failure.
 
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /**
@@ -458,14 +465,26 @@ export function extractNames(read, files) {
 const GA = /^(\d+)\.(\d+)ga(\d+)$/;
 const TAG = /^\d+\.\d+(?:alpha|beta|ga)\d+$/;
 
+/** [major, minor, ga] numeric key for an `M.NgaP` tag. Throws if `t` doesn't match; callers that
+ * haven't already checked with `GA.test` (e.g. a recorded tag of unknown shape) get that thrown
+ * as a regular error, which `main` turns into exit 3. */
+function gaKey(t) {
+  const m = t.match(GA);
+  if (!m) throw new Error(`not a GA tag: ${t}`);
+  return m.slice(1).map(Number);
+}
+
+/** Numeric ordering of two GA tags by `gaKey` (negative if `a` is older than `b`, 0 if equal). */
+function compareGa(a, b) {
+  const [x, y] = [gaKey(a), gaKey(b)];
+  return x[0] - y[0] || x[1] - y[1] || x[2] - y[2];
+}
+
 /** The newest `M.NgaP` tag in `tags`, or undefined if none is a GA tag. Alpha/beta tags are
- * ignored; GA tags are ordered numerically (not lexically: `ga10` sorts after `ga6`). */
+ * ignored; GA tags are ordered by `compareGa`'s numeric key (not lexically: `ga10` sorts after
+ * `ga6`, and `4.10` after `4.9`) -- the same key a recorded tag is compared against in `main`. */
 export function newestGa(tags) {
-  const key = (t) => t.match(GA).slice(1).map(Number);
-  return tags.filter((t) => GA.test(t)).sort((a, b) => {
-    const [x, y] = [key(a), key(b)];
-    return x[0] - y[0] || x[1] - y[1] || x[2] - y[2];
-  }).at(-1);
+  return tags.filter((t) => GA.test(t)).sort(compareGa).at(-1);
 }
 
 /** Renders an inventory as stable (sorted, deterministic) JSON with a trailing newline, the
@@ -505,50 +524,119 @@ export function inventory(root) {
 /** Downloads and unpacks the x3270 GitHub release tarball for `tag` into a fresh temp
  * directory; returns the extracted tree's root. `tag` is validated against `TAG` before it ever
  * reaches a URL or a shell argument. curl and tar both run with the temp dir as cwd, never the
- * untrusted tree itself. */
+ * untrusted tree itself. On a curl/tar failure the partial download directory is removed before
+ * the error propagates. A caller of `fetchTag` directly (rather than `withTag`) is responsible
+ * for removing the returned root's parent directory itself once done with it. */
 export function fetchTag(tag) {
   if (!TAG.test(tag)) throw new Error(`not an x3270 tag: ${tag}`);
   const dir = mkdtempSync(join(tmpdir(), 'x3270-'));
-  const tgz = join(dir, 'src.tgz');
-  const url = `https://github.com/pmattes/x3270/archive/refs/tags/${tag}.tar.gz`;
-  for (const [cmd, args] of [['curl', ['-fsSL', '-o', tgz, url]], ['tar', ['-xzf', tgz, '-C', dir]]]) {
-    const r = spawnSync(cmd, args, { cwd: dir, stdio: ['ignore', 'inherit', 'inherit'] });
-    if (r.status !== 0) throw new Error(`${cmd} failed for ${url}`);
+  try {
+    const tgz = join(dir, 'src.tgz');
+    const url = `https://github.com/pmattes/x3270/archive/refs/tags/${tag}.tar.gz`;
+    for (const [cmd, args] of [
+      ['curl', ['-fsSL', '-o', tgz, url]],
+      // --no-same-owner: we're not root, and don't want the archive's original ownership
+      // restored anyway. Extraction otherwise relies on tar's own default refusal to write a
+      // member whose path has a '..' segment or is absolute -- true of GNU tar, and these are
+      // plain GitHub release tarballs, not an attacker-chosen archive format or flags.
+      ['tar', ['-xzf', tgz, '-C', dir, '--no-same-owner']],
+    ]) {
+      const r = spawnSync(cmd, args, { cwd: dir, stdio: ['ignore', 'inherit', 'inherit'] });
+      if (r.status !== 0) throw new Error(`${cmd} failed for ${url}`);
+    }
+    return join(dir, `x3270-${tag}`);
+  } catch (e) {
+    rmSync(dir, { recursive: true, force: true });
+    throw e;
   }
-  return join(dir, `x3270-${tag}`);
 }
 
+/** Fetches `tag` into a temp directory, calls `fn(root)`, and removes the temp directory
+ * afterward -- in a `finally`, so it's removed whether `fn` returns or throws. (A curl/tar
+ * failure's directory is already gone by the time this `finally` runs; see `fetchTag`.) */
+export function withTag(tag, fn) {
+  const root = fetchTag(tag);
+  try {
+    return fn(root);
+  } finally {
+    rmSync(dirname(root), { recursive: true, force: true });
+  }
+}
+
+const GITHUB_TAGS_URL = 'https://api.github.com/repos/pmattes/x3270/tags';
+
+function githubHeaders() {
+  const headers = { accept: 'application/vnd.github+json' };
+  if (process.env.GITHUB_TOKEN) headers.authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+  return headers;
+}
+
+async function fetchTagsPage(page) {
+  const r = await fetch(`${GITHUB_TAGS_URL}?per_page=100&page=${page}`, { headers: githubHeaders() });
+  if (!r.ok) {
+    const body = await r.json().catch(() => ({}));
+    const limited = r.headers.get('x-ratelimit-remaining') === '0';
+    const reason = limited ? 'rate limited' : (body?.message ?? r.statusText);
+    throw new Error(`GitHub tags: HTTP ${r.status} (${reason})`);
+  }
+  const data = await r.json();
+  if (!Array.isArray(data)) throw new Error('GitHub tags: unexpected response shape (not an array)');
+  return data.map((t) => t.name);
+}
+
+// GitHub lists a repo's tags newest-first, so one page of 100 almost always already contains the
+// newest GA. A second page is fetched anyway -- cheap insurance against a repo with over 100
+// tags since the last GA -- but only when the first page came back full (100 items); a short
+// first page proves there's no more to fetch.
 async function upstreamTags() {
-  const r = await fetch('https://api.github.com/repos/pmattes/x3270/tags?per_page=100', {
-    headers: { accept: 'application/vnd.github+json' },
-  });
-  if (!r.ok) throw new Error(`GitHub tags: HTTP ${r.status}`);
-  return (await r.json()).map((t) => t.name);
+  const page1 = await fetchTagsPage(1);
+  if (page1.length < 100) return page1;
+  return [...page1, ...await fetchTagsPage(2)];
 }
 
-const USAGE = 'usage: parity-extract.mjs (--dir <tree> | --tag <tag>) [--out <file>] | --upstream <committed.json>';
+const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
+const DEFAULT_OUT = resolve(SCRIPT_DIR, '..', 'docs/parity/x3270-names.json');
 
-export async function main(argv, io = { log: console.log, err: console.error }) {
+const USAGE = 'usage: parity-extract.mjs (--dir <tree> | --tag <tag>) [--out <file>] | --upstream <committed.json>\n'
+  + 'exit codes: 0 current/success, 1 newer GA found upstream, 2 usage error, 3 other error';
+
+/**
+ * @param {string[]} argv
+ * @param {{ log: (s: string) => void, err: (s: string) => void }} [io]
+ * @param {{ tags?: () => Promise<string[]> | string[], inventoryForTag?: (tag: string) => Promise<object> | object }} [deps]
+ *   Injected for testing without the network: `tags` replaces the GitHub tags fetch, and
+ *   `inventoryForTag` replaces `(tag) => withTag(tag, inventory)` (used by both --upstream and
+ *   --tag, so a test never needs a real download).
+ */
+export async function main(argv, io = { log: console.log, err: console.error }, deps = {}) {
+  const getTags = deps.tags ?? upstreamTags;
+  const getInventoryForTag = deps.inventoryForTag ?? ((tag) => withTag(tag, inventory));
   const [mode, arg, ...rest] = argv;
   try {
-    if (mode === '--upstream' && arg) {
+    if (mode === '--upstream' && arg && rest.length === 0) {
       const committed = JSON.parse(readFileSync(arg, 'utf8'));
-      const ga = newestGa(await upstreamTags());
+      const ga = newestGa(await getTags());
       if (!ga) throw new Error('no GA tag upstream');
-      if (ga === committed.tag) {
+      const cmp = compareGa(ga, committed.tag);
+      if (cmp === 0) {
         io.log(`x3270 ${ga} is the newest GA and is the one recorded`);
         return 0;
       }
-      const lines = diffNames(committed, inventory(fetchTag(ga)));
+      if (cmp < 0) {
+        throw new Error(`recorded ${committed.tag} is newer than upstream's newest GA ${ga}: the tag list looks wrong`);
+      }
+      const lines = diffNames(committed, await getInventoryForTag(ga));
       io.err(`x3270 ${ga} is newer than the recorded ${committed.tag}: regenerate with --tag ${ga}`);
       for (const l of lines) io.err(l);
       return 1;
     }
     if ((mode === '--dir' || mode === '--tag') && arg) {
-      const root = mode === '--dir' ? resolve(arg) : fetchTag(arg);
-      const outIx = rest.indexOf('--out');
-      const out = outIx >= 0 ? rest[outIx + 1] : 'docs/parity/x3270-names.json';
-      const inv = inventory(root);
+      let out = DEFAULT_OUT;
+      if (rest.length > 0) {
+        if (rest.length !== 2 || rest[0] !== '--out') { io.err(USAGE); return 2; }
+        out = rest[1];
+      }
+      const inv = mode === '--dir' ? inventory(resolve(arg)) : await getInventoryForTag(arg);
       writeFileSync(out, renderInventory(inv));
       io.log(
         `${out}: x3270 ${inv.tag}, ${inv.names.length} names, ${inv.missingSources.length} missing sources, `
@@ -560,7 +648,7 @@ export async function main(argv, io = { log: console.log, err: console.error }) 
     return 2;
   } catch (e) {
     io.err(`parity-extract: ${e.message}`);
-    return 1;
+    return 3;
   }
 }
 

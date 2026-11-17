@@ -1,7 +1,24 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
-  diffNames, extractNames, guardsByLine, linkedSources, makeVar, newestGa, parseDefines, renderInventory,
+  diffNames, extractNames, guardsByLine, linkedSources, main, makeVar, newestGa, parseDefines, renderInventory,
 } from '../../../scripts/parity-extract.mjs';
+
+/** Writes `inv` as a committed-inventory fixture to a fresh temp file, calls `fn(path)`, and
+ * removes the temp directory afterward -- so `main`'s `--upstream` tests below never touch the
+ * repo's own `docs/parity/x3270-names.json`. */
+async function withCommitted(inv: unknown, fn: (path: string) => Promise<void> | void) {
+  const dir = mkdtempSync(join(tmpdir(), 'parity-upstream-test-'));
+  try {
+    const path = join(dir, 'committed.json');
+    writeFileSync(path, JSON.stringify(inv));
+    await fn(path);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
 
 // Real text (suite3270 4.5ga6): x3270/Makefile.obj.in:86 and lib/configure.in:260. linkedSources
 // checks the real tree against these before resolving anything, so every linkedSources fixture
@@ -381,6 +398,18 @@ describe('newestGa', () => {
     expect(newestGa(['4.6alpha1', '4.5ga6', '4.5ga10', '4.4ga6', '4.5beta4'])).toBe('4.5ga10');
     expect(newestGa(['4.6alpha1'])).toBeUndefined();
   });
+
+  it('orders by minor version before the ga number', () => {
+    expect(newestGa(['4.6ga1', '4.5ga6'])).toBe('4.6ga1');
+  });
+
+  it('orders the major version numerically, not lexically (4.10 sorts after 4.9)', () => {
+    expect(newestGa(['4.10ga1', '4.9ga9'])).toBe('4.10ga1');
+  });
+
+  it('ignores a three-part version, which is not an M.Nga P tag', () => {
+    expect(newestGa(['3.3.15ga9'])).toBeUndefined();
+  });
 });
 
 describe('renderInventory', () => {
@@ -402,5 +431,94 @@ describe('diffNames', () => {
     expect(diffNames(a as never, b as never)).toEqual([
       '+ action:C (x.c:3)', '- action:B (x.c:2)', '~ action:A x.c:1 -> x.c:9',
     ]);
+  });
+});
+
+// main's `--upstream` decision logic, exercised with injected `tags`/`inventoryForTag` so none
+// of these tests touch the network or a real download. `inventoryForTag`, when not overridden,
+// is `(tag) => withTag(tag, inventory)`: real network and a real temp-dir fetch.
+describe('main --upstream', () => {
+  const io = () => ({ log: vi.fn(), err: vi.fn() });
+
+  it('exits 0 and logs "current" when the recorded tag is the newest GA', async () => {
+    await withCommitted({ tag: '4.5ga6', names: [] }, async (path) => {
+      const out = io();
+      const code = await main(['--upstream', path], out, { tags: async () => ['4.5ga6'] });
+      expect(code).toBe(0);
+      expect(out.log).toHaveBeenCalledWith(expect.stringContaining('is the newest GA and is the one recorded'));
+      expect(out.err).not.toHaveBeenCalled();
+    });
+  });
+
+  it('exits 1 with one diff line per added/removed name when a newer GA is upstream', async () => {
+    const committed = { tag: '4.5ga6', names: [{ id: 'action:A', sites: [{ at: 'x.c:1' }] }] };
+    const newer = {
+      tag: '4.6ga1', missingSources: [], unresolved: [], nonLiteralMenuCalls: [], privateXactions: 0,
+      names: [{ id: 'action:B', sites: [{ at: 'x.c:2' }] }],
+    };
+    await withCommitted(committed, async (path) => {
+      const out = io();
+      const code = await main(['--upstream', path], out, {
+        tags: async () => ['4.5ga6', '4.6ga1'],
+        inventoryForTag: async () => newer as never,
+      });
+      expect(code).toBe(1);
+      expect(out.err).toHaveBeenCalledWith(expect.stringContaining('4.6ga1 is newer than the recorded 4.5ga6'));
+      expect(out.err).toHaveBeenCalledWith('+ action:B (x.c:2)');
+      expect(out.err).toHaveBeenCalledWith('- action:A (x.c:1)');
+    });
+  });
+
+  it("exits 3 with an error when the recorded tag is newer than upstream's newest GA", async () => {
+    await withCommitted({ tag: '4.5ga6', names: [] }, async (path) => {
+      const out = io();
+      const code = await main(['--upstream', path], out, { tags: async () => ['4.4ga1'] });
+      expect(code).toBe(3);
+      expect(out.err).toHaveBeenCalledWith(
+        expect.stringContaining("recorded 4.5ga6 is newer than upstream's newest GA 4.4ga1"),
+      );
+      expect(out.err).toHaveBeenCalledWith(expect.stringContaining('the tag list looks wrong'));
+    });
+  });
+
+  it('exits 3, and never claims the tag is current, when fetching upstream tags rejects', async () => {
+    await withCommitted({ tag: '4.5ga6', names: [] }, async (path) => {
+      const out = io();
+      const code = await main(['--upstream', path], out, {
+        tags: async () => { throw new Error('boom'); },
+      });
+      expect(code).toBe(3);
+      expect(out.log).not.toHaveBeenCalled();
+      expect(out.err).toHaveBeenCalledWith(expect.stringContaining('boom'));
+    });
+  });
+});
+
+describe('main argument handling', () => {
+  it('rejects a path-traversal --tag before any URL is built (exit 3, not a usage error)', async () => {
+    const out = { log: vi.fn(), err: vi.fn() };
+    const code = await main(['--tag', '../x'], out);
+    expect(code).toBe(3);
+    expect(out.err).toHaveBeenCalledWith(expect.stringContaining('not an x3270 tag'));
+  });
+
+  it('exits 2 with usage when --out is given with no value', async () => {
+    const out = { log: vi.fn(), err: vi.fn() };
+    const code = await main(['--dir', '/tmp/does-not-matter', '--out'], out);
+    expect(code).toBe(2);
+    expect(out.err).toHaveBeenCalledWith(expect.stringContaining('usage:'));
+  });
+
+  it('exits 2 with usage on an unrecognized extra argument', async () => {
+    const out = { log: vi.fn(), err: vi.fn() };
+    const code = await main(['--dir', '/tmp/does-not-matter', '--bogus'], out);
+    expect(code).toBe(2);
+    expect(out.err).toHaveBeenCalledWith(expect.stringContaining('usage:'));
+  });
+
+  it('exits 2 with usage for no recognized mode at all', async () => {
+    const out = { log: vi.fn(), err: vi.fn() };
+    const code = await main([], out);
+    expect(code).toBe(2);
   });
 });

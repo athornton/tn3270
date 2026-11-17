@@ -16,4 +16,19 @@ export function renderInventory(inv: Inventory): string;
 export function diffNames(oldInv: Inventory, newInv: Inventory): string[];
 export function inventory(root: string): Inventory;
 export function fetchTag(tag: string): string;
-export function main(argv: string[], io?: { log: (s: string) => void; err: (s: string) => void }): Promise<number>;
+export function withTag<T>(tag: string, fn: (root: string) => T): T;
+
+/** Injected deps for `main`, so its --upstream decision logic is testable without the network:
+ * `tags` replaces the GitHub tags fetch, `inventoryForTag` replaces
+ * `(tag) => withTag(tag, inventory)` (used by both --upstream and --tag). */
+export interface MainDeps {
+  tags?: () => Promise<string[]> | string[];
+  inventoryForTag?: (tag: string) => Promise<Inventory> | Inventory;
+}
+/** Exit codes: 0 current/success, 1 a newer GA was found upstream (notification), 2 usage
+ * error, 3 any other error (network, HTTP, bad JSON, bad tag, curl/tar failure). */
+export function main(
+  argv: string[],
+  io?: { log: (s: string) => void; err: (s: string) => void },
+  deps?: MainDeps,
+): Promise<number>;
