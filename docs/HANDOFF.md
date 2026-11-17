@@ -1,13 +1,37 @@
-# Handoff — state as of 2026-11-17 (x3270 PARITY CHECKLIST MERGED (`df62e6f`); THE PACKAGED GUI'S DROPPED FIRST ARGUMENT AND SYSTEM-WIDE Ctrl-] FIXED (`gui-argv-and-quit`): 413 x3270 names, 158 checklist rows, `parity.mjs gate` FAIL 157 blocking; 0.1.4 RELEASED: npm by the tag workflow with provenance, and the first GitHub release with the seven installers, SHA256SUMS and scriv notes; macOS CODE SIGNING MERGED (`db5a93d`; released installers up to 0.1.4 are UNSIGNED), Windows CI signing DROPPED for the Microsoft Store; STORE PROBE MERGED (`559ea78`); README AUDIT + FIXES MERGED (`ae8724f`); WEB RECEIVE DOWNLOADS ON COMPLETION (`4a940fe`, live-verified); `Exist` PER DIRECTION (`f533bff`); next: the user triages the parity checklist's proposed-* and unwitnessed `ours` rows, then the store roadmap)
+# Handoff — state as of 2026-11-17 (PARITY TRIAGED, gate 113 blocking; ROADMAP = README item 15a-15h, next 15a; x3270 PARITY CHECKLIST MERGED (`df62e6f`); THE PACKAGED GUI'S DROPPED FIRST ARGUMENT AND SYSTEM-WIDE Ctrl-] FIXED (`gui-argv-and-quit`): 413 x3270 names, 158 checklist rows, `parity.mjs gate` FAIL 157 blocking; 0.1.4 RELEASED: npm by the tag workflow with provenance, and the first GitHub release with the seven installers, SHA256SUMS and scriv notes; macOS CODE SIGNING MERGED (`db5a93d`; released installers up to 0.1.4 are UNSIGNED), Windows CI signing DROPPED for the Microsoft Store; STORE PROBE MERGED (`559ea78`); README AUDIT + FIXES MERGED (`ae8724f`); WEB RECEIVE DOWNLOADS ON COMPLETION (`4a940fe`, live-verified); `Exist` PER DIRECTION (`f533bff`); next: the user triages the parity checklist's proposed-* and unwitnessed `ours` rows, then the store roadmap)
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log). For the most recent work, read the spec and plan the
 latest START HERE entry names. Each finished feature has its own pair under `docs/superpowers/`.
 
-## START HERE — LATEST FIRST; NEXT: TRIAGE THE PARITY CHECKLIST'S proposed-* AND unwitnessed `ours` ROWS, THEN THE STORE ROADMAP (REPLACES README *Remaining* 15-22)
+## START HERE — LATEST FIRST; NEXT: README *Staging* item 15a (CORRECTNESS), THE FIRST OF THE EIGHT STORE-PARITY MILESTONES
 
-**2026-11-17, LATEST: TWO GUI FIXES FOUND BY THE CHECKLIST**, branch `gui-argv-and-quit`
+**2026-11-17, LATEST: PARITY TRIAGED, FOUR KEYS WITNESSED FROM THE GUI, THE ROADMAP WRITTEN**
+(branch `parity-triage`). The gate is `parity gate: FAIL, 113 blocking`; 45 of 158 rows pass
+(`docs/parity.md`'s header has the counts).
+- **The user's triage (2026-11-17):** 17 mechanical skips, 7 declined skips and 3 deferrals
+  accepted; script-port and script-cookie REJECTED as skips and deferred instead ("someday having
+  GUI scripting may be useful"), and the 11 scripting rows that need a GUI scripting interface
+  deferred with them. No other deferrals.
+- **GUI live witnesses** for sysreq (by CLICKING the keypad button), dup, field-mark (VM and TK5)
+  and reconnect (VM, with a control), through a recording relay: `docs/live-testing.md`, *The four
+  keys and reconnect, from the GUI against VM/370 and TK5 — 2026-11-17*, which has the script.
+  Still `ours` + unwitnessed: tls-verify, devname, bind-limit. The user has arranged access to a
+  modern z/VM (not yet reached), which may witness all three.
+- **The roadmap is README *Staging* item 15, milestones 15a-15h** (correctness; the rest of the
+  GUI; code pages; the mouse; printing and traces; connection and TLS; display fidelity; keyboard
+  extras), replacing the 2026-11-06 items 15-17; items 18-22 keep their numbers.
+- **Merged to `main` and pushed earlier today:** `e48595f`, with Ctrl-Q quitting in the GUI and TUI
+  (File -> Quit on Linux and Windows; Quit ends the TUI's Ctrl-K list; Ctrl-] kept) and the parity
+  checker refusing an escaping citation on Windows (`eee3773`: `relative()` uses `\` there, so
+  `startsWith('../')` never fired; windows-latest had failed both escape tests).
+- **The environment was reset during the session:** `gh` lost its login (`~/.config/gh` gone),
+  `scriv`/`uvx` are no longer installed (two real-scriv tests skip locally; CI runs them), and the
+  Hercules hosts had to be restarted by the user. VM is slow to free a terminal between sessions:
+  a back-to-back VM run may show only Hercules' banner and time out, and the next works.
+
+**2026-11-17, EARLIER: TWO GUI FIXES FOUND BY THE CHECKLIST**, branch `gui-argv-and-quit`
 (`git log --oneline df62e6f..gui-argv-and-quit`): the PACKAGED app no longer drops its first
 argument (`userArgv` in `gui/src/electronSwitches.ts`, slicing at 1 unless `process.defaultApp`, and
 dropping a macOS `-psn_` argument), and Ctrl-] quits only from our own windows (`quitChord.ts`, a
@@ -42,8 +66,8 @@ the gate and how to regenerate on a new GA.
 **Next, in order:** (1) the user triages the 29 `proposed-*` rows (26 `proposed-skipped`, 3
 `proposed-deferred`) area by area; (2) the user accepts or rejects the 7 `ours` rows whose only
 evidence is `live: unwitnessed` — `reconnect`, `devname`, `bind-limit`, `tls-verify`, `sysreq`,
-`dup`, `field-mark`; (3) whatever is still `missing`/`partial` after that is the store roadmap, which
-replaces README *Remaining* 15-22 (separate work, no spec yet).
+`dup`, `field-mark`; (3) whatever is still `missing`/`partial` after that is the store roadmap, now README
+*Staging* item 15a-15h (written 2026-11-17, see the LATEST entry).
 
 ### FOUND BY THE CHECKLIST (1-2 FIXED SINCE, 3-13 OPEN)
 

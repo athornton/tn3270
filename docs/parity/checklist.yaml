@@ -33,12 +33,12 @@
   title: Reconnect to the last host
   covers: [action:Reconnect]
   x3270: "Reconnect() action (keymap or script; no menu item)"
-  gui: "key: Enter or Clear while disconnected (a deliberate divergence: x3270 binds no key)"
+  gui: "key: Enter or Clear while disconnected (a deliberate divergence: x3270 binds no key). Live from the GUI on VM 2026-11-17: Enter after a dropped line opened a second connection and VM repainted; the control without Enter stayed disconnected"
   status: ours
   evidence:
     code: [packages/frontend/src/actions.ts:147, packages/core/src/session.ts:987]
     tests: [packages/frontend/test/actions.test.ts, packages/core/test/session.test.ts]
-    live: unwitnessed
+    live: "The four keys and reconnect, from the GUI against VM/370 and TK5 — 2026-11-17"
   browser: "the same Enter/Clear reconnect, through the shared applyAction"
   others: {tui: "Enter or Ctrl-C while disconnected", cli: "Reconnect()"}
 - id: auto-reconnect
@@ -339,12 +339,12 @@
   title: Sys Req key
   covers: [action:SysReq]
   x3270: "keypad Sys Req button; the Sys_Req keysym (x3270/xkybd.c:394); SysReq() action"
-  gui: "keypad SysRq button (no chord, as c3270). Its only live run was the CLI on a classic session (not a GUI witness); the TN3270E IAC AO form and the button click have none"
+  gui: "keypad SysRq button (no chord, as c3270). Live from the GUI 2026-11-17 by CLICKING the keypad button, on VM and TK5 (classic sessions); the TN3270E IAC AO form is still unwitnessed (no TN3270E host)"
   status: ours
   evidence:
     code: [packages/frontend/src/keypad.ts:102, packages/frontend/src/actions.ts:189, packages/core/src/session.ts:1889]
     tests: [packages/core/test/session.test.ts, packages/core/test/tn3270e-session.test.ts, packages/frontend/test/actions.test.ts, packages/canvas/test/keypadUi.test.ts]
-    live: unwitnessed
+    live: "The four keys and reconnect, from the GUI against VM/370 and TK5 — 2026-11-17"
   browser: "the keypad overlay's SysRq button"
   others: {tui: "Ctrl-K list", cli: "SysReq()"}
 - id: dup
@@ -352,12 +352,12 @@
   title: Dup key
   covers: [action:Dup]
   x3270: "keypad Dup button; Dup() action (writes 0x1c, sets MDT, tabs; Common/kybd.c:2763)"
-  gui: "key: Ctrl-D (c3270's chord); keypad Dup button. Its only live run was the CLI (not a GUI witness), and Dup's tab is unwitnessed (single-field panel)"
+  gui: "key: Ctrl-D (c3270's chord); keypad Dup button. Live from the GUI 2026-11-17 via Ctrl-D on VM and TK5; Dup's tab is still unobserved (both logon panels have one input field), and the Dup button was not clicked"
   status: ours
   evidence:
     code: [packages/canvas/src/keys.ts:128, packages/frontend/src/keypad.ts:98, packages/core/src/keyboard.ts:126]
     tests: [packages/core/test/keyboard.test.ts, packages/canvas/test/keys.test.ts, packages/frontend/test/actions.test.ts, packages/canvas/test/keypadUi.test.ts, packages/frontend/test/keypad.test.ts]
-    live: unwitnessed
+    live: "The four keys and reconnect, from the GUI against VM/370 and TK5 — 2026-11-17"
   browser: "the same Ctrl-D and keypad button"
   others: {tui: "Ctrl-D", cli: "Dup()"}
 - id: field-mark
@@ -365,12 +365,12 @@
   title: Field Mark key
   covers: [action:FieldMark]
   x3270: "keypad Field Mark button; FieldMark() action (writes 0x1e and advances; Common/kybd.c:2802)"
-  gui: "key: Ctrl-F (c3270's chord); keypad FldMk button. Its only live run was the CLI (not a GUI witness)"
+  gui: "key: Ctrl-F (c3270's chord); keypad FldMk button. Live from the GUI 2026-11-17 via Ctrl-F on VM and TK5; the FldMk button was not clicked"
   status: ours
   evidence:
     code: [packages/canvas/src/keys.ts:129, packages/frontend/src/keypad.ts:107, packages/core/src/keyboard.ts:164]
     tests: [packages/core/test/keyboard.test.ts, packages/canvas/test/keys.test.ts, packages/frontend/test/actions.test.ts, packages/canvas/test/keypadUi.test.ts, packages/frontend/test/keypad.test.ts]
-    live: unwitnessed
+    live: "The four keys and reconnect, from the GUI against VM/370 and TK5 — 2026-11-17"
   browser: "the same Ctrl-F and keypad button"
   others: {tui: "Ctrl-F", cli: "FieldMark()"}
 - id: reset-key
@@ -799,7 +799,7 @@
   title: Host code page
   covers: [option:-codepage, option:-charset, menu:codepageOption, resource:charset, resource:charsetList, resource:sbcsCgcsgid]
   x3270: "Options → Code Page menu, from charsetList (x3270/menubar.c:2502-2538, x3270/fb-x3270:107); -codepage, with -charset an alias (x3270/x3270.c:156, :159); sbcsCgcsgid overrides the reported CGCSGID"
-  gui: "none: cp037 only, where x3270 defaults to 'bracket' (Common/codepage.c:358); the canvas glyph path (canvas/src/cg.ts:89) is cp037-fixed and bypasses core's CodePage. At the defaults the two clients disagree on [ and ]: bracket puts them at 0xAD/0xBD (Common/unicode.c:293), ours at 0xBA/0xBB. README Staging item 16"
+  gui: "none: cp037 only, where x3270 defaults to 'bracket' (Common/codepage.c:358); the canvas glyph path (canvas/src/cg.ts:89) is cp037-fixed and bypasses core's CodePage. At the defaults the two clients disagree on [ and ]: bracket puts them at 0xAD/0xBD (Common/unicode.c:293), ours at 0xBA/0xBB. README Staging item 15c"
   status: missing
   browser: "none"
 - id: dbcs
@@ -809,7 +809,7 @@
   x3270: "a DBCS code page, with dbcsCgcsgid overriding its CGCSGID (x3270/resources.c:149-150)"
   gui: none
   status: deferred
-  reason: "README Staging item 16 calls DBCS a separate, larger item than the single-byte code pages and leaves it unscheduled."
+  reason: "README Staging item 15c calls DBCS a separate, larger item than the single-byte code pages."
   decided: "2026-11-17, user"
 - id: cursor-shape
   area: display
@@ -1029,7 +1029,7 @@
   title: Light-pen select with the mouse
   covers: [xaction:MouseSelect]
   x3270: "Ctrl-Shift-Button1 runs MouseSelect, a light-pen selection at the pointer (x3270/fb-x3270:289, x3270/xkybd.c:106)"
-  gui: "none: no light pen (README What is not implemented; Staging item 17)"
+  gui: "none: no light pen (README What is not implemented; Staging item 15d)"
   status: missing
   browser: "none"
 - id: redraw
@@ -1185,7 +1185,7 @@
   title: Save changed options to a profile or session file
   covers: [menu:saveOption]
   x3270: "File → Save Changed Options, a dialog for the profile/session file name (x3270/menubar.c:1203, x3270/fb-x3270:875-876)"
-  gui: "none: there is no preferences store (README *Using the GUI*, *Staging* item 15). Store: a profile outside the app's data would need a store-probe check (docs/releasing.md:808)"
+  gui: "none: there is no preferences store (README *Using the GUI*, *Staging* item 15b). Store: a profile outside the app's data would need a store-probe check (docs/releasing.md:808)"
   status: missing
   browser: "none"
 - id: local-codepage
@@ -1278,7 +1278,9 @@
   covers: [resource:macros, action:Macro]
   x3270: "the macros resource, or macros.<host> per host, lists name: actions pairs (Common/task.c:400-425); x3270 shows them as a Macros menu while connected (x3270/menubar.c:1489-1545, label x3270/fb-x3270:972-973); Macro(name) runs one by name (Common/task.c:4228-4245)"
   gui: none
-  status: missing
+  status: deferred
+  reason: "Deferred with script-port (the user, 2026-11-17): this needs a GUI scripting interface, and that interface is deferred."
+  decided: "2026-11-17, user"
   browser: "none"
   others: {cli: "none"}
 - id: source-file
@@ -1287,7 +1289,9 @@
   covers: [action:Source]
   x3270: "Source(file) reads actions from a file and runs them, locking the keyboard while it runs (Common/source.c:214, :247)"
   gui: "none. Store: reading a file outside the app's data needs a user-selected file and a store-probe check (docs/releasing.md:808)"
-  status: missing
+  status: deferred
+  reason: "Deferred with script-port (the user, 2026-11-17): this needs a GUI scripting interface, and that interface is deferred."
+  decided: "2026-11-17, user"
   browser: "none"
   others: {cli: "none: no Source(); a script is fed on stdin instead, and Replay(file) reads only a trace (packages/cli/src/main.ts:235)"}
 - id: abort-script
@@ -1296,7 +1300,9 @@
   covers: [action:Abort, menu:abortScriptOption]
   x3270: "File → Abort Scripts/Macros/Strings, sensitive while a task is active (x3270/menubar.c:1239-1245, :894-898; label x3270/fb-x3270:905); Abort() marks the running macro fatal (Common/task.c:4416-4430)"
   gui: "none: the GUI runs no scripts or macros for it to abort"
-  status: missing
+  status: deferred
+  reason: "Deferred with script-port (the user, 2026-11-17): this needs a GUI scripting interface, and that interface is deferred."
+  decided: "2026-11-17, user"
   browser: "none"
   others: {cli: "none: a script stops at EOF or Quit"}
 - id: keyboard-disable
@@ -1305,7 +1311,9 @@
   covers: [action:KeyboardDisable, menu:reenableKeyboardOption]
   x3270: "KeyboardDisable([true|false|ForceEnable]) (Common/task.c:4202-4224); Script() and Source() disable the keyboard implicitly (Common/childscript.c:1473, Common/source.c:247); File → Re-enable Keyboard, sensitive while it is disabled, runs KeyboardDisable(ForceEnable) (x3270/menubar.c:1231-1237, :886-890; label x3270/fb-x3270:913)"
   gui: "none: nothing in the GUI disables the keyboard, since it runs no scripts"
-  status: missing
+  status: deferred
+  reason: "Deferred with script-port (the user, 2026-11-17): this needs a GUI scripting interface, and that interface is deferred."
+  decided: "2026-11-17, user"
   browser: "none"
   others: {cli: "none"}
 - id: aid-wait
@@ -1314,7 +1322,9 @@
   covers: [toggle:aidWait]
   x3270: "aidWait toggle, default true in x3270 (x3270/resources.c:395-396) and in s3270 (Common/glue.c:479): a scripted AID that locks the keyboard puts the task in TS_KBWAIT until it unlocks (Common/task.c:1630-1633, CKBWAIT at :265)"
   gui: "none: the GUI has no scripts; its keyboard is always the operator's"
-  status: missing
+  status: deferred
+  reason: "Deferred with script-port (the user, 2026-11-17): this needs a GUI scripting interface, and that interface is deferred."
+  decided: "2026-11-17, user"
   browser: "none"
   others: {cli: "none, and a divergence: Enter(), Clear(), PF(n) and PA(n) all return as soon as the AID is sent (packages/cli/src/runner.ts:318-339), as if aidWait were false, so an s3270 script needs an explicit Wait(Unlock) after each"}
 - id: script-screen-read
@@ -1323,7 +1333,9 @@
   covers: [action:Ascii, action:Ascii1, action:AsciiField, action:Ebcdic, action:Ebcdic1, action:EbcdicField, action:ReadBuffer, action:Snap, action:NvtText, action:AnsiText]
   x3270: "Ascii/Ebcdic with (), (len) from the cursor, (row,col,len) or (row,col,rows,cols), 0-origin, Ascii1/Ebcdic1 1-origin, AsciiField/EbcdicField the cursor's field (Common/task.c:2739-2785); ReadBuffer([Ascii|Ebcdic|Unicode|Field]) dumps the buffer with attributes (Common/task.c:3087); Snap() saves a snapshot and Snap(Status|Rows|Cols|Ascii|Ascii1|Ebcdic|Ebcdic1|ReadBuffer) reads it and Snap(Wait,...) waits for output and saves (Common/task.c:3340-3480); NvtText/AnsiText return buffered NVT-mode text (Common/task.c:3987); all reachable only from scripts and macros"
   gui: "none"
-  status: missing
+  status: deferred
+  reason: "Deferred with script-port (the user, 2026-11-17): this needs a GUI scripting interface, and that interface is deferred."
+  decided: "2026-11-17, user"
   browser: "none"
   others: {cli: "partial: Ascii() and Ascii(row,col,len), 0-origin (packages/cli/src/runner.ts:412, tests in packages/cli/test/runner.test.ts 'screen reading'), but not Ascii(len), and Ascii(row,col,rows,cols) is accepted and silently answers wrongly: the fourth argument is ignored (runner.ts:417-421), so Ascii(0,0,2,10) returned 2 characters and ok (probed 2026-11-17); Snap returns the screen text (runner.ts:439), unlike s3270's Snap(), which saves a snapshot and prints nothing; our own ScreenText and ScreenJson (runner.ts:443) stand in for ReadBuffer; no Ascii1, AsciiField, Ebcdic*, ReadBuffer, NvtText or AnsiText"}
 - id: script-wait
@@ -1332,7 +1344,9 @@
   covers: [action:Wait, action:Expect, action:Pause]
   x3270: "Wait([timeout,]InputField|NVTMode|3270Mode|Output|Seconds|Disconnect|Unlock|CursorAt|StringAt|InputFieldAt), the timeout FIRST, scripts and macros only (Common/task.c:3556-3600, keywords :3608-3610); Expect(text[,timeout]) waits for NVT-mode text, default 30 s (Common/task.c:4166-4199); Pause() waits unlockDelayMs, default 350 (Common/task.c:3757-3770, x3270/resources.c:51-52)"
   gui: "none"
-  status: missing
+  status: deferred
+  reason: "Deferred with script-port (the user, 2026-11-17): this needs a GUI scripting interface, and that interface is deferred."
+  decided: "2026-11-17, user"
   browser: "none"
   others: {cli: "partial, and divergent: Wait(condition[,seconds]) takes Output, Unlock, Settle (ours), 3270Mode or InputField with the timeout LAST (packages/cli/src/runner.ts:486, :899), the reverse of s3270's Wait([timeout,]condition) (Common/task.c:3581-3592), so s3270's Wait(10,Unlock) is refused as 'unknown condition 10' (probed 2026-11-17); a bare Wait() means Unlock in ours (runner.ts:900) but InputField in s3270 (task.c:3558); Wait() while disconnected returns ok in ours (probed 2026-11-17) where s3270 refuses with Not connected (task.c:3567-3572); no NVTMode, Seconds, Disconnect, CursorAt, StringAt or InputFieldAt; no Expect or Pause"}
 - id: script-query
@@ -1341,7 +1355,9 @@
   covers: [action:Query, action:Show]
   x3270: "Query([keyword]) and its alias Show report connection state, host, LU, model, code page, TLS, etc. (Common/query.c:321-330, registered :355-356)"
   gui: "none"
-  status: missing
+  status: deferred
+  reason: "Deferred with script-port (the user, 2026-11-17): this needs a GUI scripting interface, and that interface is deferred."
+  decided: "2026-11-17, user"
   browser: "none"
   others: {cli: "none: each reply's status line carries the s3270 status fields (packages/cli/src/status.ts), but there is no Query or Show (unknown command, probed 2026-11-17)"}
 - id: script-messages
@@ -1350,7 +1366,9 @@
   covers: [action:Echo, action:Fail, action:Info, action:ignore]
   x3270: "Echo(text) writes to the script's output (Common/task.c:543-555); Fail([text|-Async]) fails the script with a message (Common/task.c:570); Info(text) pops up an informational message, from a keymap or macro too (Common/task.c:509-517); ignore() does nothing, for binding a key to nothing (Common/task.c:520-524)"
   gui: "none: no action language reaches the GUI, so no Info popup or ignore binding"
-  status: missing
+  status: deferred
+  reason: "Deferred with script-port (the user, 2026-11-17): this needs a GUI scripting interface, and that interface is deferred."
+  decided: "2026-11-17, user"
   browser: "none"
   others: {cli: "none (Echo is an unknown command, probed 2026-11-17; commands.ts:24 lists what exists)"}
 - id: script-cookie
@@ -1371,7 +1389,9 @@
   covers: [option:-utf8]
   x3270: "-utf8 makes script I/O UTF-8 regardless of the locale, default false (x3270/x3270.c:211, :303; x3270/resources.c:358-359; Common/codepage.c:141)"
   gui: "none: the GUI has no script I/O"
-  status: missing
+  status: deferred
+  reason: "Deferred with script-port (the user, 2026-11-17): this needs a GUI scripting interface, and that interface is deferred."
+  decided: "2026-11-17, user"
   browser: "none"
   others: {cli: "no -utf8 flag; Node reads and writes UTF-8 always (packages/cli/src/main.ts:227), i.e. as if -utf8 were given"}
 - id: set-toggle
@@ -1380,7 +1400,9 @@
   covers: [action:Set, action:Toggle, option:-set, option:-clear]
   x3270: "Toggle(name[,value]) and Set(name[,value...]) change any registered toggle or extended toggle, Set(name) alone reports it (Common/toggles.c:624-641); -set name[=value] and -clear name preset a boolean toggle (x3270/x3270.c:157, :200, :1105-1160); used from keymaps, macros and scripts"
   gui: "none: no toggle is settable by name, flag, action or menu"
-  status: missing
+  status: deferred
+  reason: "Deferred with script-port (the user, 2026-11-17): this needs a GUI scripting interface, and that interface is deferred."
+  decided: "2026-11-17, user"
   browser: "none"
   others: {cli: "Set(model,<m>[,oversize,<spec>]) and Set(oversize,<spec>) only, refused while connected (packages/cli/src/runner.ts:275); no Toggle, no Set(name) query, no -set/-clear"}
 # --- other ---
