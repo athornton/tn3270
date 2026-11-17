@@ -46,8 +46,8 @@ x3270 source tree and writes `docs/parity/x3270-names.json`.
   - `action`: `An*` entries in `action_table_t` arrays (~98 in 4.5ga6);
   - `option`: entries of the `opts[]` table, each paired with the `Res*` it sets (~88). The pair
     is **one** entry, named by the option, and a resource that has an option is not listed again
-    under `resource`. So a row lists `OptProxy`, not `ResProxy`, and "exactly once" stays
-    well defined;
+    under `resource`. So a row lists `OptProxy`, not `ResProxy` (as `option:-proxy`; see the
+    amendment), and "exactly once" stays well defined;
   - `resource`: `#define Res*` in `include/resources.h` that a linked source uses and no option
     sets (≤248);
   - `toggle`: `toggle_names[]` in `Common/toggles.c` (24);
@@ -81,7 +81,8 @@ runtime dependencies of its own).
 ```yaml
 - id: proxy                       # unique, kebab-case
   title: Connect through a proxy (HTTP, SOCKS4/4a, SOCKS5/5d, telnet, passthru)
-  covers: [OptProxy, proxyOption]   # names from x3270-names.json
+  area: connection
+  covers: [option:-proxy, menu:proxyOption]   # ids from x3270-names.json
   x3270: "Options menu → Proxy…; -proxy"      # how x3270 reaches it
   gui: "flag only: -proxy"                    # how ours does
   status: partial
@@ -174,3 +175,40 @@ points at `docs/parity.md`.
 
 Building any feature; the store submission (piece 3); any change to `package.yml` or the tag
 workflow; re-pinning the README's existing x3270 citations.
+
+## Amendment 2026-11-17, while planning
+
+1. **Names are `kind:value` ids**, using the string x3270 itself uses, not the C identifier:
+   `action:Attn`, `option:-proxy`, `resource:hostsFile`, `toggle:monoCase`, `menu:ftOption`.
+   `covers` lists these ids. (The example under *2. Rows* reads
+   `covers: [option:-proxy, menu:proxyOption]` under this rule.)
+2. **Rows have an `area`**, required, one of `connection`, `keyboard`, `display`, `files`,
+   `scripting`, `other`. `docs/parity.md` renders one table per area in that order.
+3. **Options come only from x3270's Xrm `XrmOptionDescRec base_options[]`** (`x3270/x3270.c`),
+   whose resource is its `Dot*` name minus the leading `.`. x3270's `register_opts()` is a no-op
+   (`x3270/x3270.c:1356`, `valkeep` only), so the `opt_t` tables in `Common/` (`glue.c`
+   `base_opts[]`, `sio_glue.c` `tls_opts`, …) never reach it. libXt's own options (`-geometry`,
+   `-display`, `-fg`, …) are in no x3270 table and are not names.
+3a. **Actions:** `action_table_t` entries, **excluding `ACTION_HIDDEN`** ones (x3270 hides them
+   itself), with names resolved through `include/names.h` and the source file's own `#define`s
+   (`Common/task.c` names `RESUME_INPUT` locally). **A sixth kind, `xaction`:** the pure Xt
+   actions of `XtActionsRec xactions[]` in `x3270/xactions.c` (`Cut`, `insert-selection`, …),
+   bindable in keymaps and so reachable by a user.
+3b. **A cross-check, by hand, when the inventory is regenerated:** the x3270 wiki
+   (https://x3270.miraheze.org), with its command-line options page and `Category:Actions`, because
+   `x3270.man` in 4.5ga6 is a 24-line stub pointing there. The wiki tracks 4.6, so names newer than
+   the recorded GA are expected differences. (Found by the other thread's prototype, which
+   measured 129 sources and 470 names; the counts are not to be hard-coded.)
+4. **Linkage is read from `x3270/x3270_files.mk` (`X3270_OBJECTS`) and
+   `Common/lib3270_files.mk`, `lib3270i_files.mk` and `lib32xx_files.mk`**, which x3270's
+   link line names (`x3270/Makefile.obj.in`: `$(LD3270) $(LD3270I) $(LD32XX) $(LD3270STUBS)`).
+   `lib3270stubs` is excluded, as is the X widget library (`Cme*`, `CmplxMenu`, `Husk`). An object
+   with no `.c` (e.g. `favicon.o`, generated at build time) is listed in the output's
+   `missingSources` and is not an error.
+5. **Menu items** are the string-literal arguments of `add_menu_itemv(`, `toggle_init(` and of
+   any `Xt*Create*Widget(`/`Xt*Create*PopupShell(` call whose arguments name
+   `cmeBSBObjectClass`, in linked `x3270/` files; `"space"` is excluded. Calls whose name is not a
+   literal are listed in `nonLiteralMenuCalls` for triage, because their items (e.g. the host
+   list) are built at run time.
+6. **The extractor has no npm dependencies**, so the upstream workflow runs it with no
+   `npm ci`; only `scripts/parity.mjs` uses `yaml`.
