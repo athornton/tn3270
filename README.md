@@ -477,6 +477,10 @@ version is an overlay over the page, whose files are on the browser's machine.)
 > `Mode`, which defaults to `binary` where x3270 sets `ascii_flag` true: a wrong ascii default
 > silently corrupts a load module, while a wrong explicit choice is visible in the command.
 
+**`Mode=ascii` does no local line-end conversion yet.** It asks the host to translate (`ASCII`,
+and `CRLF` unless `Cr=keep`), but a received file keeps the host's CRLF line ends and any trailing
+`^Z`, and an LF-only file is sent without CRs, where x3270 strips and adds them itself.
+
 **It is a second `BrowserWindow` with real HTML controls, not a canvas view** — so inside it the
 mouse and the keyboard behave as they do in any window, which is the whole reason it is not drawn on
 the 3270 canvas. The canvas window's preload stays at four functions, so `renderer.ts` goes on being

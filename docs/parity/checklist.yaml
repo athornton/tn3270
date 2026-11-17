@@ -1036,10 +1036,10 @@
   area: files
   title: IND$FILE file transfer (CUT and DFT), from a dialog or the Transfer() action
   covers: [action:Transfer, menu:ftOption]
-  x3270: "File → File Transfer… dialog, enabled in 3270 mode (x3270/menubar.c:1131), with local/host file, send/receive, ascii/binary, append, recfm, lrecl, blksize, vm/tso/cics, cr, remap, allocation units, primary/secondary space, avblock, buffer size and other options (x3270/ft_gui.c:212-843), an overwrite prompt (x3270/ft_gui.c:1166-1173) and a progress popup; Transfer() keywords (Common/ft.c:207, :141-162); defaults receive, tso, ascii, cr and remap on, exist keep (Common/ft.c:316-323)"
+  x3270: "File → File Transfer… dialog, enabled in 3270 mode (x3270/menubar.c:1131), with local/host file, send/receive, ascii/binary, append, recfm, lrecl, blksize, vm/tso/cics, cr, remap, allocation units, primary/secondary space, avblock, buffer size and other options (x3270/ft_gui.c:212-843), an overwrite prompt (x3270/ft_gui.c:1166-1173) and a progress popup; Transfer() keywords (Common/ft.c:207, :141-162); defaults receive, tso, ascii, cr and remap on, exist keep (Common/ft.c:318-325)"
   gui: "keys: Ctrl-T, or the keypad's Xfer button, open the File Transfer window (direction, host tso/vm, local file with Browse…, host file, mode, exist, cr, recfm, lrecl, blksize, Start/Cancel, a running byte count); no menu item"
   status: partial
-  gap: "(1) deliberate default divergences: Direction=send and Mode=binary in the window and in Transfer(), where x3270 opens on receive and ascii (Common/ft.c:319-321; README *File transfer*); (2) no Host=cics, Remap, Allocation, PrimarySpace, SecondarySpace, Avblock or OtherOptions anywhere (frontend/src/transfer.ts:356), and the window has no BufferSize field; (3) ascii mode only puts ASCII/CRLF in the IND$FILE command: the local half is not implemented (core/src/ft/cut.ts:29), so a received text file keeps the host's CRs and ^Z and a sent LF-only file is not expanded to CRLF (x3270 does both, Common/ft_cut.c:190, Common/ft_dft.c:301, :503), and there is no Remap translation; (4) a receive with Exist=keep onto an existing file is refused, where x3270 asks to overwrite; (5) no File menu item, only Ctrl-T and the keypad button. Store: the file dialogs need files.user-selected.read-write, which no store-probe check exercises yet (docs/releasing.md:808-813), and a path typed into Local file rather than picked may be outside the sandbox"
+  gap: "(1) deliberate default divergences: Direction=send and Mode=binary in the window and in Transfer(), where x3270 opens on receive and ascii (Common/ft.c:319-321; README *File transfer*); (2) no Host=cics, Remap, Allocation, PrimarySpace, SecondarySpace, Avblock or OtherOptions anywhere (frontend/src/transfer.ts:356), and the window has no BufferSize field; (3) ascii mode only puts ASCII/CRLF in the IND$FILE command: the local half is not implemented (core/src/ft/cut.ts:29), so a received text file keeps the host's CRs and ^Z and a sent LF-only file is not expanded to CRLF, proven by probe (a DFT receive of 41 42 0d 0a 43 44 0d 0a 1a is written unchanged, where x3270 writes 41 42 0a 43 44 0a; a send inserts no CR). x3270 strips on receive (Common/ft_cut.c:190-192, Common/ft_dft.c:301-303) and expands LF to CRLF on send (Common/ft_cut.c:729-731, Common/ft_dft.c:503); there is no Remap translation either; (4) a receive with Exist=keep onto an existing file is refused, where x3270 asks to overwrite; and the window's Exist default on a send is replace while the keyword parser's is keep (frontend/src/transfer.ts:519-525), though both replace the host file on a send; (5) no File menu item, only Ctrl-T and the keypad button. Store: the file dialogs need files.user-selected.read-write, which no store-probe check exercises yet (docs/releasing.md:808-813), and a path typed into Local file rather than picked may be outside the sandbox"
   evidence:
     code: [packages/gui/src/main.ts:1094, packages/gui/src/main.ts:1858, packages/frontend/src/keypad.ts:127, packages/frontend/src/bindings.ts:133, packages/frontend/src/transferForm.ts:57, packages/frontend/src/transfer.ts:439, packages/frontend/src/transfer.ts:519, packages/core/src/ft/cut.ts:29]
     tests: [packages/gui/test/transferWindow.test.ts, packages/frontend/test/transfer.test.ts, packages/frontend/test/transferForm.test.ts, packages/core/test/ft/cut.test.ts, packages/core/test/dft.test.ts]
@@ -1074,7 +1074,7 @@
   area: files
   title: DFT buffer size
   covers: [resource:ftBufferSize]
-  x3270: "dialog Buffer Size field (x3270/ft_gui.c:801); Transfer(BufferSize=); ftBufferSize resource and Set(ftBufferSize) (Common/ft.c:218), default 16384, clamped to 256..32767 (x3270/resources.c:182-183, include/globals.h:417-420)"
+  x3270: "dialog Buffer Size field (x3270/ft_gui.c:801); Transfer(BufferSize=); ftBufferSize resource and Set(ftBufferSize) (Common/ft.c:218), default 16384 (x3270/resources.c:182-183, include/globals.h:417), clamped to 256..32767 by set_dft_buffersize (Common/ft_dft.c:740-747)"
   gui: "none: the window has no buffer-size field and there is no flag; the default (16384) and the clamp match x3270 (core/src/queryreply.ts:447-452)"
   status: missing
   browser: "none"
@@ -1115,11 +1115,21 @@
 - id: printer-session
   area: files
   title: Printer session (pr3287) associated with the display LU or a named LU
-  covers: [action:Printer, menu:printerOption, menu:assocButton, menu:luButton, menu:printerOffButton, option:-printerlu, resource:printer.assocCommandLine, resource:printer.codepage, resource:printer.command, resource:printer.luCommandLine, resource:printer.name, resource:printer.options]
-  x3270: "File → Printer Session → Start, associate with current LU (TN3270E only) / Start, specific LU… / Stop Printer (x3270/menubar.c:1139-1163); Printer(Start[,lu]|Stop) (Common/task.c:4248); -printerlu; printer.* resources build the pr3287 command line (Common/pr3287_session.c:153-163, :553-588)"
+  covers: [action:Printer, menu:printerOption, menu:assocButton, menu:luButton, menu:printerOffButton, option:-printerlu, resource:printer.assocCommandLine, resource:printer.command, resource:printer.luCommandLine, resource:printer.options]
+  x3270: "File → Printer Session → Start, associate with current LU (TN3270E only) / Start, specific LU… / Stop Printer (x3270/menubar.c:1139-1163); Printer(Start[,lu]|Stop) (Common/task.c:4248); -printerlu; printer.assocCommandLine, printer.luCommandLine, printer.command and printer.options build the pr3287 command line (Common/pr3287_session.c:153-163, :553-592)"
   gui: none
   status: proposed-deferred
   reason: "Printer sessions are planned as README *Staging* item 18 (a printer-LU session with SCS and LU3, to a file, a PDF or the print dialog, after pr3287), and there is no SCS decoder yet (README *What is not implemented*); x3270's route starts pr3287 as a child process, so that item will need a store-probe check (docs/releasing.md:808)."
+  browser: "none"
+- id: printer-windows-resources
+  area: files
+  title: Windows printer name and printer code page
+  covers: [resource:printer.name, resource:printer.codepage]
+  x3270: "printer.name and printer.codepage are registered and read only under _WIN32 (Common/pr3287_session.c:158-163, :174-179, :561-582; also Common/print_screen.c:374-376 and Common/glue.c:1182-1197), so x3270 itself never uses them"
+  gui: "n/a"
+  status: proposed-skipped
+  category: n/a
+  reason: "x3270 on Unix never reads printer.name or printer.codepage (they are wc3270's, under _WIN32 only), and ours has no printer session for them to configure."
   browser: "none"
 - id: trace
   area: files

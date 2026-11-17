@@ -24,11 +24,11 @@
  * `IND_FILE`. Everything else (codec, frames, state machine) is host-independent,
  * so adding CICS later is a third `Dialect` object and nothing else.
  *
- * TSO is the lead dialect today, not VM: the design doc's "MVS/TSO HOST FOUND"
+ * TSO was the lead dialect, not VM: the design doc's "MVS/TSO HOST FOUND"
  * and "PROTOCOL CONFIRMED" sections record that TK5's IND$FILE speaks CUT, needs
- * no Query List work, and has already had a real frame decoded out of it, while
- * VM/CMS remains blocked on Query List support. Hence `Host=tso` is the default
- * even though x3270's own default is also TSO for unrelated reasons (ft.c:320).
+ * no Query List work, and had a real frame decoded out of it while VM/CMS was
+ * still blocked on Query List support. VM/CMS has since transferred live over
+ * CUT too. `Host=tso` is the default, which is also x3270's (ft.c:320).
  */
 
 import {
@@ -422,8 +422,9 @@ function positiveInt(keyword: string, value: string): number {
  * The design doc's scope item 3 reverses it: "Binary by default, `Mode=ascii`
  * opt-in. A wrong default silently corrupts a MODULE; a wrong explicit choice is
  * visible in the command." The live TK5 IND$FILE agrees, defaulting to binary
- * itself and listing `ASCII` as an option. Everything else follows x3270:
- * `Direction=receive` (ft.c:319), `Host=tso` (ft.c:320), `Exist=keep`
+ * itself and listing `ASCII` as an option. `Direction` defaults to `send`,
+ * unlike x3270's `receive` (ft.c:319); see the comment above `direction` below.
+ * Everything else follows x3270: `Host=tso` (ft.c:320), `Exist=keep`
  * (ft.c:324-325), `Cr=auto` (ft.c:322), and no RECFM/LRECL/BLKSIZE
  * (ft.c:326-329).
  *
