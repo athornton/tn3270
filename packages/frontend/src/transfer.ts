@@ -35,6 +35,8 @@ import {
   AckAid, boundDftBufferSize, DFT_BUF_MAX, DFT_BUF_MIN, type TransferDirection,
 } from '@tn3270/core';
 
+import { convertsLineEnds } from './lineEnds.js';
+
 /**
  * The file system, injected.
  *
@@ -290,9 +292,11 @@ function buildIndFileCommand(req: TransferRequest, dialect: FtHostType): string 
  * which one the host will do — CRLF means "the other side uses CRLF line ends",
  * and a GET removes them while a PUT adds them. x3270 collapses them for exactly
  * this reason and we keep both spellings so an s3270 script reads correctly.
+ *
+ * The same rule converts the bytes locally: `lineEnds.ts`.
  */
 function wantsCrlf(req: TransferRequest): boolean {
-  return req.mode === 'ascii' && req.cr !== 'keep';
+  return convertsLineEnds(req);
 }
 
 /** F, V or U (ft.c:707-719 for TSO; the VM branch has no U — see the caller). */

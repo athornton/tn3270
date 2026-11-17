@@ -121,6 +121,11 @@ export type {
   FtHostType, FtMode, FtCr, FtExist, FtRecfm,
 } from './transfer.js';
 
+// Ascii line ends, converted locally exactly as x3270 does: the one rule
+// (`convertsLineEnds`, which `wantsCrlf` above delegates to), the two byte transforms, and the
+// `TransferFiles` wrapper `startTransfer` (transferRun.ts) applies once for every front end.
+export { convertsLineEnds, fromHost, toHost, withLineEnds } from './lineEnds.js';
+
 // The event-driven transfer driver. Here rather than in `tui` because its own header's
 // reason for existing -- "a TUI cannot block" -- applies equally to the GUI and the web
 // gateway, and both already depend on this package. The CLI keeps its own blocking loop:
