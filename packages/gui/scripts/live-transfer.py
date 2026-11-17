@@ -29,8 +29,9 @@ fail it. So a green run here says nothing about `Browse...`, and the macOS dialo
 **COMPARE BYTES, NEVER THE STATUS LINE.** The form reports `done: N bytes` on a transfer that
 wrote the wrong file just as readily as on one that worked -- `docs/live-testing.md` says so in as
 many words, and it is why the TUI's runs are trusted. So every flow sends a file up, reads it back
-to a different path, and `cmp`s the two. The host's own listing (`LISTFILE` on CMS, `LISTDS` on
-TSO) is an independent check that the bytes actually landed there.
+to a different path, and `cmp`s the two. On CMS in ascii mode, a `LISTFILE` between the two
+transfers is an independent check that the bytes landed there as records (there is no TSO
+listing).
 
 ## CREDENTIALS AND WHAT MAY END UP IN /tmp
 
