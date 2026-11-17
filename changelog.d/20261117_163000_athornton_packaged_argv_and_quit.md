@@ -6,6 +6,7 @@
   one host given". Launching from npm (`tn3270-gui`) was not affected.
 - `Ctrl-]` quits only when one of TN3270's own windows has focus. It was registered as a
   system-wide shortcut, so typing `Ctrl-]` in any other application (telnet's escape key, for
-  one) quit TN3270. It now follows the same rule as the terminal window always has: Control with
-  the `]` key, so on a layout where `]` needs AltGr (German, French) it does not quit; use the
-  window's close button or the menu instead.
+  one) quit TN3270.
+- The GUI also quits on `Ctrl-Q`, from any of its windows, on every keyboard layout (`Ctrl-]`
+  needs AltGr on German and French keyboards). Linux and Windows get a File menu with Quit
+  (`Ctrl+Q`); they had no Quit item before. On macOS, Quit stays in the app menu (`Cmd-Q`).

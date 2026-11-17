@@ -1,5 +1,5 @@
 /**
- * Ctrl-] quits, from any of this app's windows -- and ONLY from this app's windows.
+ * Ctrl-] and Ctrl-Q quit, from any of this app's windows -- and ONLY from this app's windows.
  *
  * It used to be `globalShortcut.register('Control+]')`, which is system-wide: Ctrl-] typed in
  * another application (telnet's escape key, in a terminal) quit TN3270. main.ts now checks each
@@ -19,8 +19,16 @@ export interface KeyInput {
 }
 
 export function isQuitChord(input: KeyInput): boolean {
-  return input.type === 'keyDown' && input.control && !input.alt && !input.meta && input.key === ']';
+  return input.type === 'keyDown' && input.control && !input.alt && !input.meta && QUIT_KEYS.has(input.key);
 }
+
+/**
+ * `]` is c3270's quit chord; `q` is the one every keyboard layout can type. Ctrl-] needs AltGr on
+ * German and French layouts, where Windows reports AltGr as Ctrl+Alt and the Alt guard above then
+ * refuses it. Ctrl-Q is no 3270 chord here (the renderer's CTRL table is c r u ] a d f k b t), and
+ * it matches the File -> Quit item's accelerator (menu.ts).
+ */
+const QUIT_KEYS: ReadonlySet<string> = new Set([']', 'q', 'Q']);
 
 /**
  * The `before-input-event` listener main.ts gives every window: on Ctrl-] it keeps the key from

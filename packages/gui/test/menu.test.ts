@@ -46,7 +46,8 @@ describe('the Edit menu accelerators are PLATFORM-SPLIT', () => {
   it('includes an app menu on macOS, which the platform requires', () => {
     // Without one, a Mac window gets no menu bar at all -- not a cosmetic difference.
     expect(buildMenuTemplate('darwin')[0]!.role).toBe('appMenu');
-    expect(buildMenuTemplate('linux')[0]!.label).toBe('Edit');
+    // Linux and Windows open with File (Quit, Ctrl+Q); see the File menu test below.
+    expect(buildMenuTemplate('linux')[0]!.label).toBe('File');
   });
 
   it('wires the handlers it is given, and omits click entirely when given none', () => {
@@ -86,6 +87,22 @@ describe('the Edit menu accelerators are PLATFORM-SPLIT', () => {
     expect(Object.prototype.hasOwnProperty.call(bare[0]!, 'click')).toBe(false);
     const bareView = (buildMenuTemplate('linux').find((m) => m.label === 'View')!.submenu)!;
     expect(Object.prototype.hasOwnProperty.call(bareView[0]!, 'click')).toBe(false);
+  });
+
+  /**
+   * QUIT ON A MENU, ON EVERY PLATFORM, with a key every layout has. macOS's app menu carries Quit
+   * (Cmd-Q); Linux and Windows had no Quit item at all, and Ctrl-] needs AltGr on German and French
+   * layouts. The parity checklist's `exit` row records the gap this closes.
+   */
+  it('offers File -> Quit (Ctrl+Q) on Linux and Windows, and leaves Quit to the app menu on macOS', () => {
+    for (const platform of ['linux', 'win32'] as const) {
+      const file = buildMenuTemplate(platform)[0]!;
+      expect(file.label, `${platform}'s first menu`).toBe('File');
+      expect(file.submenu).toEqual([{ label: 'Quit', id: 'quit', role: 'quit', accelerator: 'Ctrl+Q' }]);
+    }
+    const mac = buildMenuTemplate('darwin');
+    expect(mac[0]!.role).toBe('appMenu');
+    expect(mac.find((m) => m.label === 'File')).toBeUndefined();
   });
 
   it('offers the keypad on a View menu, on every platform', () => {
@@ -173,7 +190,7 @@ describe('the Model menu', () => {
     return [...own, ...os.submenu!];
   };
 
-  it('is absent without a geometry, so the template is exactly the old one', () => {
+  it('is absent without a geometry: File (not on macOS), Edit and View only', () => {
     // A LITERAL of the pre-Model-menu template, not buildMenuTemplate compared with itself.
     const edit = { label: 'Edit', submenu: [
       { label: 'Copy', id: 'copy', accelerator: 'Ctrl+Shift+C' },
@@ -183,8 +200,9 @@ describe('the Model menu', () => {
       { label: 'Keypad', id: 'keypad', accelerator: 'Ctrl+K' },
       { label: 'Keyboard', id: 'keyboard', accelerator: 'Ctrl+B' },
     ] };
-    expect(buildMenuTemplate('linux')).toEqual([edit, view]);
-    expect(buildMenuTemplate('win32', undefined, undefined)).toEqual([edit, view]);
+    const file = { label: 'File', submenu: [{ label: 'Quit', id: 'quit', role: 'quit', accelerator: 'Ctrl+Q' }] };
+    expect(buildMenuTemplate('linux')).toEqual([file, edit, view]);
+    expect(buildMenuTemplate('win32', undefined, undefined)).toEqual([file, edit, view]);
     const mac = (a: string): string => a.replace('Ctrl+Shift+', 'Cmd+');
     expect(buildMenuTemplate('darwin')).toEqual([{ role: 'appMenu' },
       { ...edit, submenu: edit.submenu.map((i) => ({ ...i, accelerator: mac(i.accelerator) })) },
@@ -210,9 +228,9 @@ describe('the Model menu', () => {
     ]);
   });
 
-  it('comes after Edit and View, on every platform', () => {
+  it('comes after Edit and View (and File, off macOS), on every platform', () => {
     expect(buildMenuTemplate('linux', undefined, { ...base, current: { oversize: none } })
-      .map((m) => m.label)).toEqual(['Edit', 'View', 'Model']);
+      .map((m) => m.label)).toEqual(['File', 'Edit', 'View', 'Model']);
     expect(buildMenuTemplate('darwin', undefined, { ...base, current: { oversize: none } })
       .map((m) => m.role ?? m.label)).toEqual(['appMenu', 'Edit', 'View', 'Model']);
   });

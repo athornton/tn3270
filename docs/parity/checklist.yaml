@@ -1376,11 +1376,11 @@
   title: Exit the emulator, confirming first when connected
   covers: [action:Quit, action:Exit, menu:exitOption, menu:exitReallyOption]
   x3270: "File → Exit x3270, which while connected becomes a pullright whose Disconnect and Exit item confirms (x3270/menubar.c:653-679, :1255-1272; labels x3270/fb-x3270:907-908); Quit()/Exit() actions (Common/xio.c:209-210), refused from a keymap while connected unless -force (Common/xio.c:181-192), with Alt-Q bound to Quit(-force) (x3270/fb-x3270:266)"
-  gui: "keystroke: Ctrl-] quits at once from any of our windows, through a per-window before-input-event hook (main.ts:3164, quitChord.ts) -- app-scoped since a5aa71e, where it used to be a system-wide globalShortcut; menu: the macOS app menu's Quit only; closing the last window quits. Before our menu is installed (e.g. behind the Connect dialog) Electron's default menu applies on Linux, with File → Quit and View → Reload/Toggle Developer Tools, which is not a reach equivalent"
+  gui: "keystroke: Ctrl-] or Ctrl-Q quits at once from any of our windows, through a per-window before-input-event hook (main.ts:3164, quitChord.ts), not a system-wide shortcut; menu: File → Quit (Ctrl+Q) on Linux and Windows (menu.ts), the app menu's Quit (Cmd-Q) on macOS; closing the last window quits. Before our menu is installed (behind the Connect dialog) Electron's default menu applies on Linux, but the Ctrl-Q/Ctrl-] hook already works there"
   status: partial
-  gap: "no Exit menu item on Linux or Windows (the app menu, which carries Quit, is built only on macOS), and nothing confirms before quitting a connected session as x3270's Disconnect and Exit does."
+  gap: "nothing confirms before quitting a connected session, as x3270's Disconnect and Exit does."
   evidence:
-    code: [packages/canvas/src/keys.ts:126, packages/gui/src/main.ts:3164, packages/gui/src/quitChord.ts, packages/gui/src/main.ts:1628, packages/gui/src/menu.ts:418, packages/gui/src/main.ts:3168]
+    code: [packages/canvas/src/keys.ts:126, packages/gui/src/main.ts:3164, packages/gui/src/quitChord.ts, packages/gui/src/main.ts:1628, packages/gui/src/menu.ts:423, packages/gui/src/main.ts:3168]
     tests: [packages/canvas/test/keys.test.ts, packages/gui/test/menu.test.ts, packages/gui/test/quitChord.test.ts]
     live: n/a
   browser: "n/a: closing the tab ends the session"

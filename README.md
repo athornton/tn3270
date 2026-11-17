@@ -207,7 +207,9 @@ shared with the CLI, since a script-driven client has nothing to render; see *Us
 what it picks between. (`-oversize auto` measures the display here; see *Oversize*.) The web
 gateway takes a smaller set; see *Using the web gateway*.
 
-**`Ctrl-]` quits. `Ctrl-C` does NOT** — it is the Clear AID, which a 3270 user needs
+**`Ctrl-]` or `Ctrl-Q` quits** (`Ctrl-Q` works on every keyboard layout; `Ctrl-]` needs AltGr
+on German and French ones), as does File → Quit on Linux and Windows and Cmd-Q on macOS.
+**`Ctrl-C` does NOT** — it is the Clear AID, which a 3270 user needs
 constantly to dismiss VM's `MORE...` state. `Ctrl-R` is Reset, `Ctrl-U` is EraseInput,
 `Ctrl-A` is Attn, `Ctrl-D` is **Dup**, `Ctrl-F` is **Field Mark**, `Ctrl-K` the keypad, `Ctrl-B`
 the keyboard, `Ctrl-T` the transfer window, `Alt-M` the Model menu, `Insert` toggles insert mode,
