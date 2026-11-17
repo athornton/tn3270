@@ -1,0 +1,4895 @@
+{
+  "source": "pmattes/x3270",
+  "tag": "4.5ga6",
+  "missingSources": [
+    "favicon"
+  ],
+  "unresolved": [],
+  "nonLiteralMenuCalls": [
+    "x3270/menubar.c:362",
+    "x3270/menubar.c:1052",
+    "x3270/menubar.c:1406",
+    "x3270/menubar.c:1528",
+    "x3270/menubar.c:1754",
+    "x3270/menubar.c:1762",
+    "x3270/menubar.c:2099",
+    "x3270/menubar.c:2480",
+    "x3270/menubar.c:2520"
+  ],
+  "privateXactions": 16,
+  "names": [
+    {
+      "id": "action:Abort",
+      "kind": "action",
+      "value": "Abort",
+      "sites": [
+        {
+          "at": "Common/task.c:605",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:AltCursor",
+      "kind": "action",
+      "value": "AltCursor",
+      "sites": [
+        {
+          "at": "x3270/xkybd.c:570",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:AnsiText",
+      "kind": "action",
+      "value": "AnsiText",
+      "sites": [
+        {
+          "at": "Common/task.c:606",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Ascii",
+      "kind": "action",
+      "value": "Ascii",
+      "sites": [
+        {
+          "at": "Common/task.c:607",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Ascii1",
+      "kind": "action",
+      "value": "Ascii1",
+      "sites": [
+        {
+          "at": "Common/task.c:608",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:AsciiField",
+      "kind": "action",
+      "value": "AsciiField",
+      "sites": [
+        {
+          "at": "Common/task.c:609",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Attn",
+      "kind": "action",
+      "value": "Attn",
+      "sites": [
+        {
+          "at": "Common/kybd.c:213",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:BackSpace",
+      "kind": "action",
+      "value": "BackSpace",
+      "sites": [
+        {
+          "at": "Common/kybd.c:214",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:BackTab",
+      "kind": "action",
+      "value": "BackTab",
+      "sites": [
+        {
+          "at": "Common/kybd.c:215",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Bell",
+      "kind": "action",
+      "value": "Bell",
+      "sites": [
+        {
+          "at": "Common/task.c:610",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:CircumNot",
+      "kind": "action",
+      "value": "CircumNot",
+      "sites": [
+        {
+          "at": "Common/kybd.c:216",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Clear",
+      "kind": "action",
+      "value": "Clear",
+      "sites": [
+        {
+          "at": "Common/kybd.c:217",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Close",
+      "kind": "action",
+      "value": "Close",
+      "sites": [
+        {
+          "at": "Common/host.c:372",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:CloseScript",
+      "kind": "action",
+      "value": "CloseScript",
+      "sites": [
+        {
+          "at": "Common/task.c:612",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Compose",
+      "kind": "action",
+      "value": "Compose",
+      "sites": [
+        {
+          "at": "Common/kybd.c:263",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Connect",
+      "kind": "action",
+      "value": "Connect",
+      "sites": [
+        {
+          "at": "Common/host.c:373",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Cookie",
+      "kind": "action",
+      "value": "Cookie",
+      "sites": [
+        {
+          "at": "Common/task.c:613",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:CursorSelect",
+      "kind": "action",
+      "value": "CursorSelect",
+      "sites": [
+        {
+          "at": "Common/kybd.c:218",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Delete",
+      "kind": "action",
+      "value": "Delete",
+      "sites": [
+        {
+          "at": "Common/kybd.c:219",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:DeleteField",
+      "kind": "action",
+      "value": "DeleteField",
+      "sites": [
+        {
+          "at": "Common/kybd.c:220",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:DeleteWord",
+      "kind": "action",
+      "value": "DeleteWord",
+      "sites": [
+        {
+          "at": "Common/kybd.c:221",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Disconnect",
+      "kind": "action",
+      "value": "Disconnect",
+      "sites": [
+        {
+          "at": "Common/host.c:374",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Down",
+      "kind": "action",
+      "value": "Down",
+      "sites": [
+        {
+          "at": "Common/kybd.c:222",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Dup",
+      "kind": "action",
+      "value": "Dup",
+      "sites": [
+        {
+          "at": "Common/kybd.c:223",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Ebcdic",
+      "kind": "action",
+      "value": "Ebcdic",
+      "sites": [
+        {
+          "at": "Common/task.c:614",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Ebcdic1",
+      "kind": "action",
+      "value": "Ebcdic1",
+      "sites": [
+        {
+          "at": "Common/task.c:615",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:EbcdicField",
+      "kind": "action",
+      "value": "EbcdicField",
+      "sites": [
+        {
+          "at": "Common/task.c:616",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Echo",
+      "kind": "action",
+      "value": "Echo",
+      "sites": [
+        {
+          "at": "Common/task.c:617",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:End",
+      "kind": "action",
+      "value": "End",
+      "sites": [
+        {
+          "at": "Common/kybd.c:224",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Enter",
+      "kind": "action",
+      "value": "Enter",
+      "sites": [
+        {
+          "at": "Common/kybd.c:225",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Erase",
+      "kind": "action",
+      "value": "Erase",
+      "sites": [
+        {
+          "at": "Common/kybd.c:226",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:EraseEOF",
+      "kind": "action",
+      "value": "EraseEOF",
+      "sites": [
+        {
+          "at": "Common/kybd.c:227",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:EraseInput",
+      "kind": "action",
+      "value": "EraseInput",
+      "sites": [
+        {
+          "at": "Common/kybd.c:228",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Execute",
+      "kind": "action",
+      "value": "Execute",
+      "sites": [
+        {
+          "at": "Common/task.c:618",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Exit",
+      "kind": "action",
+      "value": "Exit",
+      "sites": [
+        {
+          "at": "Common/xio.c:210",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Expect",
+      "kind": "action",
+      "value": "Expect",
+      "sites": [
+        {
+          "at": "Common/task.c:619",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Fail",
+      "kind": "action",
+      "value": "Fail",
+      "sites": [
+        {
+          "at": "Common/task.c:620",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:FieldEnd",
+      "kind": "action",
+      "value": "FieldEnd",
+      "sites": [
+        {
+          "at": "Common/kybd.c:229",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:FieldMark",
+      "kind": "action",
+      "value": "FieldMark",
+      "sites": [
+        {
+          "at": "Common/kybd.c:230",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Flip",
+      "kind": "action",
+      "value": "Flip",
+      "sites": [
+        {
+          "at": "Common/kybd.c:231",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:HexString",
+      "kind": "action",
+      "value": "HexString",
+      "sites": [
+        {
+          "at": "Common/kybd.c:232",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Home",
+      "kind": "action",
+      "value": "Home",
+      "sites": [
+        {
+          "at": "Common/kybd.c:233",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Info",
+      "kind": "action",
+      "value": "Info",
+      "sites": [
+        {
+          "at": "Common/task.c:622",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Insert",
+      "kind": "action",
+      "value": "Insert",
+      "sites": [
+        {
+          "at": "Common/kybd.c:234",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Interrupt",
+      "kind": "action",
+      "value": "Interrupt",
+      "sites": [
+        {
+          "at": "Common/kybd.c:235",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Key",
+      "kind": "action",
+      "value": "Key",
+      "sites": [
+        {
+          "at": "Common/kybd.c:236",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:KeyboardDisable",
+      "kind": "action",
+      "value": "KeyboardDisable",
+      "sites": [
+        {
+          "at": "Common/task.c:623",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Keymap",
+      "kind": "action",
+      "value": "Keymap",
+      "sites": [
+        {
+          "at": "x3270/xkybd.c:571",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Left",
+      "kind": "action",
+      "value": "Left",
+      "sites": [
+        {
+          "at": "Common/kybd.c:237",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Left2",
+      "kind": "action",
+      "value": "Left2",
+      "sites": [
+        {
+          "at": "Common/kybd.c:238",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Macro",
+      "kind": "action",
+      "value": "Macro",
+      "sites": [
+        {
+          "at": "Common/task.c:624",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:MoveCursor",
+      "kind": "action",
+      "value": "MoveCursor",
+      "sites": [
+        {
+          "at": "Common/kybd.c:240",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:MoveCursor1",
+      "kind": "action",
+      "value": "MoveCursor1",
+      "sites": [
+        {
+          "at": "Common/kybd.c:241",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Newline",
+      "kind": "action",
+      "value": "Newline",
+      "sites": [
+        {
+          "at": "Common/kybd.c:242",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:NextWord",
+      "kind": "action",
+      "value": "NextWord",
+      "sites": [
+        {
+          "at": "Common/kybd.c:243",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:NvtText",
+      "kind": "action",
+      "value": "NvtText",
+      "sites": [
+        {
+          "at": "Common/task.c:625",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Open",
+      "kind": "action",
+      "value": "Open",
+      "sites": [
+        {
+          "at": "Common/host.c:375",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:PA",
+      "kind": "action",
+      "value": "PA",
+      "sites": [
+        {
+          "at": "Common/kybd.c:244",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:PF",
+      "kind": "action",
+      "value": "PF",
+      "sites": [
+        {
+          "at": "Common/kybd.c:248",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:PageDown",
+      "kind": "action",
+      "value": "PageDown",
+      "sites": [
+        {
+          "at": "Common/kybd.c:245",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:PageUp",
+      "kind": "action",
+      "value": "PageUp",
+      "sites": [
+        {
+          "at": "Common/kybd.c:246",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:PasteString",
+      "kind": "action",
+      "value": "PasteString",
+      "sites": [
+        {
+          "at": "Common/kybd.c:247",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Pause",
+      "kind": "action",
+      "value": "Pause",
+      "sites": [
+        {
+          "at": "Common/task.c:626",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:PreviousWord",
+      "kind": "action",
+      "value": "PreviousWord",
+      "sites": [
+        {
+          "at": "Common/kybd.c:249",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:PrintText",
+      "kind": "action",
+      "value": "PrintText",
+      "sites": [
+        {
+          "at": "Common/print_screen.c:636",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:PrintWindow",
+      "kind": "action",
+      "value": "PrintWindow",
+      "sites": [
+        {
+          "at": "x3270/print_window.c:215",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Printer",
+      "kind": "action",
+      "value": "Printer",
+      "sites": [
+        {
+          "at": "Common/task.c:637",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Prompt",
+      "kind": "action",
+      "value": "Prompt",
+      "sites": [
+        {
+          "at": "Common/task.c:627",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Query",
+      "kind": "action",
+      "value": "Query",
+      "sites": [
+        {
+          "at": "Common/query.c:355",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Quit",
+      "kind": "action",
+      "value": "Quit",
+      "sites": [
+        {
+          "at": "Common/xio.c:209",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:ReadBuffer",
+      "kind": "action",
+      "value": "ReadBuffer",
+      "sites": [
+        {
+          "at": "Common/task.c:628",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Reconnect",
+      "kind": "action",
+      "value": "Reconnect",
+      "sites": [
+        {
+          "at": "Common/host.c:376",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Reset",
+      "kind": "action",
+      "value": "Reset",
+      "sites": [
+        {
+          "at": "Common/kybd.c:250",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:RestoreInput",
+      "kind": "action",
+      "value": "RestoreInput",
+      "sites": [
+        {
+          "at": "Common/save_restore.c:242",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Right",
+      "kind": "action",
+      "value": "Right",
+      "sites": [
+        {
+          "at": "Common/kybd.c:251",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Right2",
+      "kind": "action",
+      "value": "Right2",
+      "sites": [
+        {
+          "at": "Common/kybd.c:252",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:SaveInput",
+      "kind": "action",
+      "value": "SaveInput",
+      "sites": [
+        {
+          "at": "Common/save_restore.c:241",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:ScreenTrace",
+      "kind": "action",
+      "value": "ScreenTrace",
+      "sites": [
+        {
+          "at": "Common/screentrace.c:864",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Script",
+      "kind": "action",
+      "value": "Script",
+      "sites": [
+        {
+          "at": "Common/task.c:631",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Scroll",
+      "kind": "action",
+      "value": "Scroll",
+      "sites": [
+        {
+          "at": "Common/scroll.c:575",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Set",
+      "kind": "action",
+      "value": "Set",
+      "sites": [
+        {
+          "at": "Common/toggles.c:804",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:SetFont",
+      "kind": "action",
+      "value": "SetFont",
+      "sites": [
+        {
+          "at": "x3270/screen.c:7126",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Show",
+      "kind": "action",
+      "value": "Show",
+      "sites": [
+        {
+          "at": "Common/query.c:356",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Snap",
+      "kind": "action",
+      "value": "Snap",
+      "sites": [
+        {
+          "at": "Common/task.c:632",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Source",
+      "kind": "action",
+      "value": "Source",
+      "sites": [
+        {
+          "at": "Common/task.c:633",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:String",
+      "kind": "action",
+      "value": "String",
+      "sites": [
+        {
+          "at": "Common/kybd.c:253",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:SysReq",
+      "kind": "action",
+      "value": "SysReq",
+      "sites": [
+        {
+          "at": "Common/kybd.c:254",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Tab",
+      "kind": "action",
+      "value": "Tab",
+      "sites": [
+        {
+          "at": "Common/kybd.c:255",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:TemporaryComposeMap",
+      "kind": "action",
+      "value": "TemporaryComposeMap",
+      "sites": [
+        {
+          "at": "Common/kybd.c:256",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:TemporaryKeymap",
+      "kind": "action",
+      "value": "TemporaryKeymap",
+      "sites": [
+        {
+          "at": "x3270/xkybd.c:572",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Title",
+      "kind": "action",
+      "value": "Title",
+      "sites": [
+        {
+          "at": "x3270/screen.c:7127",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Toggle",
+      "kind": "action",
+      "value": "Toggle",
+      "sites": [
+        {
+          "at": "Common/toggles.c:803",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:ToggleInsert",
+      "kind": "action",
+      "value": "ToggleInsert",
+      "sites": [
+        {
+          "at": "Common/kybd.c:257",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:ToggleReverse",
+      "kind": "action",
+      "value": "ToggleReverse",
+      "sites": [
+        {
+          "at": "Common/kybd.c:258",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Trace",
+      "kind": "action",
+      "value": "Trace",
+      "sites": [
+        {
+          "at": "Common/trace.c:1040",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Transfer",
+      "kind": "action",
+      "value": "Transfer",
+      "sites": [
+        {
+          "at": "Common/ft.c:207",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Up",
+      "kind": "action",
+      "value": "Up",
+      "sites": [
+        {
+          "at": "Common/kybd.c:259",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:Wait",
+      "kind": "action",
+      "value": "Wait",
+      "sites": [
+        {
+          "at": "Common/task.c:634",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:WindowState",
+      "kind": "action",
+      "value": "WindowState",
+      "sites": [
+        {
+          "at": "x3270/screen.c:7128",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "action:ignore",
+      "kind": "action",
+      "value": "ignore",
+      "sites": [
+        {
+          "at": "Common/task.c:621",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:abortScriptOption",
+      "kind": "menu",
+      "value": "abortScriptOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:1241",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:aboutConfig",
+      "kind": "menu",
+      "value": "aboutConfig",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:1112",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:aboutCopyright",
+      "kind": "menu",
+      "value": "aboutCopyright",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:1110",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:aboutOption",
+      "kind": "menu",
+      "value": "aboutOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:1117",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:aboutStatus",
+      "kind": "menu",
+      "value": "aboutStatus",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:1114",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:alwaysInsertOption",
+      "kind": "menu",
+      "value": "alwaysInsertOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:2283",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:assocButton",
+      "kind": "menu",
+      "value": "assocButton",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:1143",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:blankFillOption",
+      "kind": "menu",
+      "value": "blankFillOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:2270",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:blockCursorOption",
+      "kind": "menu",
+      "value": "blockCursorOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:2298",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:characterModeOption",
+      "kind": "menu",
+      "value": "characterModeOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:2307",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:codepageOption",
+      "kind": "menu",
+      "value": "codepageOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:2534",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:colorsOption",
+      "kind": "menu",
+      "value": "colorsOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:2493",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:crosshairOption",
+      "kind": "menu",
+      "value": "crosshairOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:2280",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:cursorBlinkOption",
+      "kind": "menu",
+      "value": "cursorBlinkOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:2269",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:disconnectOption",
+      "kind": "menu",
+      "value": "disconnectOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:1249",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:entry",
+      "kind": "menu",
+      "value": "entry",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:2377",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:exitOption",
+      "kind": "menu",
+      "value": "exitOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:1267",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:exitReallyOption",
+      "kind": "menu",
+      "value": "exitReallyOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:1263",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:extendedDsOption",
+      "kind": "menu",
+      "value": "extendedDsOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:2329",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:fontsOption",
+      "kind": "menu",
+      "value": "fontsOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:2396",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:ftOption",
+      "kind": "menu",
+      "value": "ftOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:1131",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:helpOption",
+      "kind": "menu",
+      "value": "helpOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:1096",
+          "guard": "defined(HAVE_START)"
+        }
+      ]
+    },
+    {
+      "id": "menu:idleCommandOption",
+      "kind": "menu",
+      "value": "idleCommandOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:2563",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:keymapDisplayOption",
+      "kind": "menu",
+      "value": "keymapDisplayOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:2554",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:keymapOption",
+      "kind": "menu",
+      "value": "keymapOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:2545",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:keypadOption",
+      "kind": "menu",
+      "value": "keypadOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:2256",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:lineModeOption",
+      "kind": "menu",
+      "value": "lineModeOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:2301",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:lineWrapOption",
+      "kind": "menu",
+      "value": "lineWrapOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:2275",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:luButton",
+      "kind": "menu",
+      "value": "luButton",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:1147",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:m3278Option",
+      "kind": "menu",
+      "value": "m3278Option",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:2315",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:m3279Option",
+      "kind": "menu",
+      "value": "m3279Option",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:2321",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:marginedPasteOption",
+      "kind": "menu",
+      "value": "marginedPasteOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:2276",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:model2Option",
+      "kind": "menu",
+      "value": "model2Option",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:2420",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:model3Option",
+      "kind": "menu",
+      "value": "model3Option",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:2425",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:model4Option",
+      "kind": "menu",
+      "value": "model4Option",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:2430",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:model5Option",
+      "kind": "menu",
+      "value": "model5Option",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:2435",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:modelsOption",
+      "kind": "menu",
+      "value": "modelsOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:2454",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:monocaseOption",
+      "kind": "menu",
+      "value": "monocaseOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:2268",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:otherFontOption",
+      "kind": "menu",
+      "value": "otherFontOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:2111",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:otherHostOption",
+      "kind": "menu",
+      "value": "otherHostOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:1438",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:overlayPasteOption",
+      "kind": "menu",
+      "value": "overlayPasteOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:2277",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:oversizeOption",
+      "kind": "menu",
+      "value": "oversizeOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:2440",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:printWindowOption",
+      "kind": "menu",
+      "value": "printWindowOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:1194",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:printerOffButton",
+      "kind": "menu",
+      "value": "printerOffButton",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:1150",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:printerOption",
+      "kind": "menu",
+      "value": "printerOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:1160",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:promptOption",
+      "kind": "menu",
+      "value": "promptOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:1210",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:recentOption",
+      "kind": "menu",
+      "value": "recentOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:1420",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:reconnectOption",
+      "kind": "menu",
+      "value": "reconnectOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:2291",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:rectangleSelectOption",
+      "kind": "menu",
+      "value": "rectangleSelectOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:2278",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:reenableKeyboardOption",
+      "kind": "menu",
+      "value": "reenableKeyboardOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:1233",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:restoreInputOption",
+      "kind": "menu",
+      "value": "restoreInputOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:1224",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:retryOption",
+      "kind": "menu",
+      "value": "retryOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:2285",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:saveInputOption",
+      "kind": "menu",
+      "value": "saveInputOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:1219",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:saveOption",
+      "kind": "menu",
+      "value": "saveOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:1203",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:screenTraceOption",
+      "kind": "menu",
+      "value": "screenTraceOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:1180",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:scrollBarOption",
+      "kind": "menu",
+      "value": "scrollBarOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:2274",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:selectUrlOption",
+      "kind": "menu",
+      "value": "selectUrlOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:2284",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:showTimingOption",
+      "kind": "menu",
+      "value": "showTimingOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:2273",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:snapOption",
+      "kind": "menu",
+      "value": "snapOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:2407",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:togglesOption",
+      "kind": "menu",
+      "value": "togglesOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:2354",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:traceOption",
+      "kind": "menu",
+      "value": "traceOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:1177",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:typeaheadOption",
+      "kind": "menu",
+      "value": "typeaheadOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:2282",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:underlineCursorOption",
+      "kind": "menu",
+      "value": "underlineCursorOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:2298",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:underscoreBlankFillOption",
+      "kind": "menu",
+      "value": "underscoreBlankFillOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:2271",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "menu:visibleControlOption",
+      "kind": "menu",
+      "value": "visibleControlOption",
+      "sites": [
+        {
+          "at": "x3270/menubar.c:2281",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "option:+sb",
+      "kind": "option",
+      "value": "+sb",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:185",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:271",
+          "guard": null
+        }
+      ],
+      "resource": "scrollBar"
+    },
+    {
+      "id": "option:--help",
+      "kind": "option",
+      "value": "--help",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:502",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "option:--version",
+      "kind": "option",
+      "value": "--version",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:307",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:499",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "option:-4",
+      "kind": "option",
+      "value": "-4",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:191",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:278",
+          "guard": null
+        }
+      ],
+      "resource": "preferIpv4"
+    },
+    {
+      "id": "option:-6",
+      "kind": "option",
+      "value": "-6",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:192",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:279",
+          "guard": null
+        }
+      ],
+      "resource": "preferIpv6"
+    },
+    {
+      "id": "option:-?",
+      "kind": "option",
+      "value": "-?",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:503",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "option:-accepthostname",
+      "kind": "option",
+      "value": "-accepthostname",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:149",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:227",
+          "guard": null
+        }
+      ],
+      "resource": "acceptHostname"
+    },
+    {
+      "id": "option:-activeicon",
+      "kind": "option",
+      "value": "-activeicon",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:147",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:230",
+          "guard": null
+        }
+      ],
+      "resource": "activeIcon"
+    },
+    {
+      "id": "option:-apl",
+      "kind": "option",
+      "value": "-apl",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:148",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:231",
+          "guard": null
+        }
+      ],
+      "resource": "aplMode"
+    },
+    {
+      "id": "option:-cadir",
+      "kind": "option",
+      "value": "-cadir",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:150",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:232",
+          "guard": null
+        }
+      ],
+      "resource": "caDir"
+    },
+    {
+      "id": "option:-cafile",
+      "kind": "option",
+      "value": "-cafile",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:151",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:234",
+          "guard": null
+        }
+      ],
+      "resource": "caFile"
+    },
+    {
+      "id": "option:-cc",
+      "kind": "option",
+      "value": "-cc",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:155",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:240",
+          "guard": null
+        }
+      ],
+      "resource": "charClass"
+    },
+    {
+      "id": "option:-certfile",
+      "kind": "option",
+      "value": "-certfile",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:152",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:235",
+          "guard": null
+        }
+      ],
+      "resource": "certFile"
+    },
+    {
+      "id": "option:-certfiletype",
+      "kind": "option",
+      "value": "-certfiletype",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:153",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:236",
+          "guard": null
+        }
+      ],
+      "resource": "certFileType"
+    },
+    {
+      "id": "option:-chainfile",
+      "kind": "option",
+      "value": "-chainfile",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:154",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:238",
+          "guard": null
+        }
+      ],
+      "resource": "chainFile"
+    },
+    {
+      "id": "option:-charset",
+      "kind": "option",
+      "value": "-charset",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:156",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:241",
+          "guard": null
+        }
+      ],
+      "resource": "codePage"
+    },
+    {
+      "id": "option:-clear",
+      "kind": "option",
+      "value": "-clear",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:157",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:242",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "option:-clientcert",
+      "kind": "option",
+      "value": "-clientcert",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:158",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:243",
+          "guard": null
+        }
+      ],
+      "resource": "clientCert"
+    },
+    {
+      "id": "option:-codepage",
+      "kind": "option",
+      "value": "-codepage",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:159",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:245",
+          "guard": null
+        }
+      ],
+      "resource": "codePage"
+    },
+    {
+      "id": "option:-connecttimeout",
+      "kind": "option",
+      "value": "-connecttimeout",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:161",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:247",
+          "guard": null
+        }
+      ],
+      "resource": "connectTimeout"
+    },
+    {
+      "id": "option:-cookiefile",
+      "kind": "option",
+      "value": "-cookiefile",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:162",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:248",
+          "guard": null
+        }
+      ],
+      "resource": "cookieFile"
+    },
+    {
+      "id": "option:-devname",
+      "kind": "option",
+      "value": "-devname",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:163",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:249",
+          "guard": null
+        }
+      ],
+      "resource": "devName"
+    },
+    {
+      "id": "option:-e",
+      "kind": "option",
+      "value": "-e",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:166",
+          "guard": "defined(LOCAL_PROCESS)"
+        },
+        {
+          "at": "x3270/x3270.c:251",
+          "guard": "defined(LOCAL_PROCESS)"
+        }
+      ]
+    },
+    {
+      "id": "option:-efont",
+      "kind": "option",
+      "value": "-efont",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:168",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:253",
+          "guard": null
+        }
+      ],
+      "resource": "emulatorFont"
+    },
+    {
+      "id": "option:-hostsfile",
+      "kind": "option",
+      "value": "-hostsfile",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:169",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:255",
+          "guard": null
+        }
+      ],
+      "resource": "hostsFile"
+    },
+    {
+      "id": "option:-httpd",
+      "kind": "option",
+      "value": "-httpd",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:170",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:254",
+          "guard": null
+        }
+      ],
+      "resource": "httpd"
+    },
+    {
+      "id": "option:-iconname",
+      "kind": "option",
+      "value": "-iconname",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:171",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:256",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "option:-iconx",
+      "kind": "option",
+      "value": "-iconx",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:172",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:257",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "option:-icony",
+      "kind": "option",
+      "value": "-icony",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:173",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:258",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "option:-im",
+      "kind": "option",
+      "value": "-im",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:207",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:299",
+          "guard": null
+        }
+      ],
+      "resource": "inputMethod"
+    },
+    {
+      "id": "option:-keyfile",
+      "kind": "option",
+      "value": "-keyfile",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:174",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:259",
+          "guard": null
+        }
+      ],
+      "resource": "keyFile"
+    },
+    {
+      "id": "option:-keyfiletype",
+      "kind": "option",
+      "value": "-keyfiletype",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:175",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:261",
+          "guard": null
+        }
+      ],
+      "resource": "keyFileType"
+    },
+    {
+      "id": "option:-keymap",
+      "kind": "option",
+      "value": "-keymap",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:176",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:263",
+          "guard": null
+        }
+      ],
+      "resource": "keymap"
+    },
+    {
+      "id": "option:-keypad",
+      "kind": "option",
+      "value": "-keypad",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:177",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:264",
+          "guard": null
+        }
+      ],
+      "resource": "keypadOn"
+    },
+    {
+      "id": "option:-keypasswd",
+      "kind": "option",
+      "value": "-keypasswd",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:178",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:265",
+          "guard": null
+        }
+      ],
+      "resource": "keyPasswd"
+    },
+    {
+      "id": "option:-loginmacro",
+      "kind": "option",
+      "value": "-loginmacro",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:179",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:267",
+          "guard": null
+        }
+      ],
+      "resource": "loginMacro"
+    },
+    {
+      "id": "option:-minversion",
+      "kind": "option",
+      "value": "-minversion",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:182",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:268",
+          "guard": null
+        }
+      ],
+      "resource": "minVersion"
+    },
+    {
+      "id": "option:-model",
+      "kind": "option",
+      "value": "-model",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:183",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:269",
+          "guard": null
+        }
+      ],
+      "resource": "model"
+    },
+    {
+      "id": "option:-mono",
+      "kind": "option",
+      "value": "-mono",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:184",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:270",
+          "guard": null
+        }
+      ],
+      "resource": "mono"
+    },
+    {
+      "id": "option:-noverifycert",
+      "kind": "option",
+      "value": "-noverifycert",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:186",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:272",
+          "guard": null
+        }
+      ],
+      "resource": "verifyHostCert"
+    },
+    {
+      "id": "option:-nvt",
+      "kind": "option",
+      "value": "-nvt",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:187",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:274",
+          "guard": null
+        }
+      ],
+      "resource": "nvtMode"
+    },
+    {
+      "id": "option:-once",
+      "kind": "option",
+      "value": "-once",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:188",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:275",
+          "guard": null
+        }
+      ],
+      "resource": "once"
+    },
+    {
+      "id": "option:-oversize",
+      "kind": "option",
+      "value": "-oversize",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:189",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:276",
+          "guard": null
+        }
+      ],
+      "resource": "oversize"
+    },
+    {
+      "id": "option:-port",
+      "kind": "option",
+      "value": "-port",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:190",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:277",
+          "guard": null
+        }
+      ],
+      "resource": "port"
+    },
+    {
+      "id": "option:-printerlu",
+      "kind": "option",
+      "value": "-printerlu",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:193",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:280",
+          "guard": null
+        }
+      ],
+      "resource": "printerLu"
+    },
+    {
+      "id": "option:-proxy",
+      "kind": "option",
+      "value": "-proxy",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:194",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:282",
+          "guard": null
+        }
+      ],
+      "resource": "proxy"
+    },
+    {
+      "id": "option:-pt",
+      "kind": "option",
+      "value": "-pt",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:208",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:300",
+          "guard": null
+        }
+      ],
+      "resource": "preeditType"
+    },
+    {
+      "id": "option:-reconnect",
+      "kind": "option",
+      "value": "-reconnect",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:195",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:283",
+          "guard": null
+        }
+      ],
+      "resource": "reconnect"
+    },
+    {
+      "id": "option:-sb",
+      "kind": "option",
+      "value": "-sb",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:198",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:286",
+          "guard": null
+        }
+      ],
+      "resource": "scrollBar"
+    },
+    {
+      "id": "option:-scheme",
+      "kind": "option",
+      "value": "-scheme",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:160",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:246",
+          "guard": null
+        }
+      ],
+      "resource": "colorScheme"
+    },
+    {
+      "id": "option:-script",
+      "kind": "option",
+      "value": "-script",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:197",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:285",
+          "guard": null
+        }
+      ],
+      "resource": "scripted"
+    },
+    {
+      "id": "option:-scriptport",
+      "kind": "option",
+      "value": "-scriptport",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:202",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:289",
+          "guard": null
+        }
+      ],
+      "resource": "scriptPort"
+    },
+    {
+      "id": "option:-scriptportonce",
+      "kind": "option",
+      "value": "-scriptportonce",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:203",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:291",
+          "guard": null
+        }
+      ],
+      "resource": "scriptPortOnce"
+    },
+    {
+      "id": "option:-secure",
+      "kind": "option",
+      "value": "-secure",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:199",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:292",
+          "guard": null
+        }
+      ],
+      "resource": "secure"
+    },
+    {
+      "id": "option:-set",
+      "kind": "option",
+      "value": "-set",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:200",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:287",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "option:-sl",
+      "kind": "option",
+      "value": "-sl",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:196",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:284",
+          "guard": null
+        }
+      ],
+      "resource": "saveLines"
+    },
+    {
+      "id": "option:-socket",
+      "kind": "option",
+      "value": "-socket",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:201",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:288",
+          "guard": null
+        }
+      ],
+      "resource": "socket"
+    },
+    {
+      "id": "option:-tlsmaxprotocol",
+      "kind": "option",
+      "value": "-tlsmaxprotocol",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:180",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:294",
+          "guard": null
+        }
+      ],
+      "resource": "tlsMaxProtocol"
+    },
+    {
+      "id": "option:-tlsminprotocol",
+      "kind": "option",
+      "value": "-tlsminprotocol",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:181",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:295",
+          "guard": null
+        }
+      ],
+      "resource": "tlsMinProtocol"
+    },
+    {
+      "id": "option:-tn",
+      "kind": "option",
+      "value": "-tn",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:204",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:293",
+          "guard": null
+        }
+      ],
+      "resource": "termName"
+    },
+    {
+      "id": "option:-trace",
+      "kind": "option",
+      "value": "-trace",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:164",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:296",
+          "guard": null
+        }
+      ],
+      "resource": "trace"
+    },
+    {
+      "id": "option:-tracefile",
+      "kind": "option",
+      "value": "-tracefile",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:205",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:297",
+          "guard": null
+        }
+      ],
+      "resource": "traceFile"
+    },
+    {
+      "id": "option:-tracefilesize",
+      "kind": "option",
+      "value": "-tracefilesize",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:206",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:298",
+          "guard": null
+        }
+      ],
+      "resource": "traceFileSize"
+    },
+    {
+      "id": "option:-user",
+      "kind": "option",
+      "value": "-user",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:209",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:301",
+          "guard": null
+        }
+      ],
+      "resource": "user"
+    },
+    {
+      "id": "option:-utenv",
+      "kind": "option",
+      "value": "-utenv",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:210",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:302",
+          "guard": null
+        }
+      ],
+      "resource": "utEnv"
+    },
+    {
+      "id": "option:-utf8",
+      "kind": "option",
+      "value": "-utf8",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:211",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:303",
+          "guard": null
+        }
+      ],
+      "resource": "utf8"
+    },
+    {
+      "id": "option:-v",
+      "kind": "option",
+      "value": "-v",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:304",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:498",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "option:-verifycert",
+      "kind": "option",
+      "value": "-verifycert",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:212",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:305",
+          "guard": null
+        }
+      ],
+      "resource": "verifyHostCert"
+    },
+    {
+      "id": "option:-xrm",
+      "kind": "option",
+      "value": "-xrm",
+      "sites": [
+        {
+          "at": "x3270/x3270.c:213",
+          "guard": null
+        },
+        {
+          "at": "x3270/x3270.c:308",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:adVersion",
+      "kind": "resource",
+      "value": "adVersion",
+      "sites": [
+        {
+          "at": "include/resources.h:37",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:alias",
+      "kind": "resource",
+      "value": "alias",
+      "sites": [
+        {
+          "at": "include/resources.h:39",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:allowResize",
+      "kind": "resource",
+      "value": "allowResize",
+      "sites": [
+        {
+          "at": "include/resources.h:41",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:aplCircledAlpha",
+      "kind": "resource",
+      "value": "aplCircledAlpha",
+      "sites": [
+        {
+          "at": "include/resources.h:45",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:bellVolume",
+      "kind": "resource",
+      "value": "bellVolume",
+      "sites": [
+        {
+          "at": "include/resources.h:52",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:bindLimit",
+      "kind": "resource",
+      "value": "bindLimit",
+      "sites": [
+        {
+          "at": "include/resources.h:54",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:bindUnlock",
+      "kind": "resource",
+      "value": "bindUnlock",
+      "sites": [
+        {
+          "at": "include/resources.h:53",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:boldColor",
+      "kind": "resource",
+      "value": "boldColor",
+      "sites": [
+        {
+          "at": "include/resources.h:56",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:bsdTm",
+      "kind": "resource",
+      "value": "bsdTm",
+      "sites": [
+        {
+          "at": "include/resources.h:57",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:charset",
+      "kind": "resource",
+      "value": "charset",
+      "sites": [
+        {
+          "at": "include/resources.h:66",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:charsetList",
+      "kind": "resource",
+      "value": "charsetList",
+      "sites": [
+        {
+          "at": "include/resources.h:67",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:colorBackground",
+      "kind": "resource",
+      "value": "colorBackground",
+      "sites": [
+        {
+          "at": "include/resources.h:70",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:composeMap",
+      "kind": "resource",
+      "value": "composeMap",
+      "sites": [
+        {
+          "at": "include/resources.h:73",
+          "guard": null
+        },
+        {
+          "at": "include/resources.h:611",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:confDir",
+      "kind": "resource",
+      "value": "confDir",
+      "sites": [
+        {
+          "at": "include/resources.h:74",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:connectFileName",
+      "kind": "resource",
+      "value": "connectFileName",
+      "sites": [
+        {
+          "at": "include/resources.h:75",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:console",
+      "kind": "resource",
+      "value": "console",
+      "sites": [
+        {
+          "at": "include/resources.h:77",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:contentionResolution",
+      "kind": "resource",
+      "value": "contentionResolution",
+      "sites": [
+        {
+          "at": "include/resources.h:79",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:crosshairColor",
+      "kind": "resource",
+      "value": "crosshairColor",
+      "sites": [
+        {
+          "at": "include/resources.h:82",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:cursorColor",
+      "kind": "resource",
+      "value": "cursorColor",
+      "sites": [
+        {
+          "at": "include/resources.h:91",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:dbcsCgcsgid",
+      "kind": "resource",
+      "value": "dbcsCgcsgid",
+      "sites": [
+        {
+          "at": "include/resources.h:92",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:debugTracing",
+      "kind": "resource",
+      "value": "debugTracing",
+      "sites": [
+        {
+          "at": "include/resources.h:93",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:disconnectClear",
+      "kind": "resource",
+      "value": "disconnectClear",
+      "sites": [
+        {
+          "at": "include/resources.h:97",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:doConfirms",
+      "kind": "resource",
+      "value": "doConfirms",
+      "sites": [
+        {
+          "at": "include/resources.h:98",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:dpi",
+      "kind": "resource",
+      "value": "dpi",
+      "sites": [
+        {
+          "at": "include/resources.h:99",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:emulatorFontList",
+      "kind": "resource",
+      "value": "emulatorFontList",
+      "sites": [
+        {
+          "at": "include/resources.h:612",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:eof",
+      "kind": "resource",
+      "value": "eof",
+      "sites": [
+        {
+          "at": "include/resources.h:101",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:erase",
+      "kind": "resource",
+      "value": "erase",
+      "sites": [
+        {
+          "at": "include/resources.h:102",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:extendedDataStream",
+      "kind": "resource",
+      "value": "extendedDataStream",
+      "sites": [
+        {
+          "at": "include/resources.h:103",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:false",
+      "kind": "resource",
+      "value": "false",
+      "sites": [
+        {
+          "at": "include/resources.h:602",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:fixedSize",
+      "kind": "resource",
+      "value": "fixedSize",
+      "sites": [
+        {
+          "at": "include/resources.h:104",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:ftAllocation",
+      "kind": "resource",
+      "value": "ftAllocation",
+      "sites": [
+        {
+          "at": "include/resources.h:105",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:ftAvblock",
+      "kind": "resource",
+      "value": "ftAvblock",
+      "sites": [
+        {
+          "at": "include/resources.h:106",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:ftBlksize",
+      "kind": "resource",
+      "value": "ftBlksize",
+      "sites": [
+        {
+          "at": "include/resources.h:107",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:ftBufferSize",
+      "kind": "resource",
+      "value": "ftBufferSize",
+      "sites": [
+        {
+          "at": "include/resources.h:108",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:ftCr",
+      "kind": "resource",
+      "value": "ftCr",
+      "sites": [
+        {
+          "at": "include/resources.h:109",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:ftDirection",
+      "kind": "resource",
+      "value": "ftDirection",
+      "sites": [
+        {
+          "at": "include/resources.h:110",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:ftExist",
+      "kind": "resource",
+      "value": "ftExist",
+      "sites": [
+        {
+          "at": "include/resources.h:111",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:ftHost",
+      "kind": "resource",
+      "value": "ftHost",
+      "sites": [
+        {
+          "at": "include/resources.h:112",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:ftHostFile",
+      "kind": "resource",
+      "value": "ftHostFile",
+      "sites": [
+        {
+          "at": "include/resources.h:113",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:ftLocalFile",
+      "kind": "resource",
+      "value": "ftLocalFile",
+      "sites": [
+        {
+          "at": "include/resources.h:114",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:ftLrecl",
+      "kind": "resource",
+      "value": "ftLrecl",
+      "sites": [
+        {
+          "at": "include/resources.h:115",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:ftMode",
+      "kind": "resource",
+      "value": "ftMode",
+      "sites": [
+        {
+          "at": "include/resources.h:116",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:ftOtherOptions",
+      "kind": "resource",
+      "value": "ftOtherOptions",
+      "sites": [
+        {
+          "at": "include/resources.h:117",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:ftPrimarySpace",
+      "kind": "resource",
+      "value": "ftPrimarySpace",
+      "sites": [
+        {
+          "at": "include/resources.h:118",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:ftRecfm",
+      "kind": "resource",
+      "value": "ftRecfm",
+      "sites": [
+        {
+          "at": "include/resources.h:119",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:ftRemap",
+      "kind": "resource",
+      "value": "ftRemap",
+      "sites": [
+        {
+          "at": "include/resources.h:120",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:ftSecondarySpace",
+      "kind": "resource",
+      "value": "ftSecondarySpace",
+      "sites": [
+        {
+          "at": "include/resources.h:121",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:ftWindowsCodePage",
+      "kind": "resource",
+      "value": "ftWindowsCodePage",
+      "sites": [
+        {
+          "at": "include/resources.h:122",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:highlightBold",
+      "kind": "resource",
+      "value": "highlightBold",
+      "sites": [
+        {
+          "at": "include/resources.h:123",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:hostname",
+      "kind": "resource",
+      "value": "hostname",
+      "sites": [
+        {
+          "at": "include/resources.h:129",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:iconFont",
+      "kind": "resource",
+      "value": "iconFont",
+      "sites": [
+        {
+          "at": "include/resources.h:132",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:iconLabelFont",
+      "kind": "resource",
+      "value": "iconLabelFont",
+      "sites": [
+        {
+          "at": "include/resources.h:133",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:icrnl",
+      "kind": "resource",
+      "value": "icrnl",
+      "sites": [
+        {
+          "at": "include/resources.h:134",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:idleCommand",
+      "kind": "resource",
+      "value": "idleCommand",
+      "sites": [
+        {
+          "at": "include/resources.h:135",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:idleCommandEnabled",
+      "kind": "resource",
+      "value": "idleCommandEnabled",
+      "sites": [
+        {
+          "at": "include/resources.h:136",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:idleTimeout",
+      "kind": "resource",
+      "value": "idleTimeout",
+      "sites": [
+        {
+          "at": "include/resources.h:137",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:inlcr",
+      "kind": "resource",
+      "value": "inlcr",
+      "sites": [
+        {
+          "at": "include/resources.h:139",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:inputColor",
+      "kind": "resource",
+      "value": "inputColor",
+      "sites": [
+        {
+          "at": "include/resources.h:140",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:intr",
+      "kind": "resource",
+      "value": "intr",
+      "sites": [
+        {
+          "at": "include/resources.h:143",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:invertKeypadShift",
+      "kind": "resource",
+      "value": "invertKeypadShift",
+      "sites": [
+        {
+          "at": "include/resources.h:144",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:keyHeight",
+      "kind": "resource",
+      "value": "keyHeight",
+      "sites": [
+        {
+          "at": "include/resources.h:613",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:keyWidth",
+      "kind": "resource",
+      "value": "keyWidth",
+      "sites": [
+        {
+          "at": "include/resources.h:614",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:keypad",
+      "kind": "resource",
+      "value": "keypad",
+      "sites": [
+        {
+          "at": "include/resources.h:149",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:keypadBackground",
+      "kind": "resource",
+      "value": "keypadBackground",
+      "sites": [
+        {
+          "at": "include/resources.h:150",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:kill",
+      "kind": "resource",
+      "value": "kill",
+      "sites": [
+        {
+          "at": "include/resources.h:153",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:labelIcon",
+      "kind": "resource",
+      "value": "labelIcon",
+      "sites": [
+        {
+          "at": "include/resources.h:154",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:largeKeyWidth",
+      "kind": "resource",
+      "value": "largeKeyWidth",
+      "sites": [
+        {
+          "at": "include/resources.h:615",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:lnext",
+      "kind": "resource",
+      "value": "lnext",
+      "sites": [
+        {
+          "at": "include/resources.h:157",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:localCp",
+      "kind": "resource",
+      "value": "localCp",
+      "sites": [
+        {
+          "at": "include/resources.h:158",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:lockedCursor",
+      "kind": "resource",
+      "value": "lockedCursor",
+      "sites": [
+        {
+          "at": "include/resources.h:160",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:macros",
+      "kind": "resource",
+      "value": "macros",
+      "sites": [
+        {
+          "at": "include/resources.h:162",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:maxRecent",
+      "kind": "resource",
+      "value": "maxRecent",
+      "sites": [
+        {
+          "at": "include/resources.h:164",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:menuBar",
+      "kind": "resource",
+      "value": "menuBar",
+      "sites": [
+        {
+          "at": "include/resources.h:165",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:message",
+      "kind": "resource",
+      "value": "message",
+      "sites": [
+        {
+          "at": "include/resources.h:616",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:modifiedSel",
+      "kind": "resource",
+      "value": "modifiedSel",
+      "sites": [
+        {
+          "at": "include/resources.h:169",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:modifiedSelColor",
+      "kind": "resource",
+      "value": "modifiedSelColor",
+      "sites": [
+        {
+          "at": "include/resources.h:170",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:newEnviron",
+      "kind": "resource",
+      "value": "newEnviron",
+      "sites": [
+        {
+          "at": "include/resources.h:174",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:noOther",
+      "kind": "resource",
+      "value": "noOther",
+      "sites": [
+        {
+          "at": "include/resources.h:175",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:noTelnetInputMode",
+      "kind": "resource",
+      "value": "noTelnetInputMode",
+      "sites": [
+        {
+          "at": "include/resources.h:178",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:nopSeconds",
+      "kind": "resource",
+      "value": "nopSeconds",
+      "sites": [
+        {
+          "at": "include/resources.h:177",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:normalColor",
+      "kind": "resource",
+      "value": "normalColor",
+      "sites": [
+        {
+          "at": "include/resources.h:179",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:normalCursor",
+      "kind": "resource",
+      "value": "normalCursor",
+      "sites": [
+        {
+          "at": "include/resources.h:180",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:numericLock",
+      "kind": "resource",
+      "value": "numericLock",
+      "sites": [
+        {
+          "at": "include/resources.h:181",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:nvt",
+      "kind": "resource",
+      "value": "nvt",
+      "sites": [
+        {
+          "at": "include/resources.h:617",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:oerrLock",
+      "kind": "resource",
+      "value": "oerrLock",
+      "sites": [
+        {
+          "at": "include/resources.h:183",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:onlcr",
+      "kind": "resource",
+      "value": "onlcr",
+      "sites": [
+        {
+          "at": "include/resources.h:185",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:paWidth",
+      "kind": "resource",
+      "value": "paWidth",
+      "sites": [
+        {
+          "at": "include/resources.h:618",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:pfWidth",
+      "kind": "resource",
+      "value": "pfWidth",
+      "sites": [
+        {
+          "at": "include/resources.h:619",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:printDialog",
+      "kind": "resource",
+      "value": "printDialog",
+      "sites": [
+        {
+          "at": "include/resources.h:197",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:printTextCommand",
+      "kind": "resource",
+      "value": "printTextCommand",
+      "sites": [
+        {
+          "at": "include/resources.h:620",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:printTextFont",
+      "kind": "resource",
+      "value": "printTextFont",
+      "sites": [
+        {
+          "at": "include/resources.h:621",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:printTextScreensPerPage",
+      "kind": "resource",
+      "value": "printTextScreensPerPage",
+      "sites": [
+        {
+          "at": "include/resources.h:624",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:printTextSize",
+      "kind": "resource",
+      "value": "printTextSize",
+      "sites": [
+        {
+          "at": "include/resources.h:625",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:printWindowCommand",
+      "kind": "resource",
+      "value": "printWindowCommand",
+      "sites": [
+        {
+          "at": "include/resources.h:627",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:printer.assocCommandLine",
+      "kind": "resource",
+      "value": "printer.assocCommandLine",
+      "sites": [
+        {
+          "at": "include/resources.h:48",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:printer.codepage",
+      "kind": "resource",
+      "value": "printer.codepage",
+      "sites": [
+        {
+          "at": "include/resources.h:192",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:printer.command",
+      "kind": "resource",
+      "value": "printer.command",
+      "sites": [
+        {
+          "at": "include/resources.h:193",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:printer.luCommandLine",
+      "kind": "resource",
+      "value": "printer.luCommandLine",
+      "sites": [
+        {
+          "at": "include/resources.h:161",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:printer.name",
+      "kind": "resource",
+      "value": "printer.name",
+      "sites": [
+        {
+          "at": "include/resources.h:195",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:printer.options",
+      "kind": "resource",
+      "value": "printer.options",
+      "sites": [
+        {
+          "at": "include/resources.h:196",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:qrBgColor",
+      "kind": "resource",
+      "value": "qrBgColor",
+      "sites": [
+        {
+          "at": "include/resources.h:200",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:quit",
+      "kind": "resource",
+      "value": "quit",
+      "sites": [
+        {
+          "at": "include/resources.h:199",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:retry",
+      "kind": "resource",
+      "value": "retry",
+      "sites": [
+        {
+          "at": "include/resources.h:203",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:rpq",
+      "kind": "resource",
+      "value": "rpq",
+      "sites": [
+        {
+          "at": "include/resources.h:207",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:rprnt",
+      "kind": "resource",
+      "value": "rprnt",
+      "sites": [
+        {
+          "at": "include/resources.h:208",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:sbcsCgcsgid",
+      "kind": "resource",
+      "value": "sbcsCgcsgid",
+      "sites": [
+        {
+          "at": "include/resources.h:223",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:schemeList",
+      "kind": "resource",
+      "value": "schemeList",
+      "sites": [
+        {
+          "at": "include/resources.h:210",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:screenTraceFile",
+      "kind": "resource",
+      "value": "screenTraceFile",
+      "sites": [
+        {
+          "at": "include/resources.h:212",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:screenTraceTarget",
+      "kind": "resource",
+      "value": "screenTraceTarget",
+      "sites": [
+        {
+          "at": "include/resources.h:213",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:screenTraceType",
+      "kind": "resource",
+      "value": "screenTraceType",
+      "sites": [
+        {
+          "at": "include/resources.h:214",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:scriptedAlways",
+      "kind": "resource",
+      "value": "scriptedAlways",
+      "sites": [
+        {
+          "at": "include/resources.h:216",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:selectBackground",
+      "kind": "resource",
+      "value": "selectBackground",
+      "sites": [
+        {
+          "at": "include/resources.h:221",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:serverKeymapList",
+      "kind": "resource",
+      "value": "serverKeymapList",
+      "sites": [
+        {
+          "at": "x3270/keymap.c:309",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:startTls",
+      "kind": "resource",
+      "value": "startTls",
+      "sites": [
+        {
+          "at": "include/resources.h:226",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:suppress",
+      "kind": "resource",
+      "value": "suppress",
+      "sites": [
+        {
+          "at": "include/resources.h:230",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:suppressActions",
+      "kind": "resource",
+      "value": "suppressActions",
+      "sites": [
+        {
+          "at": "include/resources.h:227",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:suppressFontMenu",
+      "kind": "resource",
+      "value": "suppressFontMenu",
+      "sites": [
+        {
+          "at": "include/resources.h:229",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:suppressHost",
+      "kind": "resource",
+      "value": "suppressHost",
+      "sites": [
+        {
+          "at": "include/resources.h:228",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:tls992",
+      "kind": "resource",
+      "value": "tls992",
+      "sites": [
+        {
+          "at": "include/resources.h:233",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:tlsSecurityLevel",
+      "kind": "resource",
+      "value": "tlsSecurityLevel",
+      "sites": [
+        {
+          "at": "include/resources.h:236",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:traceDir",
+      "kind": "resource",
+      "value": "traceDir",
+      "sites": [
+        {
+          "at": "include/resources.h:238",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:traceMonitor",
+      "kind": "resource",
+      "value": "traceMonitor",
+      "sites": [
+        {
+          "at": "include/resources.h:241",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:true",
+      "kind": "resource",
+      "value": "true",
+      "sites": [
+        {
+          "at": "include/resources.h:601",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:unlockDelay",
+      "kind": "resource",
+      "value": "unlockDelay",
+      "sites": [
+        {
+          "at": "include/resources.h:245",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:unlockDelayMs",
+      "kind": "resource",
+      "value": "unlockDelayMs",
+      "sites": [
+        {
+          "at": "include/resources.h:246",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:useCursorColor",
+      "kind": "resource",
+      "value": "useCursorColor",
+      "sites": [
+        {
+          "at": "include/resources.h:247",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:visualBell",
+      "kind": "resource",
+      "value": "visualBell",
+      "sites": [
+        {
+          "at": "include/resources.h:253",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:visualSelect",
+      "kind": "resource",
+      "value": "visualSelect",
+      "sites": [
+        {
+          "at": "include/resources.h:254",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:visualSelectColor",
+      "kind": "resource",
+      "value": "visualSelectColor",
+      "sites": [
+        {
+          "at": "include/resources.h:255",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:waitCursor",
+      "kind": "resource",
+      "value": "waitCursor",
+      "sites": [
+        {
+          "at": "include/resources.h:256",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:werase",
+      "kind": "resource",
+      "value": "werase",
+      "sites": [
+        {
+          "at": "include/resources.h:257",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:windowId",
+      "kind": "resource",
+      "value": "windowId",
+      "sites": [
+        {
+          "at": "include/resources.h:258",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:wrongTerminalName",
+      "kind": "resource",
+      "value": "wrongTerminalName",
+      "sites": [
+        {
+          "at": "include/resources.h:260",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "resource:xQuartzHack",
+      "kind": "resource",
+      "value": "xQuartzHack",
+      "sites": [
+        {
+          "at": "include/resources.h:261",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "toggle:aidWait",
+      "kind": "toggle",
+      "value": "aidWait",
+      "sites": [
+        {
+          "at": "Common/toggles.c:100",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "toggle:altCursor",
+      "kind": "toggle",
+      "value": "altCursor",
+      "sites": [
+        {
+          "at": "Common/toggles.c:88",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "toggle:alwaysInsert",
+      "kind": "toggle",
+      "value": "alwaysInsert",
+      "sites": [
+        {
+          "at": "Common/toggles.c:105",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "toggle:aplMode",
+      "kind": "toggle",
+      "value": "aplMode",
+      "sites": [
+        {
+          "at": "Common/toggles.c:104",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "toggle:blankFill",
+      "kind": "toggle",
+      "value": "blankFill",
+      "sites": [
+        {
+          "at": "Common/toggles.c:94",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "toggle:crosshair",
+      "kind": "toggle",
+      "value": "crosshair",
+      "sites": [
+        {
+          "at": "Common/toggles.c:98",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "toggle:cursorBlink",
+      "kind": "toggle",
+      "value": "cursorBlink",
+      "sites": [
+        {
+          "at": "Common/toggles.c:89",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "toggle:insertMode",
+      "kind": "toggle",
+      "value": "insertMode",
+      "sites": [
+        {
+          "at": "Common/toggles.c:108",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "toggle:lineWrap",
+      "kind": "toggle",
+      "value": "lineWrap",
+      "sites": [
+        {
+          "at": "Common/toggles.c:93",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "toggle:marginedPaste",
+      "kind": "toggle",
+      "value": "marginedPaste",
+      "sites": [
+        {
+          "at": "Common/toggles.c:96",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "toggle:monoCase",
+      "kind": "toggle",
+      "value": "monoCase",
+      "sites": [
+        {
+          "at": "Common/toggles.c:87",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "toggle:overlayPaste",
+      "kind": "toggle",
+      "value": "overlayPaste",
+      "sites": [
+        {
+          "at": "Common/toggles.c:102",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "toggle:rectangleSelect",
+      "kind": "toggle",
+      "value": "rectangleSelect",
+      "sites": [
+        {
+          "at": "Common/toggles.c:97",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "toggle:reverseInputMode",
+      "kind": "toggle",
+      "value": "reverseInputMode",
+      "sites": [
+        {
+          "at": "Common/toggles.c:107",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "toggle:rightToLeftMode",
+      "kind": "toggle",
+      "value": "rightToLeftMode",
+      "sites": [
+        {
+          "at": "Common/toggles.c:106",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "toggle:screenTrace",
+      "kind": "toggle",
+      "value": "screenTrace",
+      "sites": [
+        {
+          "at": "Common/toggles.c:95",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "toggle:scrollBar",
+      "kind": "toggle",
+      "value": "scrollBar",
+      "sites": [
+        {
+          "at": "Common/toggles.c:92",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "toggle:selectUrl",
+      "kind": "toggle",
+      "value": "selectUrl",
+      "sites": [
+        {
+          "at": "Common/toggles.c:109",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "toggle:showTiming",
+      "kind": "toggle",
+      "value": "showTiming",
+      "sites": [
+        {
+          "at": "Common/toggles.c:90",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "toggle:trace",
+      "kind": "toggle",
+      "value": "trace",
+      "sites": [
+        {
+          "at": "Common/toggles.c:91",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "toggle:typeahead",
+      "kind": "toggle",
+      "value": "typeahead",
+      "sites": [
+        {
+          "at": "Common/toggles.c:103",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "toggle:underscore",
+      "kind": "toggle",
+      "value": "underscore",
+      "sites": [
+        {
+          "at": "Common/toggles.c:101",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "toggle:underscoreBlankFill",
+      "kind": "toggle",
+      "value": "underscoreBlankFill",
+      "sites": [
+        {
+          "at": "Common/toggles.c:110",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "toggle:visibleControl",
+      "kind": "toggle",
+      "value": "visibleControl",
+      "sites": [
+        {
+          "at": "Common/toggles.c:99",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "xaction:Cut",
+      "kind": "xaction",
+      "value": "Cut",
+      "sites": [
+        {
+          "at": "x3270/xactions.c:138",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "xaction:Default",
+      "kind": "xaction",
+      "value": "Default",
+      "sites": [
+        {
+          "at": "x3270/xactions.c:139",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "xaction:HandleMenu",
+      "kind": "xaction",
+      "value": "HandleMenu",
+      "sites": [
+        {
+          "at": "x3270/xactions.c:141",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "xaction:KybdSelect",
+      "kind": "xaction",
+      "value": "KybdSelect",
+      "sites": [
+        {
+          "at": "x3270/xactions.c:143",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "xaction:MouseSelect",
+      "kind": "xaction",
+      "value": "MouseSelect",
+      "sites": [
+        {
+          "at": "x3270/xactions.c:144",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "xaction:MoveCursor",
+      "kind": "xaction",
+      "value": "MoveCursor",
+      "sites": [
+        {
+          "at": "x3270/xactions.c:145",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "xaction:MoveCursor1",
+      "kind": "xaction",
+      "value": "MoveCursor1",
+      "sites": [
+        {
+          "at": "x3270/xactions.c:146",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "xaction:Redraw",
+      "kind": "xaction",
+      "value": "Redraw",
+      "sites": [
+        {
+          "at": "x3270/xactions.c:164",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "xaction:SelectAll",
+      "kind": "xaction",
+      "value": "SelectAll",
+      "sites": [
+        {
+          "at": "x3270/xactions.c:165",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "xaction:SelectDown",
+      "kind": "xaction",
+      "value": "SelectDown",
+      "sites": [
+        {
+          "at": "x3270/xactions.c:166",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "xaction:SelectMotion",
+      "kind": "xaction",
+      "value": "SelectMotion",
+      "sites": [
+        {
+          "at": "x3270/xactions.c:169",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "xaction:SelectUp",
+      "kind": "xaction",
+      "value": "SelectUp",
+      "sites": [
+        {
+          "at": "x3270/xactions.c:171",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "xaction:StepEfont",
+      "kind": "xaction",
+      "value": "StepEfont",
+      "sites": [
+        {
+          "at": "x3270/xactions.c:140",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "xaction:Unselect",
+      "kind": "xaction",
+      "value": "Unselect",
+      "sites": [
+        {
+          "at": "x3270/xactions.c:174",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "xaction:insert-selection",
+      "kind": "xaction",
+      "value": "insert-selection",
+      "sites": [
+        {
+          "at": "x3270/xactions.c:142",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "xaction:move-select",
+      "kind": "xaction",
+      "value": "move-select",
+      "sites": [
+        {
+          "at": "x3270/xactions.c:147",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "xaction:select-end",
+      "kind": "xaction",
+      "value": "select-end",
+      "sites": [
+        {
+          "at": "x3270/xactions.c:167",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "xaction:select-extend",
+      "kind": "xaction",
+      "value": "select-extend",
+      "sites": [
+        {
+          "at": "x3270/xactions.c:168",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "xaction:select-start",
+      "kind": "xaction",
+      "value": "select-start",
+      "sites": [
+        {
+          "at": "x3270/xactions.c:170",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "xaction:set-select",
+      "kind": "xaction",
+      "value": "set-select",
+      "sites": [
+        {
+          "at": "x3270/xactions.c:172",
+          "guard": null
+        }
+      ]
+    },
+    {
+      "id": "xaction:start-extend",
+      "kind": "xaction",
+      "value": "start-extend",
+      "sites": [
+        {
+          "at": "x3270/xactions.c:173",
+          "guard": null
+        }
+      ]
+    }
+  ]
+}

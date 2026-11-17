@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { extractNames, guardsByLine, linkedSources, makeVar, parseDefines } from '../../../scripts/parity-extract.mjs';
+import {
+  diffNames, extractNames, guardsByLine, linkedSources, makeVar, newestGa, parseDefines, renderInventory,
+} from '../../../scripts/parity-extract.mjs';
 
 // Real text (suite3270 4.5ga6): x3270/Makefile.obj.in:86 and lib/configure.in:260. linkedSources
 // checks the real tree against these before resolving anything, so every linkedSources fixture
@@ -371,5 +373,34 @@ describe('extractNames', () => {
 
   it('is sorted by id', () => {
     expect(ids).toEqual([...ids].sort());
+  });
+});
+
+describe('newestGa', () => {
+  it('ignores alphas and betas and orders numerically', () => {
+    expect(newestGa(['4.6alpha1', '4.5ga6', '4.5ga10', '4.4ga6', '4.5beta4'])).toBe('4.5ga10');
+    expect(newestGa(['4.6alpha1'])).toBeUndefined();
+  });
+});
+
+describe('renderInventory', () => {
+  it('is stable JSON with a trailing newline and the tag first, privateXactions before names', () => {
+    const text = renderInventory({
+      tag: '4.5ga6', missingSources: [], unresolved: [], nonLiteralMenuCalls: [], privateXactions: 0, names: [],
+    });
+    expect(text).toBe(
+      '{\n  "source": "pmattes/x3270",\n  "tag": "4.5ga6",\n  "missingSources": [],\n  "unresolved": [],\n'
+      + '  "nonLiteralMenuCalls": [],\n  "privateXactions": 0,\n  "names": []\n}\n',
+    );
+  });
+});
+
+describe('diffNames', () => {
+  it('reports added, removed and moved names, one line each', () => {
+    const a = { names: [{ id: 'action:A', sites: [{ at: 'x.c:1' }] }, { id: 'action:B', sites: [{ at: 'x.c:2' }] }] };
+    const b = { names: [{ id: 'action:A', sites: [{ at: 'x.c:9' }] }, { id: 'action:C', sites: [{ at: 'x.c:3' }] }] };
+    expect(diffNames(a as never, b as never)).toEqual([
+      '+ action:C (x.c:3)', '- action:B (x.c:2)', '~ action:A x.c:1 -> x.c:9',
+    ]);
   });
 });

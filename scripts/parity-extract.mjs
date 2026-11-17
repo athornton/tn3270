@@ -4,6 +4,12 @@
 // amendment). Reads an x3270 source tree as TEXT ONLY: nothing in it is built or run.
 // No npm dependencies, so parity-upstream.yml runs this without `npm ci`.
 
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 /**
  * If `text[i]` opens a string literal (`"..."`), a character literal (`'x'`, `'\''`, `'"'`,
  * `'{'`, ...), a C block comment (possibly multi-line), or a `//`-to-end-of-line comment, returns
@@ -447,4 +453,117 @@ export function extractNames(read, files) {
     nonLiteralMenuCalls: nonLiteralMenuCalls.sort(compareAt),
     privateXactions,
   };
+}
+
+const GA = /^(\d+)\.(\d+)ga(\d+)$/;
+const TAG = /^\d+\.\d+(?:alpha|beta|ga)\d+$/;
+
+/** The newest `M.NgaP` tag in `tags`, or undefined if none is a GA tag. Alpha/beta tags are
+ * ignored; GA tags are ordered numerically (not lexically: `ga10` sorts after `ga6`). */
+export function newestGa(tags) {
+  const key = (t) => t.match(GA).slice(1).map(Number);
+  return tags.filter((t) => GA.test(t)).sort((a, b) => {
+    const [x, y] = [key(a), key(b)];
+    return x[0] - y[0] || x[1] - y[1] || x[2] - y[2];
+  }).at(-1);
+}
+
+/** Renders an inventory as stable (sorted, deterministic) JSON with a trailing newline, the
+ * source and tag first. */
+export function renderInventory({ tag, missingSources, unresolved, nonLiteralMenuCalls, privateXactions, names }) {
+  return `${JSON.stringify(
+    { source: 'pmattes/x3270', tag, missingSources, unresolved, nonLiteralMenuCalls, privateXactions, names },
+    null,
+    2,
+  )}\n`;
+}
+
+/** Names added, removed, or whose sites moved, between two inventories: one line each, `+`/`-`/`~`. */
+export function diffNames(oldInv, newInv) {
+  const sites = (n) => n.sites.map((s) => s.at).join(', ');
+  const before = new Map(oldInv.names.map((n) => [n.id, n]));
+  const after = new Map(newInv.names.map((n) => [n.id, n]));
+  const added = [...after.values()].filter((n) => !before.has(n.id)).map((n) => `+ ${n.id} (${sites(n)})`);
+  const removed = [...before.values()].filter((n) => !after.has(n.id)).map((n) => `- ${n.id} (${sites(n)})`);
+  const moved = [...after.values()]
+    .filter((n) => before.has(n.id) && sites(before.get(n.id)) !== sites(n))
+    .map((n) => `~ ${n.id} ${sites(before.get(n.id))} -> ${sites(n)}`);
+  return [...added, ...removed, ...moved];
+}
+
+/** Inventory of the x3270 tree at `root`. Reports the tag from `Common/version.txt`, and the
+ * linked `.c` files' `missingSources` exactly as `linkedSources()` reports them (object
+ * basenames, e.g. 'favicon') rather than recomputing which files exist. */
+export function inventory(root) {
+  const read = (p) => readFileSync(join(root, p), 'utf8');
+  const tag = read('Common/version.txt').match(/^version="([^"]+)"/m)?.[1];
+  if (!tag) throw new Error(`${root}: no version= in Common/version.txt`);
+  const { sources, missingSources } = linkedSources(read);
+  return { tag, missingSources, ...extractNames(read, sources) };
+}
+
+/** Downloads and unpacks the x3270 GitHub release tarball for `tag` into a fresh temp
+ * directory; returns the extracted tree's root. `tag` is validated against `TAG` before it ever
+ * reaches a URL or a shell argument. curl and tar both run with the temp dir as cwd, never the
+ * untrusted tree itself. */
+export function fetchTag(tag) {
+  if (!TAG.test(tag)) throw new Error(`not an x3270 tag: ${tag}`);
+  const dir = mkdtempSync(join(tmpdir(), 'x3270-'));
+  const tgz = join(dir, 'src.tgz');
+  const url = `https://github.com/pmattes/x3270/archive/refs/tags/${tag}.tar.gz`;
+  for (const [cmd, args] of [['curl', ['-fsSL', '-o', tgz, url]], ['tar', ['-xzf', tgz, '-C', dir]]]) {
+    const r = spawnSync(cmd, args, { cwd: dir, stdio: ['ignore', 'inherit', 'inherit'] });
+    if (r.status !== 0) throw new Error(`${cmd} failed for ${url}`);
+  }
+  return join(dir, `x3270-${tag}`);
+}
+
+async function upstreamTags() {
+  const r = await fetch('https://api.github.com/repos/pmattes/x3270/tags?per_page=100', {
+    headers: { accept: 'application/vnd.github+json' },
+  });
+  if (!r.ok) throw new Error(`GitHub tags: HTTP ${r.status}`);
+  return (await r.json()).map((t) => t.name);
+}
+
+const USAGE = 'usage: parity-extract.mjs (--dir <tree> | --tag <tag>) [--out <file>] | --upstream <committed.json>';
+
+export async function main(argv, io = { log: console.log, err: console.error }) {
+  const [mode, arg, ...rest] = argv;
+  try {
+    if (mode === '--upstream' && arg) {
+      const committed = JSON.parse(readFileSync(arg, 'utf8'));
+      const ga = newestGa(await upstreamTags());
+      if (!ga) throw new Error('no GA tag upstream');
+      if (ga === committed.tag) {
+        io.log(`x3270 ${ga} is the newest GA and is the one recorded`);
+        return 0;
+      }
+      const lines = diffNames(committed, inventory(fetchTag(ga)));
+      io.err(`x3270 ${ga} is newer than the recorded ${committed.tag}: regenerate with --tag ${ga}`);
+      for (const l of lines) io.err(l);
+      return 1;
+    }
+    if ((mode === '--dir' || mode === '--tag') && arg) {
+      const root = mode === '--dir' ? resolve(arg) : fetchTag(arg);
+      const outIx = rest.indexOf('--out');
+      const out = outIx >= 0 ? rest[outIx + 1] : 'docs/parity/x3270-names.json';
+      const inv = inventory(root);
+      writeFileSync(out, renderInventory(inv));
+      io.log(
+        `${out}: x3270 ${inv.tag}, ${inv.names.length} names, ${inv.missingSources.length} missing sources, `
+        + `${inv.unresolved.length} unresolved, ${inv.nonLiteralMenuCalls.length} non-literal menu calls`,
+      );
+      return 0;
+    }
+    io.err(USAGE);
+    return 2;
+  } catch (e) {
+    io.err(`parity-extract: ${e.message}`);
+    return 1;
+  }
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  process.exitCode = await main(process.argv.slice(2));
 }
