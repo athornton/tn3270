@@ -21,7 +21,7 @@
   x3270: "File menu → Disconnect; Disconnect()/Close() actions"
   gui: "menu: Model → Disconnect"
   status: partial
-  gap: "the Disconnect item lives in the Model menu, so a --terminal-type session, which has no Model menu, has no way to disconnect"
+  gap: "the Disconnect item lives in the Model menu, not File, so a --terminal-type session, which has no Model menu, has no way to disconnect; and it cannot cancel a connect in flight (x3270's Disconnect is enabled whenever PCONNECTED, including resolving/pending; x3270/menubar.c:650, include/globals.h:282)"
   evidence:
     code: [packages/gui/src/menu.ts:304, packages/gui/src/main.ts:1472, packages/core/src/session.ts:903]
     tests: [packages/gui/test/menu.test.ts, packages/core/test/session.test.ts]
@@ -58,8 +58,8 @@
 - id: host-list
   area: connection
   title: Host list (ibm_hosts) in the Connect menu
-  covers: [option:-hostsfile, resource:noOther]
-  x3270: "Connect menu entries from the hosts file; -hostsfile; noOther hides Other…"
+  covers: [option:-hostsfile, resource:noOther, resource:confDir]
+  x3270: "Connect menu entries from the hosts file; -hostsfile; confDir locates ibm_hosts; noOther hides Other…"
   gui: none
   status: missing
 - id: recent-hosts
@@ -112,12 +112,12 @@
   title: Verify the host certificate, or not, against the system store or a CA file
   covers: [option:-verifycert, option:-noverifycert, option:-cafile]
   x3270: "-verifycert, -noverifycert, -cafile"
-  gui: "flags: -verifycert, -noverifycert (or -no-verify), -cafile; TLS itself is on by default (Connect dialog: TLS checkbox)"
+  gui: "flags: -verifycert, -noverifycert (or -no-verify), -cafile; TLS itself is on by default (Connect dialog: TLS checkbox). Live: the default chain-verified path from the GUI against pubvm.org (cited); -cafile via the CLI in 'TLS against both hosts — verified 2026-08-25'; -noverifycert has no live witness (socket test only)"
   status: ours
   evidence:
     code: [packages/frontend/src/tls.ts:94, packages/frontend/src/tls.ts:325]
     tests: [packages/frontend/test/tls.test.ts, packages/cli/test/tls.test.ts]
-    live: "TLS against both hosts — verified 2026-08-25"
+    live: "Packaging and TLS against a real TLS host — reported by the user 2026-11-08"
   browser: "the gateway's own command line has the same TLS flags"
   others: {tui: "same flags", cli: "same flags"}
 - id: tls-ca-dir
@@ -170,10 +170,11 @@
   title: Send a given string as the telnet TERMINAL-TYPE
   covers: [option:-tn]
   x3270: "-tn <name>"
-  gui: "flag: --terminal-type (spelled differently from x3270's -tn)"
-  status: ours
+  gui: "flag: --terminal-type (spelled differently from x3270's -tn); its live witness was a CLI run"
+  status: partial
+  gap: "--terminal-type also discards -model's screen size (24x80 only) and the Model/Disconnect menu, refuses -oversize, and replaces the TN3270E DEVICE-TYPE, where x3270's -tn changes only TERMINAL-TYPE (Common/telnet.c:2121-2122)."
   evidence:
-    code: [packages/core/src/termtype.ts:115, packages/gui/src/args.ts:136]
+    code: [packages/core/src/termtype.ts:115, packages/core/src/termtype.ts:104, packages/gui/src/args.ts:136, packages/gui/src/main.ts:1380, packages/gui/src/menu.ts:417, packages/core/src/session.ts:1297]
     tests: [packages/core/test/termtype.test.ts, packages/gui/test/args.test.ts]
     live: "2. The selector rides on the TERMINAL-TYPE string, not on an LU name"
   browser: "the gateway does not accept --terminal-type"
@@ -195,7 +196,7 @@
   evidence:
     code: [packages/core/src/devname.ts:16, packages/core/src/telnet.ts:445, packages/gui/src/args.ts:170]
     tests: [packages/core/test/devname.test.ts, packages/core/test/telnet.test.ts, packages/gui/test/args.test.ts]
-    live: "`playback -b` as a reference oracle — the traces, and how to read them, 2026-09-17"
+    live: unwitnessed
   browser: "the gateway accepts -devname on its own command line"
   others: {tui: "-devname", cli: "-devname"}
 - id: new-environ
@@ -205,7 +206,7 @@
   x3270: "newEnviron resource (on by default)"
   gui: "on only when -devname is given"
   status: partial
-  gap: "option 39 is refused unless -devname is given, where x3270 offers it by default; CHARSET and KBDTYPE are never sent"
+  gap: "option 39 is refused unless -devname is given, where x3270 accepts a host's DO NEW-ENVIRON by default (Common/telnet.c:1913-1922); CHARSET and KBDTYPE are never sent"
   evidence:
     code: [packages/core/src/telnet.ts:445, packages/core/src/newenviron.ts:195]
     tests: [packages/core/test/newenviron.test.ts, packages/core/test/telnet.test.ts]
@@ -216,9 +217,9 @@
   x3270: "-user <name>"
   gui: none
   status: partial
-  gap: "no -user flag: USER is always the local account ($USER, then $USERNAME, then UNKNOWN), and only when -devname enables option 39"
+  gap: "no -user flag: USER is always the local account ($USER, then $USERNAME, then UNKNOWN), and only when -devname enables option 39. Core already takes SessionOptions.user (core/src/session.ts:122), so only the flag is missing"
   evidence:
-    code: [packages/core/src/session.ts:720]
+    code: [packages/core/src/session.ts:720, packages/core/src/session.ts:122]
 - id: login-macro
   area: connection
   title: Run a macro at login
@@ -229,11 +230,22 @@
 - id: nvt-mode
   area: connection
   title: NVT (ANSI) mode, line and character mode, and their line-editing characters
-  covers: [option:-nvt, menu:lineModeOption, menu:characterModeOption, resource:icrnl, resource:inlcr, resource:onlcr, resource:eof, resource:erase, resource:intr, resource:kill, resource:lnext, resource:quit, resource:rprnt, resource:werase, resource:bsdTm, resource:noTelnetInputMode]
-  x3270: "Options → Toggles → Line Mode / Character Mode (NVT only); -nvt; line-mode resources; bsdTm; noTelnetInputMode (T: hosts)"
+  covers: [option:-nvt, menu:lineModeOption, menu:characterModeOption, resource:icrnl, resource:inlcr, resource:onlcr, resource:eof, resource:erase, resource:intr, resource:kill, resource:lnext, resource:quit, resource:rprnt, resource:werase, resource:noTelnetInputMode]
+  x3270: "Options → Toggles → Line Mode / Character Mode (NVT only); -nvt; line-mode resources; noTelnetInputMode (T: hosts)"
   gui: none
   status: missing
   browser: "none"
+- id: telnet-timing-mark
+  area: connection
+  title: Answer a host's DO TIMING-MARK (BSD telnetd compatibility)
+  covers: [resource:bsdTm]
+  x3270: "bsdTm resource (off by default: DO TIMING-MARK is refused; Common/telnet.c:1918)"
+  gui: "none: DO TIMING-MARK is always refused"
+  status: partial
+  gap: "we always answer WONT TIMING-MARK, which matches x3270's default; there is no switch to accept it as bsdTm does"
+  evidence:
+    code: [packages/core/src/telnet.ts:480]
+    tests: [packages/core/test/telnet.test.ts]
 - id: telnet-nop
   area: connection
   title: Send telnet NOPs to keep an idle connection alive
