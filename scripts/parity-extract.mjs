@@ -126,23 +126,16 @@ function callArgs(text, open) {
 
 const MENU_CALL = /\b(add_menu_itemv|toggle_init|Xt\w*Create\w*(?:Widget|PopupShell))\s*\(/g;
 
-// A name field can be a bare identifier, a string literal, or (suite3270 4.5ga6
-// x3270/xactions.c, e.g. `{ PA_PFX "ConfigureNotify", ... }`) a run of either, space-separated
-// (a macro prefix concatenated with a literal, C-style). The plan's draft only matched a single
-// bare token or literal, which silently dropped all 13 `PA_PFX "..."` entries in xactions.c;
-// over-include means accepting the run and resolving/flagging it below.
-const NAME_TOKEN = '(?:\\w+|"(?:[^"\\\\]|\\\\.)*")';
-const NAME_FIELD = new RegExp(`^${NAME_TOKEN}(?:\\s+${NAME_TOKEN})*$`);
-
 /**
  * The six kinds of name, over the linked `files`. `read(path)` returns file text.
- * @returns {{ names: object[], unresolved: string[], nonLiteralMenuCalls: string[] }}
+ * @returns {{ names: object[], unresolved: string[], nonLiteralMenuCalls: string[], privateXactions: number }}
  */
 export function extractNames(read, files) {
   const defs = parseDefines(`${read('include/names.h')}\n${read('include/resources.h')}`);
   const names = new Map();
   const unresolved = [];
   const nonLiteralMenuCalls = [];
+  let privateXactions = 0;
   const add = (kind, value, file, line, guards, extra = {}) => {
     const id = `${kind}:${value}`;
     const n = names.get(id) ?? { id, kind, value, sites: [] };
@@ -166,31 +159,21 @@ export function extractNames(read, files) {
     const guards = guardsByLine(text);
     for (const t of text.match(/\b(?:Res|Dot)\w+/g) ?? []) used.add(t);
     const local = parseDefines(text); // e.g. Common/task.c's RESUME_INPUT
-    // Resolve a (possibly multi-token) action/xaction name field: concatenate each literal or
-    // Ident piece, local #defines first, then names.h/resources.h; an unresolved identifier is
-    // kept as its own text (so the result is still a usable, if ugly, id) and flagged.
-    const actionName = (raw, line) => {
-      if (/^"(?:[^"\\]|\\.)*"$/.test(raw)) return raw.slice(1, -1);
-      const tokens = raw.match(/"(?:[^"\\]|\\.)*"|\w+/g) ?? [];
-      let ok = true, s = '';
-      for (const t of tokens) {
-        if (t.startsWith('"')) { s += t.slice(1, -1); continue; }
-        const v = local.has(t) ? local.get(t) : defs.get(t);
-        if (v === undefined) { ok = false; s += t; } else s += v;
-      }
-      if (!ok) unresolved.push(`${raw} at ${file}:${line}`);
-      return s;
-    };
+    const actionName = (token, line) => (local.has(token) ? local.get(token) : resolveName(token, file, line));
 
     for (const e of tables(text, /\baction_table_t\s+\w+\s*\[\s*\]\s*=\s*\{/g)) {
       const f = fields(e.body);
-      if (!NAME_FIELD.test(f[0] ?? '') || /\bACTION_HIDDEN\b/.test(f[2] ?? '')) continue;
+      if (!/^(\w+|"[^"]*")$/.test(f[0] ?? '') || /\bACTION_HIDDEN\b/.test(f[2] ?? '')) continue;
       add('action', actionName(f[0], e.line), file, e.line, guards);
     }
     // The pure Xt actions (x3270/xactions.c): bindable in keymaps, so reachable by a user.
+    // x3270's own event-handler actions ("private Xt actions": PA_END, PA_KEYMAP_TRACE, and the
+    // PA_PFX-concatenated Expose/Focus/WMProtocols/etc. entries) are internal plumbing, not
+    // user-bindable commands, and are counted in privateXactions instead of listed.
     for (const e of tables(text, /\bXtActionsRec\s+xactions\s*\[\s*\]\s*=\s*\{/g)) {
       const [name] = fields(e.body);
-      if (NAME_FIELD.test(name ?? '')) add('xaction', actionName(name, e.line), file, e.line, guards);
+      if (/^PA_\w+/.test(name ?? '')) { privateXactions++; continue; }
+      if (/^(\w+|"[^"]*")$/.test(name ?? '')) add('xaction', actionName(name, e.line), file, e.line, guards);
     }
     // Options: x3270's own Xrm table only. Its register_opts() is a no-op (x3270/x3270.c:1356),
     // so the opt_t tables in Common/ never reach it.
@@ -240,5 +223,6 @@ export function extractNames(read, files) {
     names: [...names.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)),
     unresolved: [...new Set(unresolved)].sort(),
     nonLiteralMenuCalls: nonLiteralMenuCalls.sort(),
+    privateXactions,
   };
 }

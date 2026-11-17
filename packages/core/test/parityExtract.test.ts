@@ -115,13 +115,14 @@ describe('extractNames', () => {
     expect(ids).toEqual(expect.arrayContaining(['xaction:Cut', 'xaction:StepEfont']));
   });
 
-  it('resolves a concatenated action/xaction name (macro prefix + string literal), flagging the unknown macro', () => {
-    // x3270/xactions.c (suite3270 4.5ga6) has 13 entries of the form `{ PA_PFX "Foo", ... }`,
-    // where PA_PFX is `#define`d in x3270/xactions.h, a header this extractor never reads. The
-    // plan's draft regex (bare `\w+` or `"..."` only) silently dropped these; over-include means
-    // keeping them under a best-effort concatenated id and flagging the unresolved macro.
-    expect(ids).toContain('xaction:PA_PFXConfigureNotify');
-    expect(out.unresolved).toContain('PA_PFX "ConfigureNotify" at x3270/xactions.c:4');
+  it('excludes PA_-prefixed private Xt actions (x3270 event handlers, not user-bindable), counted', () => {
+    // x3270/xactions.c (suite3270 4.5ga6) has 13 entries of the form `{ PA_PFX "Foo", ... }` plus
+    // bare `PA_END`/`PA_KEYMAP_TRACE` entries: x3270's own internal event-handler plumbing, not
+    // commands a user binds. Controller decision: these are not inventory names; count them in
+    // `privateXactions` instead of listing or flagging them as unresolved.
+    expect(ids).not.toContain('xaction:PA_PFXConfigureNotify');
+    expect(out.unresolved).not.toContain('PA_PFX "ConfigureNotify" at x3270/xactions.c:4');
+    expect(out.privateXactions).toBe(1);
   });
 
   it("takes options from x3270's Xrm table only, with the resource each sets", () => {
