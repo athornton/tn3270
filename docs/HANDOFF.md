@@ -38,20 +38,16 @@ evidence is `live: unwitnessed` — `reconnect`, `devname`, `bind-limit`, `tls-v
 `dup`, `field-mark`; (3) whatever is still `missing`/`partial` after that is the store roadmap, which
 replaces README *Remaining* 15-22 (separate work, no spec yet).
 
-### FOUND, NOT FIXED
+### FOUND BY THE CHECKLIST (1-2 FIXED SINCE, 3-13 OPEN)
 
 Found while populating the checklist and confirmed by an independent reviewer, mostly with a
-probe; none of these are fixed by this branch.
+probe. Items 1-2 were fixed afterwards in `a5aa71e`; the rest are open.
 
-1. **GUI, HIGH, blocks any store build:** `packages/gui/src/main.ts:510` uses
-   `process.argv.slice(2)`, but a packaged Electron's argv is `[exe, ...userArgs]`, so the first
-   user argument is dropped. `TN3270 host` opens the Connect dialog. Package smoke misses it
-   because its first argument is `--disable-gpu` (`scripts/package-checks.mjs:99,173`). Likely
-   fix: `slice(process.defaultApp ? 2 : 1)`, plus a package-smoke case with a host as the first
-   argument.
-2. **GUI, MEDIUM:** Ctrl-] is registered with `globalShortcut` (`main.ts:480,501`), which is
-   system-wide, so Ctrl-] in another app (e.g. telnet's escape) quits TN3270, per Electron's docs
-   (not run).
+1. ~~**GUI, HIGH:** the packaged app dropped its first argument (`main.ts` sliced argv at 2).~~
+   **FIXED in `a5aa71e`** (`userArgv`, slicing at 1 unless `process.defaultApp`); package smoke's
+   golden launch now leads with `-model`, which the 0.1.4 deb fails and the fix passes 4/4.
+2. ~~**GUI, MEDIUM:** Ctrl-] was a system-wide `globalShortcut`.~~ **FIXED in `a5aa71e`**: a
+   per-window `before-input-event` hook (`quitChord.ts`), probed to quit before the renderer acts.
 3. **Core:** AID keys are sent while the keyboard is locked (`Session.sendAID` has no lock check;
    x3270 queues or drops them).
 4. **Core:** editing and cursor keys change the screen while host-locked.

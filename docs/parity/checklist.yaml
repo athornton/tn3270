@@ -1376,12 +1376,12 @@
   title: Exit the emulator, confirming first when connected
   covers: [action:Quit, action:Exit, menu:exitOption, menu:exitReallyOption]
   x3270: "File → Exit x3270, which while connected becomes a pullright whose Disconnect and Exit item confirms (x3270/menubar.c:653-679, :1255-1272; labels x3270/fb-x3270:907-908); Quit()/Exit() actions (Common/xio.c:209-210), refused from a keymap while connected unless -force (Common/xio.c:181-192), with Alt-Q bound to Quit(-force) (x3270/fb-x3270:266)"
-  gui: "keystroke: Ctrl-] quits at once, registered with globalShortcut and so system-wide (main.ts:480, :501); menu: the macOS app menu's Quit only; closing the last window quits. Before our menu is installed (e.g. behind the Connect dialog) Electron's default menu applies on Linux, with File → Quit and View → Reload/Toggle Developer Tools, which is not a reach equivalent"
+  gui: "keystroke: Ctrl-] quits at once from any of our windows, through a per-window before-input-event hook (main.ts:3164, quitChord.ts) -- app-scoped since a5aa71e, where it used to be a system-wide globalShortcut; menu: the macOS app menu's Quit only; closing the last window quits. Before our menu is installed (e.g. behind the Connect dialog) Electron's default menu applies on Linux, with File → Quit and View → Reload/Toggle Developer Tools, which is not a reach equivalent"
   status: partial
   gap: "no Exit menu item on Linux or Windows (the app menu, which carries Quit, is built only on macOS), and nothing confirms before quitting a connected session as x3270's Disconnect and Exit does."
   evidence:
-    code: [packages/canvas/src/keys.ts:126, packages/gui/src/main.ts:501, packages/gui/src/main.ts:1629, packages/gui/src/menu.ts:418, packages/gui/src/main.ts:3158]
-    tests: [packages/canvas/test/keys.test.ts, packages/gui/test/menu.test.ts]
+    code: [packages/canvas/src/keys.ts:126, packages/gui/src/main.ts:3164, packages/gui/src/quitChord.ts, packages/gui/src/main.ts:1628, packages/gui/src/menu.ts:418, packages/gui/src/main.ts:3170]
+    tests: [packages/canvas/test/keys.test.ts, packages/gui/test/menu.test.ts, packages/gui/test/quitChord.test.ts]
     live: n/a
   browser: "n/a: closing the tab ends the session"
   others: {tui: "Ctrl-]", cli: "Quit()"}
@@ -1427,7 +1427,7 @@
   title: Print command-line usage
   covers: [option:--help, option:-?]
   x3270: "a lone --help or -? prints the option list and exits (x3270/x3270.c:502-506)"
-  gui: "none: from npm, refused as an unrecognized argument (args.ts:176-177); in the packaged app the first argument is dropped (main.ts:510 slices argv at 2, but a packaged Electron's argv is [exe, ...userArgs]) and the Connect dialog opens."
+  gui: "none: refused as an unrecognized argument (args.ts:176-177), from npm and (since a5aa71e, which stopped the packaged app dropping its first argument) from the packaged app too."
   status: missing
   browser: "n/a"
 - id: version-flag
@@ -1435,7 +1435,7 @@
   title: Print the version and build options
   covers: [option:-v, option:--version]
   x3270: "a lone -v or --version prints the build, build options, TLS provider, code pages and copyright, then exits (x3270/x3270.c:497-501, Common/util.c:944-956)"
-  gui: "none: from npm, refused as an unrecognized argument (args.ts:176-177); in the packaged app the first argument is dropped (main.ts:510 slices argv at 2, but a packaged Electron's argv is [exe, ...userArgs]) and the Connect dialog opens."
+  gui: "none: refused as an unrecognized argument (args.ts:176-177), from npm and (since a5aa71e, which stopped the packaged app dropping its first argument) from the packaged app too."
   status: missing
   browser: "n/a"
 - id: min-version
