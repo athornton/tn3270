@@ -6,6 +6,7 @@ import {
 } from '../src/constants.js';
 import { NO_BIND_TIMEOUT_MS, BIND_OFF, BIND_RU as BIND_RU_BYTE } from '../src/bind.js';
 import { MODEL_4 } from '../src/constants.js';
+import { KeyboardState } from '../src/oia.js';
 
 const ascii = (s: string): number[] => Array.from(s, (c) => c.charCodeAt(0) & 0xff);
 
@@ -1042,5 +1043,64 @@ describe('TN3270E SYSREQ', () => {
     conn.clear();
     session.sendAID(AID.ENTER);
     expect(conn.writes.at(-1)!.slice(0, 5)).toEqual([0, 0, 0, 0, 0]);
+  });
+});
+
+/**
+ * Task 8: `Attn_action` (kybd.c:982-1002). `IN_E` branches on `net_bound()`
+ * (`Session.inTn3270e() && Session.bound`, the latter set by `handleBind`, Task 8's
+ * section of session.ts): bound sends `net_interrupt` (`IAC IP`); unbound sends
+ * nothing and raises `KL_OIA_MINUS` instead (`vstatus_minus()` +
+ * `kybdlock_set(KL_OIA_MINUS, AnAttn)`). `IN_3270` (classic) is unchanged and is
+ * already pinned by session.test.ts's "sends Attn as IAC BREAK rather than an AID".
+ *
+ * No TN3270E host is reachable here (the spec says so explicitly), so every case
+ * below is driven through `FakeConnection`, exactly as the BIND-gate tests above.
+ */
+describe('TN3270E Attn', () => {
+  const GRANT_BIND_IMAGE = [Tn3270eFunc.BIND_IMAGE, Tn3270eFunc.RESPONSES];
+  const BIND_RU = 0x31;
+  const bind = (): number[] =>
+    [Tn3270eDataType.BIND_IMAGE, 0x00, 0x00, 0x00, 0x00, BIND_RU, T.IAC, T.EOR];
+
+  it('sends IAC IP, not IAC BREAK, once bound', async () => {
+    const { session, conn } = newSession();
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE(GRANT_BIND_IMAGE);
+    conn.host(...bind());
+    conn.clear();
+
+    session.sendAttn();
+
+    expect(conn.writes).toEqual([[T.IAC, T.IP]]);
+  });
+
+  it('sends nothing and raises the OIA minus-function lock while unbound', async () => {
+    // Ordinary TN3270E negotiation (the default grant, as every other describe block
+    // in this file but "the BIND gate" uses) never sets `bound` at all, so this session
+    // is E but unbound for its whole life -- exactly the case Attn_action's `else` arm
+    // covers.
+    const { session, conn } = newSession();
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE();
+    conn.clear();
+
+    session.sendAttn();
+
+    expect(conn.writes).toEqual([]);
+    expect(session.oia.keyboard).toBe(KeyboardState.MinusFunction);
+    expect(session.oia.toText()).toContain('X -f');
+  });
+
+  it('clears the minus-function lock on Reset', async () => {
+    const { session, conn } = newSession();
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE();
+    session.sendAttn();
+    expect(session.oia.keyboard).toBe(KeyboardState.MinusFunction);
+
+    session.run({ kind: 'reset' });
+
+    expect(session.oia.keyboard).toBe(KeyboardState.Unlocked);
   });
 });

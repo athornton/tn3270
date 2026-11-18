@@ -2123,9 +2123,32 @@ export class Session {
     this.sendAID(AID.SYSREQ);
   }
 
-  /** Attn is Telnet BREAK (RFC 1576 §8), not an AID. */
+  /**
+   * `Attn_action` (kybd.c:982-1002), not an AID:
+   *
+   *  - TN3270E, bound (`net_bound()`, i.e. `inTn3270e() && this.bound`): Telnet IP
+   *    (`net_interrupt`, telnet.c:3608-3622).
+   *  - TN3270E, unbound: nothing goes on the wire. x3270 shows the OIA minus-function
+   *    indicator and locks the keyboard (`vstatus_minus()` +
+   *    `kybdlock_set(KL_OIA_MINUS, AnAttn)`); `KeyboardState.MinusFunction` is the
+   *    mirror (it renders `X -f`, `Oia.toText`). KL_OIA_MINUS sits outside
+   *    `KL_OERR_MASK` (include/kybd.h:35-49), so it is a HOST lock, not an operator
+   *    error -- `Oia.isOperatorError()` already excludes it, and `run`'s typeahead
+   *    queue (not the alarm-and-drop path) is what a key typed under it would hit.
+   *    Cleared by Reset like any other lock bit: `do_reset`'s `kybdlock_clr` mask
+   *    includes it (kybd.c:2062), matching `Keyboard.reset()`/`Oia.reset()` here.
+   *  - Classic 3270: Telnet BREAK, as before this task (`net_break`, telnet.c:3589-3603).
+   */
   sendAttn(): void {
     if (this.telnet === undefined) throw new Error('not connected');
+    if (this.inTn3270e()) {
+      if (this.bound) {
+        this.telnet.sendInterrupt();
+      } else {
+        this.oia.inhibit(KeyboardState.MinusFunction);
+      }
+      return;
+    }
     this.telnet.sendAttn();
   }
 

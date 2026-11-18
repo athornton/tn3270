@@ -450,6 +450,17 @@ describe('transmission', () => {
     layer.sendAttn();
     expect(sent[0]).toEqual([T.IAC, T.BREAK]);
   });
+
+  /**
+   * TN3270E Attn, bound: `net_interrupt` (Common/telnet.c:3608-3622) sends `IAC IP`,
+   * not `IAC BREAK`. `Session.sendAttn` picks which of the two this layer sends; this
+   * layer just needs the second wire form to exist. See `Attn_action`, kybd.c:982-1002.
+   */
+  it('sends Attn as IAC IP on a TN3270E session, per RFC 2355 / Attn_action', () => {
+    const { layer, sent } = harness();
+    layer.sendInterrupt();
+    expect(sent[0]).toEqual([T.IAC, T.IP]);
+  });
 });
 
 describe('trace wiring', () => {
@@ -476,6 +487,17 @@ describe('trace wiring', () => {
     // At least one received line (negotiation) and one sent line (our WILL reply).
     expect(lines.some((l) => l.includes(' < '))).toBe(true);
     expect(lines.some((l) => l.includes(' > '))).toBe(true);
+  });
+
+  it('labels sendInterrupt "Attn (IAC IP)"', () => {
+    const trace = new Trace({ enabled: true, clock: () => 0 });
+    const layer = new TelnetLayer({
+      write: () => {},
+      onRecord: () => {},
+      trace,
+    });
+    layer.sendInterrupt();
+    expect(trace.lines().some((l) => l.includes('Attn (IAC IP)'))).toBe(true);
   });
 });
 
