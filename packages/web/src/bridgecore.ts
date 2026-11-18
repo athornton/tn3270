@@ -262,8 +262,14 @@ export interface BridgeDeps {
    * INJECTED RATHER THAN `new AudioContext()` AT THE POINT OF USE, which is what lets a test
    * supply a FAKE one, one that THROWS, or `undefined` -- and all three are real browser
    * behavior, not merely test conveniences: a missing `AudioContext` constructor on an old
-   * engine, and a context a browser REFUSES to let play before the page has had a user gesture
-   * (`tone`, in this file, swallows every one of the three and never throws).
+   * engine, and a context a browser's autoplay policy starts `suspended` rather than refusing
+   * outright (`tone`, in this file, swallows every one of the three and never throws).
+   *
+   * A CONTEXT BUILT BEFORE A USER GESTURE DOES NOT THROW: it is simply created `suspended`, and
+   * stays that way -- `start()` on an oscillator through it runs and produces no error, just no
+   * audible sound, until something calls `resume()` after a gesture has happened. `tone` calls
+   * `resume()` on every alarm for exactly this reason, and ignores a rejection the same way: the
+   * remedy for a silent first alarm is interacting with the page, same as it always was.
    */
   readonly audioContext?: () => AudioContext | undefined;
 }
@@ -463,7 +469,20 @@ export function writeClipboard(
 }
 
 /**
- * Play a short tone for the host's alarm, or do nothing. 2026-11-17.
+ * `tone`'s cache of the `AudioContext` it has already built, one per `createBridge` call.
+ *
+ * A PLAIN OBJECT A CALLER OWNS, RATHER THAN STATE INSIDE `tone` ITSELF: a module-level cache
+ * would leak ONE page's (or one test's) context into every other caller, including a second
+ * `createBridge` in the very same test file. `createBridge` below holds exactly one of these for
+ * the lifetime of the bridge, the same scope `flashFns` and `copyFailed` already have.
+ */
+interface ToneCache {
+  attempted: boolean;
+  ac: AudioContext | undefined;
+}
+
+/**
+ * Play a short tone for the host's alarm, or do nothing. 2026-11-17, context reuse 2026-11-18.
  *
  * HERE RATHER THAN INLINE IN THE `alarm` BRANCH BELOW, so it is a plain function a test can call
  * directly with a fake/throwing/absent `make` -- the same split `writeClipboard` and `socketUrl`
@@ -471,23 +490,37 @@ export function writeClipboard(
  * the bell, and a browser may block sound entirely before a user gesture), so it is the route
  * most at risk of rotting if it only ever ran inline and untested.
  *
- * NEVER THROWS, by design, not by accident: `make` is `undefined` when no `audioContext` dep was
- * given, `make()` can return `undefined` (an old engine with no `AudioContext` constructor), and
- * either `make()` ITSELF or any call inside the `try` can throw (`NotAllowedError` is exactly
- * what a browser throws for a context started before any user gesture -- see MDN's
- * `AudioContext: AudioContext() constructor` page, "Autoplay policy"). A bell is never worth an
- * error on a socket message handler whose `catch` would otherwise paint it on the canvas as if
- * the SCREEN had failed, which it has not.
+ * ONE `AudioContext`, BUILT LAZILY AND REUSED, NEVER CLOSED: `make` used to run on EVERY alarm,
+ * leaking a fresh context (and the browser-side resources behind it, which nothing ever
+ * released) per bell. `cache` is what makes `make` run AT MOST ONCE PER BRIDGE: the first alarm
+ * builds (or fails to build) the context, `cache.attempted` is set either way, and every alarm
+ * after reuses whatever that produced -- including reusing `undefined`, i.e. never retrying a
+ * `make` that returned nothing or threw.
  *
- * BROWSERS MAY BLOCK SOUND BEFORE A USER GESTURE: documented here rather than handled, because
- * there is nothing to handle -- the operator's first alarm on a fresh page load can be silent,
- * and the only remedy is interacting with the page first. This is the plan's own wording,
- * repeated at the point a reader would otherwise expect a retry or a queued tone.
+ * `resume()` RUNS BEFORE EVERY TONE, not only the first, and its rejection is swallowed: see this
+ * function's own doc comment on `BridgeDeps.audioContext` for why a context can be `suspended`
+ * at any point, including ones this cache is already reusing. A rejected `resume()` just means
+ * the suspend has not been lifted yet, so the oscillator below still starts and still produces no
+ * audible sound -- the same silent outcome `BridgeDeps.audioContext`'s doc comment already
+ * documents, now reached by `resume()` rejecting instead of by never calling it at all.
+ *
+ * STILL NEVER THROWS, by design, not by accident: `make` is `undefined` when no `audioContext`
+ * dep was given, `make()` can return `undefined` (an old engine with no `AudioContext`
+ * constructor), and either `make()` ITSELF or any call inside the `try` can throw (an old or
+ * locked-down engine that refuses to construct one at all). A bell is never worth an error on a
+ * socket message handler whose `catch` would otherwise paint it on the canvas as if the SCREEN
+ * had failed, which it has not.
  */
-export function tone(make: (() => AudioContext | undefined) | undefined): void {
+function tone(make: (() => AudioContext | undefined) | undefined, cache: ToneCache): void {
   try {
-    const ac = make?.();
+    if (!cache.attempted) {
+      cache.attempted = true;
+      cache.ac = make?.();
+    }
+    const ac = cache.ac;
     if (ac === undefined) return;
+    // Ignored on purpose -- see the doc comment above and on `BridgeDeps.audioContext`.
+    ac.resume().catch(() => { /* still suspended: play (silently) anyway */ });
     const osc = ac.createOscillator();
     const gain = ac.createGain();
     osc.frequency.value = 880;
@@ -524,6 +557,9 @@ export function createBridge(deps: BridgeDeps): BridgeApi {
   // possibly arrive (the socket has not even said `hello` yet), so there is nothing to queue, and
   // queuing an unclaimed one would strand it forever in a client that never registers it.
   const flashFns: Array<() => void> = [];
+  // `tone`'s own `AudioContext`, built lazily on the first alarm and reused by every one after --
+  // see `ToneCache`'s doc comment and `tone`'s. One per bridge, the same scope `flashFns` has.
+  const toneCache: ToneCache = { attempted: false, ac: undefined };
 
   const dispatch = (kind: string, payload: unknown): void => {
     const fn = handlers.get(kind);
@@ -664,7 +700,7 @@ export function createBridge(deps: BridgeDeps): BridgeApi {
       if (msg.kind === 'alarm') {
         const visual = msg['visual'];
         if (typeof visual !== 'boolean') return;
-        if (visual) { for (const fn of flashFns) fn(); } else { tone(deps.audioContext); }
+        if (visual) { for (const fn of flashFns) fn(); } else { tone(deps.audioContext, toneCache); }
         return;
       }
       if (msg.kind === 'transferProgress' || msg.kind === 'transferDone'
