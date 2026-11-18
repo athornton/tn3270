@@ -114,6 +114,79 @@ describe('typing', () => {
     expect(s.cellAt(1).ebcdic).toBe(0xc1);
   });
 
+  /**
+   * Task 5 (x3270's `ins_prep`, kybd.c:1030-1134): room to insert is ANY NUL
+   * from the cursor to the end of the field, not just the field's last cell.
+   * `ins_prep` scans forward from `baddr` to `next_faddr` (the field's own
+   * attribute) for the first NUL and shifts only up to it -- cells beyond
+   * that NUL do not move. Field is A B C NUL D E, cursor on A.
+   */
+  it('inserts into room anywhere in the field, not only at its last cell', () => {
+    const s = new Screen();
+    s.setFieldAttribute(0, 0x00);
+    s.setFieldAttribute(7, FA.PROTECT); // field data is 1-6
+    s.setChar(1, 0xc1); // A
+    s.setChar(2, 0xc2); // B
+    s.setChar(3, 0xc3); // C
+    s.setChar(4, 0x00); // NUL -- the room
+    s.setChar(5, 0xc4); // D
+    s.setChar(6, 0xc5); // E
+    s.cursor = 1;
+    const k = kb(s);
+    k.insertMode = true;
+    expect(k.type('X')).toBe(true);
+    expect(s.cellAt(1).ebcdic).toBe(0xe7); // X
+    expect(s.cellAt(2).ebcdic).toBe(0xc1); // A, pushed right
+    expect(s.cellAt(3).ebcdic).toBe(0xc2); // B, pushed right
+    expect(s.cellAt(4).ebcdic).toBe(0xc3); // C, pushed right -- the NUL is consumed
+    expect(s.cellAt(5).ebcdic).toBe(0xc4); // D, UNCHANGED: beyond the consumed NUL
+    expect(s.cellAt(6).ebcdic).toBe(0xc5); // E, UNCHANGED
+  });
+
+  /**
+   * A NUL before the cursor is not room: `ins_prep` starts its scan at
+   * `baddr`, never looking backward. Field data is NUL(before) A B, cursor on
+   * A; there is no NUL from the cursor onward, so this is Overflow exactly
+   * like "refuses an insert that would overflow the field" above, which pins
+   * the ordinary case; this one pins that an EARLIER NUL cannot be borrowed.
+   */
+  it('does not count a NUL before the cursor as room', () => {
+    const s = new Screen();
+    s.setFieldAttribute(0, 0x00);
+    s.setFieldAttribute(4, FA.PROTECT); // field data is 1-3
+    s.setChar(1, 0x00); // NUL, but before the cursor
+    s.setChar(2, 0xc1); // A -- cursor here
+    s.setChar(3, 0xc2); // B
+    s.cursor = 2;
+    const k = kb(s);
+    k.insertMode = true;
+    expect(k.type('X')).toBe(false);
+    expect(k.oia.keyboard).toBe(KeyboardState.Overflow);
+    expect(s.cellAt(2).ebcdic).toBe(0xc1); // unchanged
+  });
+
+  /**
+   * Unformatted screen: `ins_prep`'s `faddr == -1` arm uses the end of the
+   * SCREEN as the boundary instead of a field attribute (kybd.c:1079-1081).
+   * Today's insert branch is gated on `field !== null` and skips entirely on
+   * an unformatted screen -- this pins that it must not.
+   */
+  it('inserts on an unformatted screen, using the end of the screen as the boundary', () => {
+    const s = new Screen();
+    s.setChar(5, 0xc1); // A
+    s.setChar(6, 0xc2); // B
+    s.setChar(7, 0x00); // NUL -- the room
+    s.setChar(8, 0xc3); // C, beyond the NUL
+    s.cursor = 5;
+    const k = kb(s);
+    k.insertMode = true;
+    expect(k.type('X')).toBe(true);
+    expect(s.cellAt(5).ebcdic).toBe(0xe7); // X
+    expect(s.cellAt(6).ebcdic).toBe(0xc1); // A, pushed right
+    expect(s.cellAt(7).ebcdic).toBe(0xc2); // B, pushed right -- the NUL is consumed
+    expect(s.cellAt(8).ebcdic).toBe(0xc3); // C, UNCHANGED
+  });
+
   it('types a whole string, respecting protection', () => {
     const s = twoFields();
     const k = kb(s);

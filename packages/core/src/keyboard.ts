@@ -74,7 +74,12 @@ export class Keyboard {
 
     const ebcdic = this.codePage.fromUnicode(char);
 
-    if (this.insertMode && field !== null) {
+    // NOT gated on `field !== null` any more (Task 5): x3270's `ins_prep` runs
+    // on an unformatted screen too, using the end of the SCREEN as its
+    // boundary instead of a field attribute (kybd.c:1079-1081, the `faddr ==
+    // -1` arm). Skipping it there made every unformatted insert a silent
+    // overwrite.
+    if (this.insertMode) {
       if (!this.shiftRight(field, s.cursor)) {
         this.oia.inhibit(KeyboardState.Overflow);
         return false;
@@ -226,7 +231,8 @@ export class Keyboard {
       }
     }
 
-    if (this.insertMode && field !== null) {
+    // See the identical comment in `type()`: not gated on `field !== null`.
+    if (this.insertMode) {
       if (!this.shiftRight(field, s.cursor)) {
         this.oia.inhibit(KeyboardState.Overflow);
         return false;
@@ -269,12 +275,40 @@ export class Keyboard {
     }
   }
 
-  /** Push field contents right from `from`; false if the field would overflow. */
-  private shiftRight(field: Field, from: number): boolean {
+  /**
+   * Room to insert at `from`: ANY NUL from `from` up to (not including) the
+   * field's end, not only the field's own last cell. Mirrors x3270's
+   * `ins_prep` (kybd.c:1030-1134): it scans forward from `baddr` to
+   * `next_faddr` for the first NUL, then shifts only the cells between
+   * `baddr` and that NUL right by one -- cells beyond it do not move. A NUL
+   * BEFORE `from` is never considered, because the scan starts at `from`.
+   *
+   * `field === null` is the unformatted case: `ins_prep`'s `faddr == -1` arm
+   * uses the end of the SCREEN, `(ROWS*COLS)-1`, as the boundary instead of a
+   * field attribute (kybd.c:1079-1081) -- a FIXED address, not derived by
+   * wrapping from `from`, which is why `end` below is `s.size - 1` rather
+   * than something reached via `s.dec`. Trailing BLANKS counting as room is
+   * x3270's `blankFill` (`toggled(BLANK_FILL)`, ins_prep), off by default and
+   * a separate row -- not modelled here.
+   *
+   * No DBCS/charset-SA checks here: `ins_prep`'s `ctlr_mutable_cs()` guard,
+   * which refuses an insert that would move a charset SA, has no equivalent
+   * in this codebase (we carry no DBCS or charset-SA state).
+   */
+  private shiftRight(field: Field | null, from: number): boolean {
     const s = this.screen;
-    const last = this.lastCellOf(field);
-    if (s.cellAt(last).ebcdic !== 0x00) return false; // no room
-    let a = last;
+    // x3270's `next_faddr`: the NEXT field attribute after this one, found by
+    // walking forward from the field's start -- NOT `field.attrAddr`, which
+    // is the attribute at the field's OWN START, behind `from`. A single
+    // field that wraps the whole buffer lands back on its own `attrAddr`,
+    // matching `ins_prep`'s `next_faddr != faddr` loop test.
+    const end = field !== null ? this.fieldEnd(field) : s.size - 1;
+    let firstNull = -1;
+    for (let a = from; a !== end; a = s.inc(a)) {
+      if (s.cellAt(a).ebcdic === 0x00) { firstNull = a; break; }
+    }
+    if (firstNull === -1) return false; // no room
+    let a = firstNull;
     while (a !== from) {
       const prev = s.dec(a);
       s.setChar(a, s.cellAt(prev).ebcdic);
@@ -283,9 +317,10 @@ export class Keyboard {
     return true;
   }
 
-  private lastCellOf(field: Field): number {
+  /** The address just past `field`'s last data cell -- the next field attribute. */
+  private fieldEnd(field: Field): number {
     let a = field.start;
-    for (let n = 1; n < field.length; n++) a = this.screen.inc(a);
+    for (let n = 0; n < field.length; n++) a = this.screen.inc(a);
     return a;
   }
 
