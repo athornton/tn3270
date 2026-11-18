@@ -4,7 +4,7 @@ import {
 } from './constants.js';
 import { Screen } from './screen.js';
 import { Keyboard } from './keyboard.js';
-import type { KeyAction, RunResult } from './keyAction.js';
+import { OERR_CLEARS, type KeyAction, type RunResult } from './keyAction.js';
 import { Oia, KeyboardState } from './oia.js';
 import { Trace, parseTrace } from './trace.js';
 import { TelnetLayer, type TelnetLayerOptions } from './telnet.js';
@@ -1867,16 +1867,37 @@ export class Session {
    *     given priority over the queue, which is still a faithful x3270 behaviour since a
    *     locked Reset has nowhere to queue TO until Task 3/4 give the lock its shape.
    *  3. No lock: perform now.
-   *  4. Operator-error lock (`oia.isOperatorError()`): Task 3 inserts its
-   *     clear-then-act-or-drop branch HERE, before the host-lock branch below -- x3270's
-   *     `KYBDLOCK_IS_OERR` is checked first, and an OERR bit present alongside a host lock
-   *     drops rather than queues (`enq_xta`'s own first test).
+   *  4. Operator-error lock (`oia.isOperatorError()`): `KYBDLOCK_IS_OERR` is checked
+   *     before the host-lock branch below -- an OERR bit present alongside a host lock
+   *     drops rather than queues (`enq_xta`'s own first test). `OERR_CLEARS` members
+   *     (`tab`, the arrows, `home`, `eraseEOF`, `eraseInput`) clear the error and run as
+   *     `perform` would on an unlocked keyboard (`OERR_CLEAR_OR_ENQ`, kybd.c:146-157);
+   *     everything else -- typed characters, `backspace`, `delete`, `newline`, `dup`,
+   *     `fieldMark`, the AIDs, `attn`, `sysreq`, `insert` -- is dropped with the alarm,
+   *     because x3270's `key_Character` tests `kybdlock` unconditionally and is not
+   *     wrapped in `OERR_CLEAR_OR_ENQ` (kybd.c:1200-1208 vs :146-157): an operator error
+   *     is the operator's to clear with a cursor move or Reset, not with another
+   *     keystroke of the same kind that caused it.
+   *
+   *     OUR OIA HOLDS ONE KEYBOARD STATE, so x3270's "operator error raised while a host
+   *     lock is also up" (two bits at once) cannot arise here -- `isOperatorError()` is
+   *     only ever true when `isInhibited()` is true for THAT reason, never alongside a
+   *     host lock. `oia.reset()` below is therefore safe to call unconditionally in this
+   *     branch: it cannot un-lock a host lock that coexists with the OERR state, because
+   *     none ever does. Modelled as a comment rather than a second bit, which is why.
    *  5. Host lock: during a transfer, drop with the alarm (`KL_FT`); otherwise queue.
    */
   run(action: KeyAction): RunResult {
     if (!this.isConnected()) return 'dropped';
     if (!this.oia.isInhibited()) return this.perform(action);
-    // Task 3 adds the operator-error branch HERE, before the host-lock branch.
+    if (this.oia.isOperatorError()) {
+      if (!OERR_CLEARS.has(action.kind)) {
+        this.emit('alarm');
+        return 'dropped';
+      }
+      this.oia.reset();
+      return this.perform(action);
+    }
     if (this.transferring) {
       this.emit('alarm');
       return 'dropped';

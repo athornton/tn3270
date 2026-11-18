@@ -1,9 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
 import { Session, type Connection, type SessionOptions } from '../src/session.js';
 import {
-  TelnetCmd as T, TelnetOpt as O, TelnetSubopt as S, SnaCmd, Order, AID,
+  TelnetCmd as T, TelnetOpt as O, TelnetSubopt as S, SnaCmd, Order, AID, FA,
 } from '../src/constants.js';
 import { KeyboardState, Oia } from '../src/oia.js';
+import { encodeAddress } from '../src/address.js';
+import type { KeyAction } from '../src/keyAction.js';
 
 /**
  * `Session.run`: the one route for operator actions (spec section A), its typeahead
@@ -52,6 +54,57 @@ async function connectedWithField() {
   await session.connect('localhost', 3270);
   conn.negotiate();
   conn.host(SnaCmd.EW, 0xc3, Order.SF, 0x00, T.IAC, T.EOR);
+  conn.sent = [];
+  return { session, conn };
+}
+
+/**
+ * A connected session with a PROTECTED field (attr 0, data address 1) followed
+ * by an ordinary unprotected one (attr 10, data 11-): the protected field is
+ * what raises `X Protected`, the second is what a clear-then-act key (Tab,
+ * Home, ...) lands in.
+ */
+async function connectedWithProtectedField() {
+  const { session, conn } = newSession();
+  await session.connect('localhost', 3270);
+  conn.negotiate();
+  conn.host(
+    SnaCmd.EW, 0xc3,
+    Order.SF, FA.PROTECT,
+    Order.SBA, ...encodeAddress(10, session.screen.size),
+    Order.SF, 0x00,
+    T.IAC, T.EOR,
+  );
+  conn.sent = [];
+  return { session, conn };
+}
+
+/** A connected session with one NUMERIC, unprotected field (attr 0, data 1-). */
+async function connectedWithNumericField() {
+  const { session, conn } = newSession();
+  await session.connect('localhost', 3270);
+  conn.negotiate();
+  conn.host(SnaCmd.EW, 0xc3, Order.SF, FA.NUMERIC, T.IAC, T.EOR);
+  conn.sent = [];
+  return { session, conn };
+}
+
+/**
+ * A connected session with a two-cell unprotected field (attr 0, data 1-2)
+ * followed immediately by a protected one (attr 3): just big enough to hold
+ * two characters and no NUL to spare, for an insert-mode Overflow.
+ */
+async function connectedWithTinyField() {
+  const { session, conn } = newSession();
+  await session.connect('localhost', 3270);
+  conn.negotiate();
+  conn.host(
+    SnaCmd.EW, 0xc3,
+    Order.SF, 0x00,
+    Order.SBA, ...encodeAddress(3, session.screen.size),
+    Order.SF, FA.PROTECT,
+    T.IAC, T.EOR,
+  );
   conn.sent = [];
   return { session, conn };
 }
@@ -261,5 +314,158 @@ describe('Session.run: the typeahead queue under a host lock (Task 2)', () => {
     expect(onAlarm).toHaveBeenCalledTimes(1);
     expect(session.oia.typeahead).toBe(false);
     expect(session.screen.cellAt(1).ebcdic).toBe(0x00);
+  });
+});
+
+describe('Session.run: operator-error lock (Task 3, oerrLock)', () => {
+  /**
+   * Everything OERR_CLEARS does NOT name: typed characters, the AIDs, Attn,
+   * SysReq and insert all get DROPPED under an operator error rather than
+   * cleared-and-acted (spec section A step 4; x3270's key_Character checks
+   * `kybdlock` unconditionally and is not wrapped in OERR_CLEAR_OR_ENQ,
+   * kybd.c:146-157 vs :1200-1208).
+   */
+  const dropKinds: KeyAction[] = [
+    { kind: 'type', text: 'B' },
+    { kind: 'backspace' },
+    { kind: 'delete' },
+    { kind: 'newline' },
+    { kind: 'dup' },
+    { kind: 'fieldMark' },
+    { kind: 'enter' },
+    { kind: 'pf', n: 1 },
+    { kind: 'attn' },
+    { kind: 'sysreq' },
+    { kind: 'insert' },
+    { kind: 'toggleInsert' },
+  ];
+
+  it('drops every non-clearing action with the alarm, leaving X Protected up', async () => {
+    const { session, conn } = await connectedWithProtectedField();
+    session.keyboard.moveCursor(1); // inside the protected field
+
+    // Raise the error: the FIRST action on an unlocked keyboard runs immediately
+    // (there is no lock yet to drop it against) and the field itself refuses it.
+    expect(session.run({ kind: 'type', text: 'A' })).toBe('refused');
+    expect(session.oia.keyboard).toBe(KeyboardState.ProtectedField);
+
+    for (const action of dropKinds) {
+      conn.sent = [];
+      const onAlarm = vi.fn();
+      session.on('alarm', onAlarm);
+
+      const r = session.run(action);
+
+      expect(r, action.kind).toBe('dropped');
+      expect(onAlarm, action.kind).toHaveBeenCalledTimes(1);
+      expect(conn.sent, action.kind).toEqual([]);
+      expect(session.screen.cellAt(1).ebcdic, action.kind).toBe(0x00);
+      expect(session.oia.keyboard, action.kind).toBe(KeyboardState.ProtectedField);
+
+      session.off('alarm', onAlarm);
+    }
+  });
+
+  it('drops a non-clearing action under Overflow too, not just Protected', async () => {
+    // Task 7 (numericLock off) is out of scope here, so Overflow -- raised by
+    // insert mode finding no room -- stands in for the `X Numeric` case the
+    // plan asks for once that task exists.
+    const { session } = await connectedWithTinyField();
+    session.keyboard.moveCursor(1);
+    session.screen.setChar(1, 0xc1);
+    session.screen.setChar(2, 0xc2); // field full: no NUL for insert to consume
+    session.keyboard.setInsertMode(true);
+
+    expect(session.run({ kind: 'type', text: 'X' })).toBe('refused');
+    expect(session.oia.keyboard).toBe(KeyboardState.Overflow);
+
+    const onAlarm = vi.fn();
+    session.on('alarm', onAlarm);
+
+    const r = session.run({ kind: 'type', text: 'Y' });
+
+    expect(r).toBe('dropped');
+    expect(onAlarm).toHaveBeenCalledTimes(1);
+    expect(session.oia.keyboard).toBe(KeyboardState.Overflow);
+    expect(session.screen.cellAt(1).ebcdic).toBe(0xc1); // unchanged
+  });
+
+  /** OERR_CLEARS: clear the error, then run as if the keyboard had been unlocked. */
+  const movementClears: KeyAction[] = [
+    { kind: 'tab' }, { kind: 'backTab' }, { kind: 'home' },
+    { kind: 'up' }, { kind: 'down' }, { kind: 'left' }, { kind: 'right' },
+  ];
+
+  it('clears the error and acts for each movement key, even starting inside the protected field', async () => {
+    // None of these seven touch `field.protected` themselves (they only move
+    // the cursor), unlike EraseEOF below -- so starting inside the very field
+    // that raised the error still comes out unlocked, for all seven.
+    for (const action of movementClears) {
+      const { session } = await connectedWithProtectedField();
+      session.keyboard.moveCursor(1);
+      session.run({ kind: 'type', text: 'A' }); // raises X Protected
+      expect(session.oia.keyboard, action.kind).toBe(KeyboardState.ProtectedField);
+
+      const before = session.screen.cursor;
+      const r = session.run(action);
+
+      expect(r, action.kind).toBe('done');
+      expect(session.oia.isInhibited(), action.kind).toBe(false);
+      expect(session.screen.cursor, action.kind).not.toBe(before);
+    }
+  });
+
+  it('EraseInput clears the error and acts, even starting inside the protected field', async () => {
+    const { session } = await connectedWithProtectedField();
+    session.keyboard.moveCursor(1);
+    session.run({ kind: 'type', text: 'A' });
+    expect(session.oia.keyboard).toBe(KeyboardState.ProtectedField);
+
+    const r = session.run({ kind: 'eraseInput' });
+
+    expect(r).toBe('done');
+    expect(session.oia.isInhibited()).toBe(false);
+    expect(session.screen.cursor).toBe(11); // homed to the one unprotected field
+  });
+
+  it('EraseEOF clears a Numeric error and acts, when the field itself is unprotected', async () => {
+    const { session } = await connectedWithNumericField();
+    session.keyboard.moveCursor(1);
+    session.screen.setChar(1, 0xc1); // leftover data for the erase to null out
+    session.run({ kind: 'type', text: 'A' }); // refused: not a digit
+    expect(session.oia.keyboard).toBe(KeyboardState.Numeric);
+
+    const r = session.run({ kind: 'eraseEOF' });
+
+    expect(r).toBe('done');
+    expect(session.oia.isInhibited()).toBe(false);
+    expect(session.screen.cellAt(1).ebcdic).toBe(0x00);
+  });
+
+  /**
+   * THE SOURCE DISAGREES WITH THE PLAN'S WORDING HERE, and this test is why:
+   * `EraseEOF_action` runs `OERR_CLEAR_OR_ENQ(AnEraseEOF)` and THEN its own
+   * `if (FA_IS_PROTECTED(fa) || ea_buf[baddr].fa) return
+   * operator_error(KL_OERR_PROTECTED, true);` (Common/kybd.c, EraseEOF_action,
+   * ~3018-3025) -- so EraseEOF run from INSIDE the protected field that raised
+   * the error clears the OLD error and immediately raises a NEW, identical
+   * one. It does not come out unlocked, unlike the other eight OERR_CLEARS
+   * members (none of which re-examine `field.protected`). `Keyboard.eraseEOF`
+   * has the identical `f.protected` check, so it matches. The plan's "clears
+   * the error AND acts" is accurate about the ACT, just not about every act
+   * ending unlocked.
+   */
+  it('EraseEOF clears and re-locks with a fresh Protected error, run from inside the protected field', async () => {
+    const { session } = await connectedWithProtectedField();
+    session.keyboard.moveCursor(1);
+    session.run({ kind: 'type', text: 'A' });
+    expect(session.oia.keyboard).toBe(KeyboardState.ProtectedField);
+
+    const r = session.run({ kind: 'eraseEOF' });
+
+    // `perform`'s 'eraseEOF' case returns 'done' unconditionally -- it does not
+    // see eraseEOF's own internal refusal, only that the call ran.
+    expect(r).toBe('done');
+    expect(session.oia.keyboard).toBe(KeyboardState.ProtectedField);
   });
 });

@@ -47,6 +47,22 @@ describe('typing', () => {
     s.cursor = 1;
     const k = kb(s);
     expect(k.type('A')).toBe(false);
+    expect(k.oia.keyboard).toBe(KeyboardState.Numeric);
+    // CHANGED (Task 3, oerrLock -- spec section A step 4): `type` no longer
+    // excuses an operator error for itself. x3270's key_Character checks
+    // `kybdlock` unconditionally and queues/drops rather than clearing
+    // (Common/kybd.c:1200-1208) -- typed characters are NOT in
+    // OERR_CLEAR_OR_ENQ's set (kybd.c:146-157), so a second keystroke right
+    // after a refusal is refused too. The operator's own escape is a
+    // clear-then-act key (Tab, an arrow, Home, EraseEOF/EraseInput) or Reset,
+    // which is what `Session.run`'s new operator-error branch grants and
+    // `Keyboard.type` alone cannot: it has no lock rules of its own now.
+    expect(k.type('5')).toBe(false);
+    expect(s.cellAt(1).ebcdic).toBe(0x00);
+
+    // The operator's actual escape: Reset (or, through `Session.run`, a
+    // clear-then-act key) clears the error, and the next keystroke lands.
+    k.reset();
     expect(k.type('5')).toBe(true);
     expect(s.cellAt(1).ebcdic).toBe(0xf5);
   });

@@ -44,17 +44,20 @@ export class Keyboard {
     // and return false, which is this class's documented contract for a
     // refusal.
     //
-    // OPERATOR ERRORS ARE EXCLUDED, and must be, or the exclusion breaks two
-    // shipped behaviors: "refuses a letter in a numeric field" types '5'
-    // successfully straight after the refused 'A', and the auto-skip test types
-    // on after a full field. x3270 draws the same line, clearing KL_OERR_MASK
-    // and continuing where a host lock would have deferred — see
-    // OERR_CLEAR_OR_ENQ (kybd.c:147-158), whose two arms are exactly
-    // `kybdlock_clr(KL_OERR_MASK, action)` versus `enq_ta(action, ...)`.
-    // Semantically: an operator error is the operator's own to correct with the
-    // next keystroke, whereas AwaitingFirstWrite, EnterInhibit, SystemWait and
-    // ProgramCheck are the host's to release.
-    if (this.oia.isInhibited() && !this.oia.isOperatorError()) return false;
+    // NO OPERATOR-ERROR EXCLUSION HERE ANY MORE (removed for oerrLock, spec
+    // section A step 4): key_Character is UNCONDITIONAL on `kybdlock`, which
+    // includes KL_OERR_MASK — unlike Tab, Home, the arrows and the two Erase
+    // keys, it is NOT wrapped in OERR_CLEAR_OR_ENQ (kybd.c:146-157 names only
+    // those five; key_Character at kybd.c:1200 has no such wrapper at all). A
+    // typed character under an operator error is therefore dropped (with the
+    // alarm) exactly like any other non-clearing action, and clearing the
+    // error is `Session.run`'s job now: it is the one caller with the lock
+    // rules, and this method carries none of its own beyond the host-imposed
+    // refusal above. (The two tests this broke — a numeric-field refusal
+    // followed immediately by a good digit, and typing on into a field that
+    // just auto-skipped past a full one — are `keyboard.test.ts`'s own
+    // problem to restate, not this method's to special-case.)
+    if (this.oia.isInhibited()) return false;
 
     const field = s.fieldAt(s.cursor);
 
@@ -179,9 +182,12 @@ export class Keyboard {
    * untouched, and states the equivalent EBCDIC rule here instead.
    *
    * Everything up to the write is `type()`'s sequence, for the reasons documented
-   * there: a host-imposed lock refuses outright while an operator error does not,
-   * a protected field is an operator error, and insert mode shifts the field
-   * right first.
+   * there: ANY lock, operator error included, refuses outright now (removed for
+   * oerrLock, spec section A step 4 — Dup and Field Mark are `key_Character(EBC_dup/
+   * EBC_fm, ...)` in x3270, kybd.c:2788 and :2825, so they share `type()`'s
+   * unconditional `kybdlock` test and are not in OERR_CLEAR_OR_ENQ either); a
+   * protected field is an operator error, and insert mode shifts the field right
+   * first.
    *
    * BOTH PER-KEY POLICIES ARE THE CALLER'S, and neither is optional. An earlier
    * version took the cursor rule as a parameter but decided the numeric rule in
@@ -203,7 +209,7 @@ export class Keyboard {
     },
   ): boolean {
     const s = this.screen;
-    if (this.oia.isInhibited() && !this.oia.isOperatorError()) return false;
+    if (this.oia.isInhibited()) return false;
 
     const field = s.fieldAt(s.cursor);
     if (field !== null) {
