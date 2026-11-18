@@ -13,6 +13,19 @@ import type { Screen, Field } from './screen.js';
  */
 export class Keyboard {
   insertMode = false;
+  /**
+   * x3270's `numericLock` resource (`ResNumericLock`, x3270/resources.c:336-337),
+   * default `ResFalse`. OFF means `type()`'s digit/+/-/./, test never runs
+   * (`key_Character`'s own test is `FA_IS_NUMERIC(fa) && appres.numeric_lock &&
+   * !(...)`, kybd.c:1232-1238 -- `numeric_lock` false makes the whole
+   * expression false), so a letter in a numeric field goes in exactly as it
+   * does in stock x3270. ON restores the refusal this class enforced
+   * unconditionally before this property existed. 15b will expose this as a
+   * setting; until then it is this property, read by `type()` alone --
+   * `writeControl()`'s Dup/Field Mark policy is a DIFFERENT, manual-derived
+   * rule (see `dup()`'s own comment) that this property does not gate.
+   */
+  numericLock = false;
 
   constructor(
     private readonly screen: Screen,
@@ -66,7 +79,12 @@ export class Keyboard {
         this.oia.inhibit(KeyboardState.ProtectedField);
         return false;
       }
-      if (field.numeric && !/[0-9.\-+,]/.test(char)) {
+      // Task 7 (spec section D): gated on `numericLock`, default false -- see
+      // the property's own comment. x3270 refuses NOTHING ELSE here when the
+      // resource is off; `key_Character`'s numeric test is wholly skipped,
+      // not narrowed, so there is no separate "what, if anything, is still
+      // refused" rule to encode.
+      if (field.numeric && this.numericLock && !/[0-9.\-+,]/.test(char)) {
         this.oia.inhibit(KeyboardState.Numeric);
         return false;
       }

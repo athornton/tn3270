@@ -367,9 +367,11 @@ describe('Session.run: operator-error lock (Task 3, oerrLock)', () => {
   });
 
   it('drops a non-clearing action under Overflow too, not just Protected', async () => {
-    // Task 7 (numericLock off) is out of scope here, so Overflow -- raised by
-    // insert mode finding no room -- stands in for the `X Numeric` case the
-    // plan asks for once that task exists.
+    // Written before Task 7 existed, when `numericLock` had no off switch and
+    // `X Numeric` could not be raised without it: Overflow, raised by insert
+    // mode finding no room, stood in for the `X Numeric` case the plan asks
+    // for. Kept as its own test now that Task 7 exists -- the real `X
+    // Numeric` case is the one right after this.
     const { session } = await connectedWithTinyField();
     session.keyboard.moveCursor(1);
     session.screen.setChar(1, 0xc1);
@@ -388,6 +390,33 @@ describe('Session.run: operator-error lock (Task 3, oerrLock)', () => {
     expect(onAlarm).toHaveBeenCalledTimes(1);
     expect(session.oia.keyboard).toBe(KeyboardState.Overflow);
     expect(session.screen.cellAt(1).ebcdic).toBe(0xc1); // unchanged
+  });
+
+  /**
+   * THE `X Numeric` CASE ITSELF, now that Task 7 exists: `numericLock` is
+   * off by default (spec section D), so it has to be turned on to raise the
+   * error at all -- `run`'s drop/alarm behaviour for a non-clearing action
+   * under ANY `KYBDLOCK_IS_OERR` state is otherwise identical to the
+   * Overflow case above, which is why that one stood in for this one while
+   * Task 7 did not exist yet.
+   */
+  it('drops a non-clearing action under a Numeric error too, once numericLock is on', async () => {
+    const { session } = await connectedWithNumericField();
+    session.keyboard.numericLock = true;
+    session.keyboard.moveCursor(1);
+
+    expect(session.run({ kind: 'type', text: 'A' })).toBe('refused');
+    expect(session.oia.keyboard).toBe(KeyboardState.Numeric);
+
+    const onAlarm = vi.fn();
+    session.on('alarm', onAlarm);
+
+    const r = session.run({ kind: 'type', text: 'B' });
+
+    expect(r).toBe('dropped');
+    expect(onAlarm).toHaveBeenCalledTimes(1);
+    expect(session.oia.keyboard).toBe(KeyboardState.Numeric);
+    expect(session.screen.cellAt(1).ebcdic).toBe(0x00); // unchanged
   });
 
   /** OERR_CLEARS: clear the error, then run as if the keyboard had been unlocked. */
@@ -430,6 +459,10 @@ describe('Session.run: operator-error lock (Task 3, oerrLock)', () => {
 
   it('EraseEOF clears a Numeric error and acts, when the field itself is unprotected', async () => {
     const { session } = await connectedWithNumericField();
+    // CHANGED (Task 7, spec section D): `numericLock` is off by default, so
+    // 'A' would simply go in -- turned on here to still raise the error this
+    // test is about.
+    session.keyboard.numericLock = true;
     session.keyboard.moveCursor(1);
     session.screen.setChar(1, 0xc1); // leftover data for the erase to null out
     session.run({ kind: 'type', text: 'A' }); // refused: not a digit

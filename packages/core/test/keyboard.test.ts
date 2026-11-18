@@ -41,11 +41,22 @@ describe('typing', () => {
     expect(k.oia.keyboard).toBe(KeyboardState.ProtectedField);
   });
 
-  it('refuses a letter in a numeric field', () => {
+  /**
+   * CHANGED (Task 7, spec section D): a letter in a numeric field now goes
+   * in BY DEFAULT, as x3270 does -- `numericLock` defaults to `ResFalse`
+   * (x3270/resources.c:336-337), and `key_Character`'s digit/+/-/./,  test is
+   * gated on it (`FA_IS_NUMERIC(fa) && appres.numeric_lock && !(...)`,
+   * kybd.c:1232-1238): with the resource off, the whole test is false and
+   * ANY character is accepted. The refusal this test pins is therefore no
+   * longer the default; it is what `keyboard.numericLock = true` restores.
+   * The default-off behaviour has its own test right after this one.
+   */
+  it('refuses a letter in a numeric field, with numericLock on', () => {
     const s = new Screen();
     s.setFieldAttribute(0, FA.NUMERIC);
     s.cursor = 1;
     const k = kb(s);
+    k.numericLock = true;
     expect(k.type('A')).toBe(false);
     expect(k.oia.keyboard).toBe(KeyboardState.Numeric);
     // CHANGED (Task 3, oerrLock -- spec section A step 4): `type` no longer
@@ -65,6 +76,22 @@ describe('typing', () => {
     k.reset();
     expect(k.type('5')).toBe(true);
     expect(s.cellAt(1).ebcdic).toBe(0xf5);
+  });
+
+  /**
+   * Task 7, spec section D: `numericLock` defaults to `false` (x3270's own
+   * default, x3270/resources.c:336-337), so a letter in a numeric field
+   * goes in and no `X Numeric` is raised.
+   */
+  it('permits a letter in a numeric field by default (numericLock off)', () => {
+    const s = new Screen();
+    s.setFieldAttribute(0, FA.NUMERIC);
+    s.cursor = 1;
+    const k = kb(s);
+    expect(k.numericLock).toBe(false);
+    expect(k.type('A')).toBe(true);
+    expect(k.oia.keyboard).toBe(KeyboardState.Unlocked);
+    expect(s.cellAt(1).ebcdic).toBe(0xc1);
   });
 
   it('refuses to type on an unformatted screen only where protected', () => {
