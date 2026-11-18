@@ -1205,6 +1205,108 @@ while True:
     threading.Thread(target=handle, args=(c,), daemon=True).start()
 ```
 
+## Blink, intensify and the bell, from the GUI and TUI — 2026-11-17
+
+**The host's alarm has live witnesses in the GUI and the TUI, audible and `-visualbell`, on both
+VM/370 and MVS TK5. Blink and intensify are witnessed OFFLINE only**, from a synthetic trace
+replayed through the GUI, because no host here sends either (the plan's measurement: no recorded
+trace has a single blinking or intensified cell). **The browser's bell is covered by tests only.**
+Run 2026-11-18 at `66b944b`. No logon was attempted anywhere, and no screen below came from one.
+
+**WHERE EACH HOST RINGS.** The alarm is bit 0x04 of the WCC, the byte after a Write command. VM sets
+it on the Write that paints its `VM/370` logo (`f1 c6`), so connecting is enough. TK5's USS logon
+panel is `f5 c3`, no alarm; TK5 rings on VTAM's `IKT00405I SCREEN ERROR` answer (`f5 c6`), which is
+what `mvs-tk5-vtam-logon.trace` records: `tso` typed at the panel under `-model 3278-2` (no `-E`),
+which VTAM rejects before TSO is reached. No userid is entered.
+
+**GUI.** The recording relay from *The four keys and reconnect* above, with two changes: the seam
+filter keeps `bell` lines, and extra arguments (`-visualbell`) pass through to the GUI. Its stdout
+line is printed after the listener's `shell.beep()` or `flash` send, under any test seam.
+
+| host | keys | flag | host Write (wire) | GUI stdout |
+|---|---|---|---|---|
+| VM/370 | `wait:VM/370\|CP READ` | — | `f5 42`, `f5 c2`, then `f1 c6` (alarm) | `bell: audible`, 41 ms after the `f1 c6` |
+| VM/370 | same | `-visualbell` | same three | `bell: visual`, 41 ms after |
+| TK5 | `wait:Logon\|LOGON` | either | `f5 42`, `f5 c3` (no alarm) | **no bell line**: the control |
+| TK5, `-model 3278-2` | `wait:Logon\|LOGON,T,S,O,Enter,wait:IKT` | — | `> 7d 5b 6e 11 5b 6b a3 a2 96 …`, then `< f5 c6 … IKT00405I` | `bell: audible`, 39 ms after |
+| TK5, `-model 3278-2` | same | `-visualbell` | same | `bell: visual`, 39 ms after |
+
+One bell line per alarm Write in every run, and none in the two TK5 runs whose Writes have no
+alarm bit. (`T,S,O` arrives as lower case `a3 a2 96`; VTAM rejects it either way, as in the trace.)
+
+**TUI.** A short Python pty driver on `packages/tui/scripts/pty-smoke.py`'s spawn (fork, `setsid`,
+`TIOCSCTTY`, 25x80, `TERM=xterm-256color`): run `node packages/tui/dist/main.js -insecure HOST`,
+wait for `VM/370` or `Logon` (type `tso\r` for the TK5 rejection), let it settle 1.5 s, send
+Ctrl-], and capture everything. **A bare `\x07` must be counted AFTER removing OSC sequences**: the
+TUI's cursor colour set and reset (`\x1b]12;#00ff00\x07`, `\x1b]112\x07`) end in BEL too, so every
+run has two `\x07` that are not a bell.
+
+| host | flag | bare BEL | `\x1b[?5h` / `\x1b[?5l` | exit, tty after |
+|---|---|---|---|---|
+| VM/370 | — | **1** | 0 / 0 | 0; alt screen left, lflag equal to before (ECHO, ICANON on) |
+| VM/370 | `-visualbell` | 0 | **1 / 1, 101 ms apart** | same |
+| TK5 logon panel | either | 0 | 0 / 0 | same (the control) |
+| TK5 `tso` rejection, `-model 3278-2` | — | **1** | 0 / 0 | same |
+| TK5 `tso` rejection, `-model 3278-2` | `-visualbell` | 0 | **1 / 1, 101 ms apart** | same |
+
+The `?5l` is the 100 ms timer's, not `restore()`'s: it was read at least 1.4 s before Ctrl-] was sent,
+and `restore()` writes one only while the timer is pending, so a second would have appeared. Raw
+mode was in effect (ECHO off) in every run before the quit.
+
+**OFFLINE: BLINK AND INTENSIFY.** One Erase/Write: `BLINKBLINK` at row 2 column 10 in an SFE field
+with highlighting `f1` (blink), `INTENSIFY` at row 4 with `f8` (intensify), and `INTENSIFY` again at
+row 6 in a plain SF field, for comparison. Core resolves 11 blink cells on row 2 and 10 intensify
+cells on row 4 (the attribute cell included), none on row 6. Replayed with `TN3270_GUI_REPLAY` and
+captured with `TN3270_GUI_SHOT` at `TN3270_GUI_SHOT_MS` 600, 850, 1100 and 1350, with
+`CAPTURE_SWITCHES` (720x350, cells 9x14). Ink is pixels not equal to the background, columns 10-19:
+
+| capture | row 2, blink | row 4, intensify | row 6, plain |
+|---|---|---|---|
+| 600 ms, 850 ms | **0** | 275 | 165 |
+| 1100 ms, 1350 ms | **192** | 275 | 165 |
+
+- **Blink:** 600 and 850 are byte-identical bitmaps, as are 1100 and 1350, and the two pairs differ
+  in **192 pixels, every one in row 2 columns 10-19**: the glyphs and nothing else. The phase starts
+  on and flips every 500 ms, so 600-850 is the first off phase and 1100-1350 the next on phase.
+- **Intensify:** 275 pixels against 165 for the same nine characters plain. All 1260 pixels of the
+  intensified cells equal the plain cells' ink OR'd with itself shifted one pixel right (0
+  mismatches): the one-source-pixel overstrike, in the same colour (`120,144,240`) as the plain row.
+
+The generator (the trace is not kept as a fixture; regenerate it from the checkout root with
+`node --input-type=module < gen.mjs > blink.trace`):
+
+```js
+import { ADDRESS_CODE_TABLE, Order, FA, SnaCmd, XA, XAH, cp037 } from './packages/core/dist/index.js';
+const sba = (a) => [Order.SBA, ADDRESS_CODE_TABLE[(a >> 6) & 0x3f], ADDRESS_CODE_TABLE[a & 0x3f]];
+const eb = (s) => Array.from(cp037.encode(s));
+const sfe = (hl) => [Order.SFE, 2, 0xc0, FA.PROTECT, XA.HIGHLIGHTING, hl];
+const bytes = [SnaCmd.EW, 0xc3,
+  ...sba(169), ...sfe(XAH.BLINK), ...eb('BLINKBLINK'), Order.SF, FA.PROTECT,
+  ...sba(329), ...sfe(XAH.INTENSIFY), ...eb('INTENSIFY'), Order.SF, FA.PROTECT,
+  ...sba(489), Order.SF, FA.PROTECT, ...eb('INTENSIFY'), Order.SF, FA.PROTECT, 0xff, 0xef];
+const lines = ['0.000 < ff fd 19 ff fb 19', '0.000 < ff fd 00 ff fb 00'];
+for (let i = 0; i < bytes.length; i += 16)
+  lines.push('0.000 < ' + bytes.slice(i, i + 16).map((b) => b.toString(16).padStart(2, '0')).join(' '));
+process.stdout.write(lines.join('\n') + '\n');
+```
+
+Launch the GUI with a host argument even for a replay (`127.0.0.1:1`, as `shot.mjs` does): without
+one it paints its usage text, and four captures of that were byte-identical, which looked at first
+like a blink that never flipped. `decodePng` in `scripts/smoke-lib.mjs` reads the PNGs.
+
+**NOT WITNESSED.**
+
+- **No sound and no GUI flash was observed.** Xvfb has no audio, and the GUI's stdout line says the
+  listener ran and took the right branch, not that `shell.beep()` made a noise or the window
+  inverted (the flash's drawing is unit-tested in `canvas`). The TUI's bytes were captured; how a
+  given terminal renders BEL or DECSCNM was not.
+- **Blink and intensify from a real host:** none sends them.
+- **The browser's bell, tests only:** no `packages/web/scripts` harness rings it. Covered by
+  `protocol.test.ts` (`alarm` round-trips), `integration.test.ts` (the gateway forwards
+  `{kind:"alarm", visual}`, and `visual:true` under `-visualbell`) and `bridgecore.test.ts` (the
+  flash handlers, the tone through an injected AudioContext, one context reused, a malformed alarm
+  dropped).
+
 ## Step 1 — Confirm the host is reachable
 
 Substitute the real host and port (do not guess; get these from whoever
