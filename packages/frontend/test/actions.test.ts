@@ -563,8 +563,14 @@ const ROWS: readonly Row[] = [
   // THE ERASERS, the two pairs where a swap is destructive rather than merely wrong: Backspace
   // destroys one character to the LEFT and Delete one under the cursor, and EraseEOF clears to the
   // end of ONE field while EraseInput clears EVERY unprotected field on the screen.
-  { action: { kind: 'backspace' }, target: 'keyboard.backspace',
-    notCalled: ['keyboard.deleteChar'] },
+  //
+  // CHANGED (Task 6, keyboard-semantics spec section C): `backspace`'s `notCalled` no longer
+  // names `keyboard.deleteChar`. `Keyboard.backspace` is x3270's `Erase` (`do_erase` ->
+  // `do_left` -> `do_delete`, Common/kybd.c:2317-2346) and is now composed from a cursor-left
+  // plus `deleteChar` itself, so a correctly-dispatched `backspace` calls `deleteChar` ONE level
+  // down -- that is the behavior, not a mis-wiring. The reverse still holds: dispatching `delete`
+  // must never reach `backspace`, since `deleteChar` does not call it.
+  { action: { kind: 'backspace' }, target: 'keyboard.backspace' },
   { action: { kind: 'delete' }, target: 'keyboard.deleteChar', notCalled: ['keyboard.backspace'] },
   { action: { kind: 'eraseEOF' }, target: 'keyboard.eraseEOF', notCalled: ['keyboard.eraseInput'] },
   { action: { kind: 'eraseInput' }, target: 'keyboard.eraseInput', notCalled: ['keyboard.eraseEOF'] },

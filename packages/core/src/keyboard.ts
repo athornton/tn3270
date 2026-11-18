@@ -406,11 +406,26 @@ export class Keyboard {
 
   // ---- erasing ----
 
-  /** Null from the cursor to the end of the field. */
+  /**
+   * Null from the cursor to the end of the field -- or, on an unformatted
+   * screen, to the end of the SCREEN (`EraseEOF_action`'s `else` arm,
+   * kybd.c:3026-3039: `do { ...null...; INC_BA(baddr); } while (baddr !=
+   * 0)`). That loop does NOT wrap past address 0 -- it nulls from the
+   * cursor up to the last cell of the buffer and stops, touching address 0
+   * only when the cursor started there. No field on an unformatted screen,
+   * so no protection check and no MDT to set.
+   */
   eraseEOF(): void {
     const s = this.screen;
     const f = s.fieldAt(s.cursor);
-    if (f === null) return;
+    if (f === null) {
+      let a = s.cursor;
+      do {
+        s.setChar(a, 0x00);
+        a = s.inc(a);
+      } while (a !== 0);
+      return;
+    }
     if (f.protected) {
       this.oia.inhibit(KeyboardState.ProtectedField);
       return;
@@ -436,25 +451,73 @@ export class Keyboard {
     this.home();
   }
 
+  /**
+   * CHANGED (Task 6, spec section C): `backspace` is x3270's `Erase`
+   * (`Erase_action` -> `do_erase`, kybd.c:2317-2346), not a null-in-place --
+   * it moves the cursor left one and DELETES there, closing up the rest of
+   * the field (or the screen, unformatted) rather than leaving a gap.
+   *
+   * `do_erase`'s OWN "protected" check is `if (faddr == baddr ||
+   * FA_IS_PROTECTED(ea_buf[baddr].fa)) { operator_error(...); }` -- WITHOUT
+   * a `return`, so x3270 falls through regardless. Read closely (per the
+   * task's own instruction to check what x3270 does next, since this is not
+   * simply a no-op): `ea_buf[baddr].fa` is the CURSOR'S OWN cell, which
+   * `find_field_attribute` (ctlr.c:435-446) makes nonzero ONLY when `baddr`
+   * itself IS an attribute byte -- and `faddr == baddr` is exactly that same
+   * condition. So for an ORDINARY data cell, including one inside a
+   * protected field, this test is FALSE and `operator_error` does not fire
+   * here at all; every OTHER erase key (`do_delete`, `EraseEOF_action`, ...)
+   * tests `FA_IS_PROTECTED(get_field_attribute(baddr))` -- the GOVERNING
+   * field -- not the cursor's own cell, so `do_erase` alone has this
+   * asymmetry. No Keyboard method here ever parks the cursor on an attribute
+   * byte, so the branch cannot arise in our model and is not reproduced.
+   * (No DBCS here either: `do_erase`'s SO/SI handling is skipped, we carry
+   * no such state.)
+   *
+   * The NEXT line, `if (baddr && faddr == baddr - 1) return;`, is what
+   * actually governs: at a field's OWN FIRST data cell -- protected or not
+   * -- Erase is a complete no-op (no move, no delete, no alarm). Everywhere
+   * else, `do_left()` runs unconditionally and `do_delete()` then runs AT
+   * THE NEW position -- which is where a protected field actually raises
+   * X Protected, via `do_delete`'s correct (governing-field) check. So Erase
+   * in a protected field, away from its first cell, DOES move the cursor
+   * left by one before it errors, leaving no cell changed.
+   *
+   * Composing this from a plain cursor-left plus `deleteChar` reproduces
+   * exactly that sequence -- INCLUDING the unformatted case, where there is
+   * no field and so no first-cell guard: `do_left` is unconditional there.
+   */
   backspace(): void {
     const s = this.screen;
-    const f = s.fieldAt(s.cursor);
-    if (f !== null && f.protected) {
-      this.oia.inhibit(KeyboardState.ProtectedField);
-      return;
-    }
-    const prev = s.dec(s.cursor);
-    if (s.isFieldAttribute(prev)) return; // at the start of the field
-    s.cursor = prev;
-    s.setChar(prev, 0x00);
-    if (f !== null) s.setMDT(f.attrAddr);
+    const baddr = s.cursor;
+    const f = s.fieldAt(baddr);
+    if (f !== null && baddr === f.start && baddr !== 0) return; // field's own first cell: no-op
+    s.cursor = s.dec(baddr);
+    this.deleteChar();
   }
 
-  /** Delete under the cursor, shifting the remainder of the field left. */
+  /**
+   * Delete under the cursor, shifting the remainder of the field left -- or,
+   * on an unformatted screen, the remainder of the SCREEN (`do_delete`'s
+   * `!formatted` arm, kybd.c:2168-2200: `end_baddr = (ROWS*COLS)-1`, a FIXED
+   * address, not one derived by wrapping from the cursor). No field there,
+   * so no protection check and no MDT to set (`mdt_set` would resolve a
+   * governing attribute that does not exist).
+   */
   deleteChar(): void {
     const s = this.screen;
     const f = s.fieldAt(s.cursor);
-    if (f === null) return;
+    if (f === null) {
+      const end = s.size - 1;
+      let a = s.cursor;
+      while (a !== end) {
+        const next = s.inc(a);
+        s.setChar(a, s.cellAt(next).ebcdic);
+        a = next;
+      }
+      s.setChar(end, 0x00);
+      return;
+    }
     if (f.protected) {
       this.oia.inhibit(KeyboardState.ProtectedField);
       return;

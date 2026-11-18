@@ -327,16 +327,144 @@ describe('erase actions', () => {
     expect(s.cursor).toBe(1);
   });
 
-  it('Backspace moves left and nulls, within the field', () => {
+  /**
+   * CHANGED (Task 6): `backspace` is x3270's `Erase` (`Erase_action` ->
+   * `do_erase`, kybd.c:2317-2346), not a null-in-place. It moves the cursor
+   * left one (`do_left`) and then DELETES at the new position, closing up
+   * the rest of the field (`do_delete`) rather than leaving a gap -- so a
+   * field of A B C D with the cursor on C becomes A C D NUL, cursor on C's
+   * new address (B's old one). The previous test ("Backspace moves left and
+   * nulls, within the field") pinned a null-in-place that happened to look
+   * identical to a close-up on its own sparse data (everything past the
+   * deleted cell was already NUL); this one uses data on both sides of the
+   * deleted cell so the two behaviours are distinguishable, per spec
+   * section C.
+   */
+  it('Backspace (Erase) moves left, deletes and closes up the rest of the field', () => {
+    const s = new Screen();
+    s.setFieldAttribute(0, 0x00);
+    s.setFieldAttribute(5, FA.PROTECT); // field data is 1-4
+    s.setChar(1, 0xc1); // A
+    s.setChar(2, 0xc2); // B
+    s.setChar(3, 0xc3); // C
+    s.setChar(4, 0xc4); // D
+    s.cursor = 3; // on C
+    const k = kb(s);
+    k.backspace();
+    expect(s.cursor).toBe(2); // B's old address
+    expect(s.cellAt(1).ebcdic).toBe(0xc1); // A, untouched
+    expect(s.cellAt(2).ebcdic).toBe(0xc3); // C, closed up into B's place
+    expect(s.cellAt(3).ebcdic).toBe(0xc4); // D, closed up
+    expect(s.cellAt(4).ebcdic).toBe(0x00); // NUL enters at the field's end
+    expect(s.fieldAt(1)!.modified).toBe(true);
+  });
+
+  /**
+   * `do_erase`'s `if (baddr && faddr == baddr - 1) return;` (kybd.c:2327-2329)
+   * fires at the field's OWN FIRST data cell -- for ANY field, protected or
+   * not -- before `do_left` or `do_delete` run. Erase there is a complete
+   * no-op: no cursor move, no cell change, no alarm.
+   */
+  it('Backspace at the field’s first cell does nothing', () => {
     const s = new Screen();
     s.setFieldAttribute(0, 0x00);
     s.setChar(1, 0xc1);
-    s.setChar(2, 0xc2);
-    s.cursor = 3;
+    s.cursor = 1;
     const k = kb(s);
     k.backspace();
-    expect(s.cursor).toBe(2);
-    expect(s.cellAt(2).ebcdic).toBe(0x00);
+    expect(s.cursor).toBe(1);
+    expect(s.cellAt(1).ebcdic).toBe(0xc1);
+    expect(k.oia.keyboard).toBe(KeyboardState.Unlocked);
+  });
+
+  /**
+   * SOURCE DISAGREES WITH A LITERAL READING OF THE PLAN HERE, and this test
+   * and the one after it are why. `do_erase`'s OWN protected check tests
+   * `ea_buf[baddr].fa` -- the CURSOR'S OWN cell -- which `find_field_attribute`
+   * (ctlr.c:435-446) makes nonzero only when `baddr` IS an attribute byte. No
+   * Keyboard method ever parks the cursor there, so for an ordinary cell
+   * inside a protected field this check is FALSE and `operator_error` does
+   * NOT fire in `do_erase` itself (unlike every other erase key, which tests
+   * `FA_IS_PROTECTED(get_field_attribute(baddr))`, the GOVERNING field). What
+   * actually raises X Protected is the SUBSEQUENT `do_delete()` call, at the
+   * cursor's NEW (moved-left) position -- so Erase inside a protected field,
+   * away from its first cell, DOES move the cursor left by one before it
+   * errors. `Keyboard.deleteChar` already has the correct (governing-field)
+   * check, so composing `backspace` from a left-move plus `deleteChar`
+   * reproduces this exactly without reproducing the vacuous check itself.
+   */
+  it('Backspace in a protected field (not its first cell) moves left, then errors', () => {
+    const s = twoFields(); // unprotected attr 0 (data 1-9), protected attr 10 (data 11-19)
+    s.cursor = 12; // inside the protected field, NOT its first cell (11)
+    const k = kb(s);
+    k.backspace();
+    expect(s.cursor).toBe(11); // moved left one, as do_left does unconditionally
+    expect(s.cellAt(11).ebcdic).toBe(0x00); // unchanged: do_delete refused the write
+    expect(k.oia.keyboard).toBe(KeyboardState.ProtectedField);
+  });
+
+  /** The other half of the same finding: AT the protected field's first cell, nothing happens at all -- not even the alarm. */
+  it('Backspace at a protected field’s own first cell does nothing, not even the alarm', () => {
+    const s = twoFields();
+    s.cursor = 11; // the protected field's first (and only reachable) data cell
+    const k = kb(s);
+    k.backspace();
+    expect(s.cursor).toBe(11);
+    expect(k.oia.keyboard).toBe(KeyboardState.Unlocked);
+  });
+
+  /**
+   * Unformatted screen: `do_delete`'s `!formatted` arm (kybd.c:2168-2200) ends
+   * at the last cell of the BUFFER, a fixed address, not a field boundary.
+   * `backspace` composes `do_left` (unconditional on an unformatted screen --
+   * `do_erase`'s first-cell guard needs a field, which there is none of) with
+   * that shift.
+   */
+  it('Backspace on an unformatted screen shifts the rest of the SCREEN left', () => {
+    const s = new Screen();
+    s.setChar(5, 0xc1); // A
+    s.setChar(6, 0xc2); // B
+    s.setChar(7, 0xc3); // C
+    s.cursor = 6; // on B
+    const k = kb(s);
+    k.backspace();
+    expect(s.cursor).toBe(5); // moved left one, onto A's old address
+    expect(s.cellAt(5).ebcdic).toBe(0xc2); // B closed up into A's old place
+    expect(s.cellAt(6).ebcdic).toBe(0xc3); // C closed up
+    expect(s.cellAt(s.size - 1).ebcdic).toBe(0x00); // NUL enters at the SCREEN's end
+  });
+
+  it('Delete on an unformatted screen shifts the rest of the SCREEN left', () => {
+    const s = new Screen();
+    s.setChar(5, 0xc1); // A
+    s.setChar(6, 0xc2); // B
+    s.setChar(7, 0xc3); // C
+    s.cursor = 5; // on A
+    const k = kb(s);
+    k.deleteChar();
+    expect(s.cursor).toBe(5); // Delete does not move the cursor
+    expect(s.cellAt(5).ebcdic).toBe(0xc2); // B closed up into A's old place
+    expect(s.cellAt(6).ebcdic).toBe(0xc3); // C closed up
+    expect(s.cellAt(s.size - 1).ebcdic).toBe(0x00); // NUL enters at the SCREEN's end
+  });
+
+  /**
+   * `EraseEOF_action`'s unformatted arm (kybd.c:3026-3039): null from the
+   * cursor to the end of the screen, NOT wrapping past address 0
+   * (`do { ...; INC_BA(baddr); } while (baddr != 0)`).
+   */
+  it('EraseEOF on an unformatted screen nulls from the cursor to the end of the screen', () => {
+    const s = new Screen();
+    s.setChar(5, 0xc1);
+    s.setChar(6, 0xc2);
+    s.setChar(0, 0xc3); // before the cursor, and must survive (no wrap)
+    s.cursor = 5;
+    const k = kb(s);
+    k.eraseEOF();
+    expect(s.cellAt(5).ebcdic).toBe(0x00);
+    expect(s.cellAt(6).ebcdic).toBe(0x00);
+    expect(s.cellAt(s.size - 1).ebcdic).toBe(0x00);
+    expect(s.cellAt(0).ebcdic).toBe(0xc3); // NOT wrapped into
   });
 
   it('Delete shifts the rest of the field left', () => {
