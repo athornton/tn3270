@@ -38,44 +38,38 @@
  * or emit a spurious PA.
  */
 
-import { PF_AIDS } from '@tn3270/core';
+import { PF_AIDS, type KeyAction } from '@tn3270/core';
 
+/**
+ * Every KEYBOARD-AND-AID kind -- `type`, `enter`/`clear`, `pf`/`pa`, `reset`, the four arrows,
+ * `home`, `tab`, `backTab`, `newline`, `backspace`, `delete`, `eraseEOF`, `eraseInput`, `dup`,
+ * `fieldMark`, `insert`, `toggleInsert`, `attn`, `sysreq` -- is `@tn3270/core`'s own `KeyAction`,
+ * reused here rather than redeclared so the two unions cannot drift (keyboard-semantics spec,
+ * section A, "One way in"). `Session.run` is the only route by which one of these reaches the
+ * keyboard or the host; see `applyAction`. Field names (`text` on `type`, `n` on `pf`/`pa`) are
+ * `KeyAction`'s own, chosen there to match what this file used to spell out by hand.
+ *
+ * Two notes that used to sit beside the `dup`/`fieldMark` and `newline` members of THIS union,
+ * before it reused `KeyAction` instead of declaring them itself -- kept here, rather than moved
+ * into `KeyAction` (core, which has no front-end concerns and no terminal keymap to reference):
+ *
+ * DUP AND FIELD MARK ARE TYPED CHARACTERS, NOT AIDS -- see `applyAction` and
+ * `Keyboard.dup`/`Keyboard.fieldMark` in core.
+ *
+ * NEWLINE HAS NO CHORD, IN EITHER FRONT END, AND THAT IS A MEASURED DECISION RATHER THAN AN
+ * OVERSIGHT. c3270 binds Newline to Ctrl-J in BOTH its keymaps -- `Ctrl<Key>j: Newline()` at
+ * Common/fb-c3270:190 in the non-Windows table a terminal build reads, and `Ctrl <Key>j:
+ * Newline()` at :100 in the _WIN32 one -- but Ctrl-J IS `\n` (0x0a), which `buildTable` below
+ * already maps to `enter` for terminals that send LF for Return. ONE BYTE CANNOT BE BOTH, and
+ * Enter is the AID that submits the screen; quietly turning Return into a cursor move is not a
+ * trade this feature gets to make. x3270's Shift-Return is no help either: terminals do not
+ * report modifiers on Return. Recorded as the user's call on 2026-09-14 --
+ * "leave SysReq and Newline to the keypad, where a button has no spelling problem" --
+ * and `newline` is the other half of that decision, not a reversal of it: the keypad button
+ * and the TUI overlay are Newline's routes, exactly as they are Sys Req's.
+ */
 export type Action =
-  | { kind: 'pf'; n: number }
-  | { kind: 'pa'; n: number }
-  | { kind: 'enter' }
-  | { kind: 'clear' }
-  | { kind: 'reset' }
-  | { kind: 'up' }
-  | { kind: 'down' }
-  | { kind: 'left' }
-  | { kind: 'right' }
-  | { kind: 'home' }
-  | { kind: 'tab' }
-  | { kind: 'backTab' }
-  | { kind: 'backspace' }
-  | { kind: 'delete' }
-  | { kind: 'eraseEOF' }
-  | { kind: 'eraseInput' }
-  | { kind: 'attn' }
-  | { kind: 'sysreq' }
-  // Dup and Field Mark are TYPED CHARACTERS, not AIDs -- see `applyAction` and
-  // `Keyboard.dup`/`Keyboard.fieldMark` in core.
-  | { kind: 'dup' }
-  | { kind: 'fieldMark' }
-  | { kind: 'toggleInsert' }
-  // NO CHORD, IN EITHER FRONT END, AND THAT IS A MEASURED DECISION RATHER THAN AN OVERSIGHT.
-  // c3270 binds Newline to Ctrl-J in BOTH its keymaps -- `Ctrl<Key>j: Newline()` at
-  // Common/fb-c3270:190 in the non-Windows table a terminal build reads, and `Ctrl <Key>j:
-  // Newline()` at :100 in the _WIN32 one -- but Ctrl-J IS `\n` (0x0a), which `buildTable` below
-  // already maps to `enter` for terminals that send LF for Return. ONE BYTE CANNOT BE BOTH, and
-  // Enter is the AID that submits the screen; quietly turning Return into a cursor move is not a
-  // trade this feature gets to make. x3270's Shift-Return is no help either: terminals do not
-  // report modifiers on Return. Recorded as the user's call on 2026-09-14 --
-  // "leave SysReq and Newline to the keypad, where a button has no spelling problem" --
-  // and this member is the other half of that decision, not a reversal of it: the keypad button
-  // and the TUI overlay are Newline's routes, exactly as they are Sys Req's.
-  | { kind: 'newline' }
+  | KeyAction
   // Not a 3270 key at all: it shows or hides the front end's own virtual keypad, and
   // `applyAction` throws on it exactly as it does on `quit`. It lives in this union because
   // the chord that opens the keypad, the GUI's Alt-K and the `BINDING_INTENT` row must all
@@ -196,9 +190,9 @@ export type Action =
    * refusal is unconditional, so there is no malformed-field path to bound.
    */
   | { kind: 'requestCopy' }
-  | { kind: 'type'; text: string }
   /**
-   * PASTE, 2026-10-23, AND IT IS DELIBERATELY NOT `type` -- BUT NOT FOR THE REASON THE PLAN GAVE.
+   * PASTE, 2026-10-23, AND IT IS DELIBERATELY NOT `type` (`KeyAction`'s member, reused above) --
+   * BUT NOT FOR THE REASON THE PLAN GAVE.
    *
    * The plan for this feature said that carrying a paste as `type` would send every `\n` as
    * **Enter, an AID that submits a half-filled panel to a live host** and every `\f` as **Clear,
@@ -316,7 +310,10 @@ function buildBindings(): readonly TerminalBinding[] {
 
   // Control keys. Ctrl-C is Clear, not interrupt: Clear is an AID a 3270 user
   // needs constantly (it dismisses MORE...), and Ctrl-] is the way out.
-  // Attn is c3270's Ctrl-A (Common/fb-c3270:83). It is a Telnet BREAK, not an AID.
+  // Attn is c3270's Ctrl-A (Common/fb-c3270:83). NOT AN AID, but not unconditionally a Telnet
+  // BREAK either -- `Session.sendAttn` (core/src/session.ts) sends IAC IP on a bound TN3270E
+  // session, sets the OIA's `X -f` with nothing on the wire on an unbound one, and BREAK only
+  // on a classic session. See packages/core/test/tn3270e-session.test.ts for all three.
   bind('\x01', { kind: 'attn' }, 'Ctrl-A');
   bind('\x03', { kind: 'clear' }, 'Ctrl-C');
   bind('\x12', { kind: 'reset' }, 'Ctrl-R');

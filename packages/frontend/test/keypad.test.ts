@@ -85,7 +85,10 @@ describe('KEYPAD_KEYS', () => {
       ['Home', 'home'], ['Tab', 'tab'], ['BkTab', 'backTab'], ['NewLn', 'newline'],
       // Changing what is in the field.
       ['BkSp', 'backspace'], ['Del', 'delete'],
-      ['ErEOF', 'eraseEOF'], ['ErInp', 'eraseInput'], ['Ins', 'toggleInsert'],
+      // `Ins` -> `insert`, NOT `toggleInsert`: x3270's keypad Ins (`Insert_action`,
+      // Common/kybd.c ~3237) sets insert mode ON, where the Insert KEY still toggles it --
+      // keyboard-semantics Task 9.
+      ['ErEOF', 'eraseEOF'], ['ErInp', 'eraseInput'], ['Ins', 'insert'],
       // Typed characters rather than AIDs -- see the note in keymap.ts.
       ['Dup', 'dup'], ['FldMk', 'fieldMark'],
       // Sent to the host, or handled locally.

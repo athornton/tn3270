@@ -94,7 +94,12 @@ export const KEYPAD_KEYS: readonly KeypadKey[] = Object.freeze([
   { label: 'PA3', action: { kind: 'pa', n: 3 }, name: 'PA3' },
   { label: 'Home', action: { kind: 'home' }, name: 'Home' },
   { label: '^', action: { kind: 'up' }, name: 'Cursor up' },
-  { label: 'Ins', action: { kind: 'toggleInsert' }, name: 'Insert mode' },
+  // `{ kind: 'insert' }`, NOT `toggleInsert`: x3270's keypad Ins is `Insert_action`
+  // (Common/kybd.c ~3237), which sets insert mode ON unconditionally, where the Insert KEY
+  // (terminal keymap, `keymap.ts`'s `\x1b[2~` row) toggles it. Two different bindings for the
+  // same label on purpose -- the keypad's one mouse click and the keyboard's one physical key
+  // disagree in x3270 too, and this table follows the keypad's half of that.
+  { label: 'Ins', action: { kind: 'insert' }, name: 'Insert mode' },
   { label: 'Dup', action: { kind: 'dup' }, name: 'Dup' },
   { label: 'Reset', action: { kind: 'reset' }, name: 'Reset' },
 

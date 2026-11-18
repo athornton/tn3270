@@ -1,4 +1,4 @@
-import { AID, pfAID, paAID, type Session } from '@tn3270/core';
+import type { Session } from '@tn3270/core';
 import type { Action } from './keymap.js';
 
 /**
@@ -6,25 +6,44 @@ import type { Action } from './keymap.js';
  *
  * ## THIS FILE DECIDES NOTHING ABOUT 3270 SEMANTICS
  *
- * The field-aware typing rules, the tab order, the keyboard lock and the AID semantics
- * all live in core and are tested there. If a branch here grows logic, that logic is in
- * the wrong package. It is shared because it is the one translation every front end
- * needs and none of them should own: the CLI's command table, the TUI's keymap and the
- * GUI's KeyboardEvent mapper all produce these same names.
+ * The field-aware typing rules, the tab order, the keyboard lock and the AID semantics all live
+ * in core and are tested there. If a branch here grows logic, that logic is in the wrong
+ * package. It is shared because it is the one translation every front end needs and none of
+ * them should own: the CLI's command table, the TUI's keymap and the GUI's KeyboardEvent mapper
+ * all produce these same names.
  *
- * ## `quit` AND `toggleKeypad` ARE NOT HANDLED HERE, AND THROW RATHER THAN BEING IGNORED
+ * ## EVERY `KeyAction` KIND GOES THROUGH `Session.run`, AND NOTHING ELSE HERE DOES
  *
- * Teardown is the front end's: the TUI restores raw mode on every exit path, the GUI
- * closes a window. Silently ignoring `quit` would leave a front end that forgot to check
- * for it simply unquittable, and that failure would show up as a hang rather than an
- * error. Callers test for it before delegating.
+ * `Session.run` (`core/src/session.ts`) is the keyboard-semantics feature's "one way in": it is
+ * where a key is dropped while disconnected, queued behind a host lock (the OIA's typeahead `T`),
+ * cleared-then-acted under an operator error, or performed immediately -- see its own docstring
+ * for the order, which mirrors x3270's `enq_xta`. Before this task (keyboard-semantics Task 9)
+ * this function held its OWN switch, one case per `KeyAction` kind, each calling a `Keyboard` or
+ * `Session` method directly -- which is exactly how an operator's keystroke bypassed every lock
+ * rule `run` now enforces: a GUI, browser or TUI key reached the keyboard a script's `String()`
+ * or `Enter()` never could, because only the CLI runner went through `run` before this. That
+ * switch's INDIVIDUAL CASE BODIES, and the defects their commentary recorded (an out-of-range
+ * `pf`/`pa` number coercing to AID 0x00, Dup/FieldMark not being AIDs, Sys Req's two wire forms,
+ * Newline's plausible-swap neighbours), are gone from here: every case below is `session.run(
+ * action)`, and `core/src/session.ts`'s `perform` is the switch that still has one case per
+ * kind, reached by exactly the same route for every caller -- a key, a keypad button, or a
+ * script action. The switch below still exists, but only to single out `enter`/`clear` for
+ * `reconnectInstead` and to keep the `satisfies never` exhaustiveness check (see the note above
+ * the `try`'s `default` arm). `frontend/test/actions.test.ts` still pins the old defects' shape;
+ * they just redden a different file's test now.
  *
- * `toggleKeypad` is the same shape. Showing or hiding a keypad is a display decision no
- * `Session` knows anything about: the Electron main process and the gateway's server each
- * hold the flag and rebuild the frame, and the TUI opens a list overlay instead. The
- * switch below treats an unrecognized kind as a NO-OP, so ignoring it would leave a front
- * end that forgot to intercept it presenting a button or a chord that does nothing at
- * all -- the least diagnosable outcome available. So it throws.
+ * ## `quit` AND SEVEN OTHER FRONT-END-ONLY KINDS ARE NOT HANDLED HERE, AND THROW RATHER THAN
+ * BEING IGNORED
+ *
+ * Teardown is the front end's: the TUI restores raw mode on every exit path, the GUI closes a
+ * window. Silently ignoring `quit` would leave a front end that forgot to check for it simply
+ * unquittable, and that failure would show up as a hang rather than an error. `toggleKeypad`,
+ * `toggleKeyboard`, `geometryMenu`, `transferForm`, `copy`, `paste` and `requestCopy` are the
+ * same shape for their own reasons, each explained where it guards below and on its member of
+ * the `Action` union in `keymap.ts`. None of the eight is a `KeyAction`, so none of them could
+ * reach `session.run` even by accident -- `KeyAction`'s type excludes them structurally, which
+ * is what makes the exhaustiveness note on the switch's `default` arm below a compile-time
+ * guarantee rather than a style preference.
  *
  * ## `enter` AND `clear` DEPEND ON THE CONNECTION STATE, WHICH NOTHING ELSE HERE DOES
  *
@@ -34,10 +53,13 @@ import type { Action } from './keymap.js';
  *
  * ## A REJECTED ACTION IS SWALLOWED
  *
- * Not connected, or a program check, is normal operation rather than a crash — and the
- * OIA already says why, so the caller's redraw shows it. `typeString` is different again:
- * it REPORTS refusal by returning false rather than throwing, so there is nothing to
- * catch and nothing to do.
+ * Not connected, an operator error, a host lock, or a program check, is normal operation rather
+ * than a crash — and the OIA already says why (`X Protected`, the typeahead `T`, ...), so the
+ * caller's redraw shows it. `session.run`'s `RunResult` (`'done' | 'queued' | 'dropped' |
+ * 'refused'`) is discarded here for the same reason `typeString`'s old boolean return was: it
+ * REPORTS rather than throws, so there is nothing to catch and nothing to do. `pfAID`/`paAID`
+ * still THROW on an out-of-range number, from inside `session.run`'s `perform`, and the `catch`
+ * below still swallows that the same way it always has.
  */
 export function applyAction(session: Session, action: Action): void {
   if (action.kind === 'quit') {
@@ -136,72 +158,36 @@ export function applyAction(session: Session, action: Action): void {
       'applyAction does not handle geometryMenu: the front end owns its own display',
     );
   }
-  const k = session.keyboard;
   try {
     switch (action.kind) {
-      case 'type': k.typeString(action.text); break;
       // ENTER AND CLEAR MEAN TWO DIFFERENT THINGS, AND WHICH ONE IS DECIDED BY `isConnected()`.
-      // Read the block comment below before touching either line: "Enter submits the screen,
-      // except when it doesn't" is the whole of what a maintainer needs to be told here.
+      // Read the block comment below before touching either case: "Enter submits the screen,
+      // except when it doesn't" is the whole of what a maintainer needs to be told here. The
+      // reconnect is checked BEFORE `session.run`, not inside it: `run` has no concept of a
+      // disconnected session doing anything other than dropping the action, because the
+      // reconnect is this file's own divergence from x3270, not one of `run`'s lock rules.
       case 'enter':
-        if (reconnectInstead(session)) break;
-        session.sendAID(AID.ENTER);
-        break;
       case 'clear':
         if (reconnectInstead(session)) break;
-        session.sendAID(AID.CLEAR);
+        session.run(action);
         break;
-      // `pfAID`/`paAID`, NOT `PF_AIDS[action.n - 1]!`. The index form put a bogus 0x00 AID on the
-      // wire to a live mainframe for an out-of-range `n`, because `undefined` coerces to 0 inside
-      // `Uint8Array.from`. These throw instead, and the `catch` below means nothing is sent at all.
-      case 'pf': session.sendAID(pfAID(action.n)); break;
-      case 'pa': session.sendAID(paAID(action.n)); break;
-      case 'reset': k.reset(); break;
-      case 'left': k.left(); break;
-      case 'right': k.right(); break;
-      case 'up': k.up(); break;
-      case 'down': k.down(); break;
-      case 'home': k.home(); break;
-      case 'tab': k.tab(); break;
-      case 'backTab': k.backTab(); break;
-      // BESIDE `tab`/`backTab` because it is the same kind of thing: a local cursor move, not an
-      // AID. `Keyboard.newline()` has existed since stage 1 (`core/src/keyboard.ts:348`) and the
-      // CLI could already call it as `Newline()` (that case in `cli/src/runner.ts`) -- this
-      // case is what makes it reachable from an interactive front end, the same shape of gap
-      // `Session.sysreq()` had. It has NO CHORD: see the note on the union member.
-      case 'newline': k.newline(); break;
-      case 'backspace': k.backspace(); break;
-      case 'delete': k.deleteChar(); break;
-      case 'eraseEOF': k.eraseEOF(); break;
-      case 'eraseInput': k.eraseInput(); break;
-      case 'attn': session.sendAttn(); break;
-      // `Session.sysreq()` has existed since stage 2b with no front end able to call it;
-      // this case is what makes it reachable. TWO FORMS, and `Session.sysreq` picks: Telnet
-      // IAC AO on a TN3270E session that agreed the SYSREQ function, and a TEST REQUEST READ
-      // -- the four bytes SOH `%` `/` STX plus modified field data -- on a classic one. The
-      // classic form is what both of this project's live hosts get, since neither offers
-      // TN3270E. Refused silently either way; see that method for every refusal.
-      //
-      // SYSREQ IS AN AID ARCHITECTURALLY -- `AID.SYSREQ` 0xf0 in `@tn3270/core`'s constants,
-      // x3270 `3270ds.h:307` -- and x3270 does route it through `key_AID` on a non-E session
-      // (`kybd.c:2864`). IT IS STILL NEVER THE BYTE ON THE WIRE FOR THIS KEY: the AID selects
-      // the heading and is then discarded. Cited by name, not line: `constants.ts` moves.
-      case 'sysreq': session.sysreq(); break;
-      // Typed CHARACTERS, not AIDs: they write one EBCDIC control byte into the buffer and
-      // set MDT -- see the keyboard methods and kybd.c:2788,2825.
-      //
-      // What routing them through `sendAID` would ACTUALLY do, traced rather than assumed:
-      // 0x1c and 0x1e are not in `AID`, `VALID_AIDS` is built from its values
-      // (`constants.ts`, by name: the line moves), and `sendAID` throws `RangeError` before it
-      // even checks for a connection (`Session.sendAID`'s AID-byte check, by name: the line
-      // moves) -- which the `catch` below swallows. So the outcome is NOT a wrong byte on the
-      // wire but a key that does nothing at all, silently. Same class of defect, worse
-      // diagnosability.
-      case 'dup': k.dup(); break;
-      case 'fieldMark': k.fieldMark(); break;
-      // Read-then-set rather than a stored flag: `Keyboard.insertMode` is the one truth and
-      // the OIA reads it too, so a second copy here could disagree with what is displayed.
-      case 'toggleInsert': k.setInsertMode(!k.insertMode); break;
+      // EVERY OTHER `KeyAction` KIND, THROUGH `Session.run` AND NOTHING ELSE (keyboard-semantics
+      // Task 9). Before this task each of these 22 cases called a `Keyboard` or `Session` method
+      // directly -- `k.left()`, `session.sendAID(pfAID(action.n))`, `k.dup()`, and so on -- which
+      // is exactly how a GUI, browser or TUI key bypassed every lock rule `run` now enforces: a
+      // key typed under a host lock reached the buffer when only the CLI runner went through
+      // `run` first. `core/src/session.ts`'s `perform` is that switch now, one case per
+      // `KeyAction` kind, reached by the identical route whether the caller is a key, a keypad
+      // button, or a script action; its own comments carry the per-kind detail that used to live
+      // here (the out-of-range `pf`/`pa` number that once coerced to AID 0x00, Dup/FieldMark
+      // being typed characters and not AIDs, Sys Req's two wire forms). `actions.test.ts` still
+      // pins the behaviour; it reads `session.ts`'s source for it now, not this switch's.
+      case 'type': case 'pf': case 'pa': case 'reset':
+      case 'up': case 'down': case 'left': case 'right': case 'home': case 'tab': case 'backTab':
+      case 'newline': case 'backspace': case 'delete': case 'eraseEOF': case 'eraseInput':
+      case 'dup': case 'fieldMark': case 'insert': case 'toggleInsert': case 'attn': case 'sysreq':
+        session.run(action);
+        break;
       // EXHAUSTIVENESS, WITH NO RUNTIME FOOTPRINT. `satisfies never` is a type-level assertion
       // that every member has been handled above: it emits `default: action;` and nothing else, so
       // an unrecognized `kind` arriving from untrusted JSON is still the silent no-op that

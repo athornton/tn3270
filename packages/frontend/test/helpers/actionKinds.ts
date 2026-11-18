@@ -25,22 +25,50 @@
  *
  * A FLOOR AND CANARIES ARE ASSERTED BY EACH CALLER, using the two constants below: a scan that
  * silently stopped matching would otherwise leave a caller iterating an empty list and passing.
+ *
+ * ## TWO FILES NOW, NOT ONE, SINCE keyboard-semantics TASK 9
+ *
+ * `Action` used to spell out every one of its members by hand in `keymap.ts`; it now reuses
+ * `@tn3270/core`'s `KeyAction` for every keyboard-and-AID kind (`KeyAction | <front-end-only
+ * kinds>`, spec section A) so the two unions cannot drift. A scan bounded to `keymap.ts`'s own
+ * declaration, as this one always was, therefore finds only the eight front-end-only kinds that
+ * are still spelled `{ kind: '...' }` there -- `KeyAction` is a plain identifier in that
+ * declaration, matching no `{ kind: ... }` shape at all -- so this now reads `KeyAction`'s OWN
+ * declaration in `core/src/keyAction.ts` too, with the identical bounded regex, and returns the
+ * union of both. Losing this second read would not make the scan find NOTHING, which is what
+ * made the single-file version of this bug easy to miss while writing it: it would quietly find
+ * only the eight guards and undercount by exactly `KeyAction`'s size, a wrong answer that still
+ * clears `ACTION_KIND_FLOOR` (8 < 24 fails loudly; the floor is what catches this, not a visual
+ * inspection of the list).
  */
 import { readFileSync } from 'node:fs';
 
+/** Every `{ kind: '...' }` member of the union captured at group 1, bounded the same way both calls below use it. */
+function kindsOfUnion(declarationName: string, pattern: RegExp, source: string): readonly string[] {
+  const union = pattern.exec(source);
+  if (union === null) throw new Error(`cannot find the \`${declarationName}\` union`);
+  return [...union[1]!.matchAll(/\|\s*\{\s*kind:\s*'([A-Za-z]+)'/g)].map((m) => m[1]!);
+}
+
 /**
- * The kinds, in declaration order.
+ * The kinds, `KeyAction`'s own first and then `Action`'s front-end-only ones, each in its own
+ * declaration order.
  *
- * Read from `frontend/src/keymap.ts` relative to THIS file, so the path does not depend on which
- * package's test is asking.
+ * Read relative to THIS file, so the path does not depend on which package's test is asking.
  */
 export function actionKinds(): readonly string[] {
-  const source = readFileSync(new URL('../../src/keymap.ts', import.meta.url), 'utf8');
-  // Bounded to the union's own declaration, so a `{ kind: 'x' }` in a doc comment or a table
-  // elsewhere in that file cannot smuggle in a kind the type does not have.
-  const union = /export type Action =([\s\S]*?);\n/.exec(source);
-  if (union === null) throw new Error('cannot find the `Action` union in frontend/src/keymap.ts');
-  return [...union[1]!.matchAll(/\|\s*\{\s*kind:\s*'([A-Za-z]+)'/g)].map((m) => m[1]!);
+  const keymapSource = readFileSync(new URL('../../src/keymap.ts', import.meta.url), 'utf8');
+  const coreSource =
+    readFileSync(new URL('../../../core/src/keyAction.ts', import.meta.url), 'utf8');
+  // Bounded to each union's own declaration, so a `{ kind: 'x' }` in a doc comment or a table
+  // elsewhere in either file cannot smuggle in a kind the type does not have.
+  const keyActionKinds = kindsOfUnion(
+    'KeyAction', /export type KeyAction =([\s\S]*?);\n/, coreSource,
+  );
+  const frontEndOnlyKinds = kindsOfUnion(
+    'Action', /export type Action =([\s\S]*?);\n/, keymapSource,
+  );
+  return [...keyActionKinds, ...frontEndOnlyKinds];
 }
 
 /**

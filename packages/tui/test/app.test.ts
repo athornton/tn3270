@@ -78,6 +78,50 @@ function harness(rows = 25, cols = 80, hint?: string): Harness {
   return { app, session, stdin, stdout, host };
 }
 
+/**
+ * Like `harness()`, but CONNECTED AND UNLOCKED -- the shape `alarmHarness` below already uses,
+ * needed here for a different reason since keyboard-semantics Task 9.
+ *
+ * `App.onInput` eventually reaches `applyAction`, which now routes every `KeyAction` -- a typed
+ * character included -- through `Session.run`. `run` drops the action outright while
+ * `!isConnected()`, and before this task that distinction never mattered here: `applyAction`
+ * called `Keyboard.typeString`/`Session.sendAID` directly, with no connection test of its own,
+ * so a `harness()` that never connected typed and sent exactly as a connected one would. Most of
+ * this file's dispatch-level tests need a connected, UNLOCKED session now, not merely a
+ * connected one: `run` QUEUES rather than performs an action while the OIA is still
+ * `AwaitingFirstWrite`, true immediately after `connect()` and before any host write restores
+ * the keyboard.
+ *
+ * NO FIELD IS SENT, deliberately: an Erase/Write with WCC 0xc3 (keyboard-restore) and nothing
+ * else leaves the screen exactly as unformatted and as blank as it already was under the old,
+ * connectionless setup, so every typed-character assertion in this file sees the identical
+ * starting state it always did -- only the lock state changed.
+ *
+ * `hostWrite` ON THE RETURNED HARNESS lets a test unlock the keyboard a SECOND time, after an
+ * AID has locked it again (`sendAID`'s `SystemWait`) -- a real host's next write, simulated the
+ * same way the initial unlock above is.
+ */
+async function unlockedHarness(
+  rows = 25, cols = 80,
+): Promise<Harness & { hostWrite(...bytes: number[]): void }> {
+  const conn: Connection = {
+    write: () => {}, close: () => {}, onData: undefined, onClose: undefined, onError: undefined,
+  };
+  const session = new Session({ connect: () => conn });
+  const stdin = new FakeStdin();
+  const stdout = new FakeStdout(rows, cols);
+  const host = new FakeHost();
+  const app = new App({ session, stdin, stdout, host, depth: 0 });
+  await session.connect('h', 23);
+  const hostWrite = (...bytes: number[]): void => { conn.onData?.(Uint8Array.from(bytes)); };
+  hostWrite(T.IAC, T.DO, O.TERMINAL_TYPE);
+  hostWrite(T.IAC, T.SB, O.TERMINAL_TYPE, S.SEND, T.IAC, T.SE);
+  hostWrite(T.IAC, T.DO, O.EOR, T.IAC, T.WILL, O.EOR);
+  hostWrite(T.IAC, T.DO, O.BINARY, T.IAC, T.WILL, O.BINARY);
+  hostWrite(SnaCmd.EW, 0xc3, T.IAC, T.EOR);
+  return { app, session, stdin, stdout, host, hostWrite };
+}
+
 /** The resolved text of one cell, straight from the real screen. */
 function cellText(session: Session, index: number): string {
   return resolve(session.screen.snapshot(), {})[index]!.text;
@@ -536,36 +580,40 @@ describe('the host alarm', () => {
 });
 
 describe('input dispatch', () => {
-  it('types printable text into the real screen', () => {
-    const h = harness();
+  it('types printable text into the real screen', async () => {
+    // UNLOCKED, NOT MERELY A BARE `harness()` (keyboard-semantics Task 9): `applyAction` now
+    // routes a typed character through `Session.run`, which drops it on a disconnected session
+    // and queues it (rather than typing it) on a connected-but-locked one -- both true of a
+    // bare `harness()`. See `unlockedHarness`'s own note.
+    const h = await unlockedHarness();
     h.app.start();
     h.app.onInput(Uint8Array.from([0x41]));           // 'A'
     expect(cellText(h.session, 0)).toBe('A');
   });
 
-  it('types a whole pasted run', () => {
-    const h = harness();
+  it('types a whole pasted run', async () => {
+    const h = await unlockedHarness();
     h.app.start();
     h.app.onInput(new TextEncoder().encode('HELLO'));
     expect([0, 1, 2, 3, 4].map((i) => cellText(h.session, i)).join('')).toBe('HELLO');
   });
 
-  it('DOES NOT DROP a keystroke that shares a chunk with an escape sequence', () => {
+  it('DOES NOT DROP a keystroke that shares a chunk with an escape sequence', async () => {
     // The regression this whole pump was rewritten for. One read can carry
     // several keystrokes, so `A\x1b[A` is ordinary input -- type fast, or press a
     // key while an arrow is in flight. Matching the WHOLE buffer makes that null
     // (not a sequence, not all printable), and discarding a byte at a time then
     // throws the `A` away. Silent, and likelier the faster the user types.
-    const h = harness();
+    const h = await unlockedHarness();
     h.app.start();
     h.app.onInput(new TextEncoder().encode('A\x1b[A'));
     expect(cellText(h.session, 0)).toBe('A');         // the keystroke survived
     expect(h.session.screen.cursor).not.toBe(1);      // and the arrow was acted on
   });
 
-  it('acts on both encodings of an arrow key', () => {
+  it('acts on both encodings of an arrow key', async () => {
     for (const seq of ['\x1b[C', '\x1bOC']) {
-      const h = harness();
+      const h = await unlockedHarness();
       h.app.start();
       const before = h.session.screen.cursor;
       h.app.onInput(new TextEncoder().encode(seq));
@@ -606,8 +654,10 @@ describe('the ambiguous Escape', () => {
     expect(cellText(h.session, 0)).toBe(' ');         // and never typed literally
   });
 
-  it('completes the sequence when the rest arrives in time', () => {
-    const h = harness();
+  it('completes the sequence when the rest arrives in time', async () => {
+    // UNLOCKED (keyboard-semantics Task 9): the resolved `right` is a `KeyAction`, dropped by
+    // `Session.run` on a disconnected session.
+    const h = await unlockedHarness();
     h.app.start();
     h.app.onInput(Uint8Array.from([0x1b]));
     h.app.onInput(new TextEncoder().encode('[C'));    // ESC then [C = right
@@ -636,12 +686,14 @@ describe('the ambiguous Escape', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('resolves Esc then 1 as PA1 however long the gap is', () => {
+  it('resolves Esc then 1 as PA1 however long the gap is', async () => {
     // THE REPORTED BUG, 2026-09-14 from a Mac: ESC_TIMEOUT_MS is 50 and a human takes
     // hundreds of ms, so the ESC was discarded and the digit then arrived as ordinary text
     // -- `Esc 1` typed "1". No existing test could catch it: every keymap test hands
     // lookup() a complete `\x1b1`, which is exactly the case that already worked.
-    const h = harness();
+    // UNLOCKED (keyboard-semantics Task 9): `pa` is a `KeyAction`, dropped by `Session.run`
+    // on a disconnected session -- `sendAID` would never be reached at all.
+    const h = await unlockedHarness();
     h.app.start();
     const sent = vi.spyOn(h.session, 'sendAID');
 
@@ -653,7 +705,7 @@ describe('the ambiguous Escape', () => {
     expect(cellText(h.session, 0)).toBe(' ');         // and NOT typed into the field
   });
 
-  it('does not let a PROMOTED ESC combine with a paste into an arrow -- THE HAZARD', () => {
+  it('does not let a PROMOTED ESC combine with a paste into an arrow -- THE HAZARD', async () => {
     // Found in review, 2026-09-15, one level up from the bug this file exists to fix.
     // GATED ON THE TIMEOUT HAVING FIRED: an earlier version of this fix held a lone
     // ESC with no timer at all, so it combined with WHATEVER arrived next regardless
@@ -666,7 +718,10 @@ describe('the ambiguous Escape', () => {
     // A paste arriving WITHIN the timeout is, correctly, a different story: see
     // 'completes the sequence when the rest arrives in time' above. This test is
     // about a paste arriving well after Escape, once the ESC has been promoted.
-    const h = harness();
+    //
+    // UNLOCKED (keyboard-semantics Task 9): typed characters are `KeyAction`s too, dropped by
+    // `Session.run` on a disconnected session.
+    const h = await unlockedHarness();
     h.app.start();
     h.app.onInput(Uint8Array.from([0x1b]));
     vi.advanceTimersByTime(100);                      // past ESC_TIMEOUT_MS: now PROMOTED
@@ -679,13 +734,15 @@ describe('the ambiguous Escape', () => {
     expect(h.session.screen.cursor).toBe(2);
   });
 
-  it('types the byte after a PROMOTED ESC literally when it is not a PA digit', () => {
+  it('types the byte after a PROMOTED ESC literally when it is not a PA digit', async () => {
     // The improved cost, gated on the timeout having fired: once promoted, a bare
     // Escape with no PA follow-up is dropped and the buffer is reprocessed from the
     // start, so the very next keystroke is typed instead of lost. (Within the
     // timeout, an ESC followed by an unrelated byte is still discarded whole by the
     // ordinary impossible-sequence rule -- unchanged, and not what this pins.)
-    const h = harness();
+    //
+    // UNLOCKED (keyboard-semantics Task 9): see the note on the test above.
+    const h = await unlockedHarness();
     h.app.start();
     h.app.onInput(Uint8Array.from([0x1b]));
     vi.advanceTimersByTime(100);                      // past ESC_TIMEOUT_MS: now PROMOTED
@@ -693,10 +750,12 @@ describe('the ambiguous Escape', () => {
     expect(cellText(h.session, 0)).toBe('a');
   });
 
-  it('still discards a TRUNCATED sequence after the timeout', () => {
+  it('still discards a TRUNCATED sequence after the timeout', async () => {
     // The protection that must survive: `\x1b[` with nothing following is not a Meta prefix,
     // and leaving `[` behind would type a literal bracket into the field.
-    const h = harness();
+    //
+    // UNLOCKED (keyboard-semantics Task 9): the final `A` is typed through `Session.run`.
+    const h = await unlockedHarness();
     h.app.start();
     h.app.onInput(new TextEncoder().encode('\x1b['));
     expect(vi.getTimerCount()).toBe(1);               // this one DOES arm a timer
@@ -708,12 +767,14 @@ describe('the ambiguous Escape', () => {
     expect(h.session.screen.cursor).not.toBe(0);
   });
 
-  it('types a digit normally when no ESC came first', () => {
+  it('types a digit normally when no ESC came first', async () => {
     // Duplicates coverage elsewhere in this file, deliberately: it is the paired
     // control for 'resolves Esc then 1 as PA1' above, proving the ESC-holding guard
     // above did not overreach into ordinary un-prefixed digits. Do not delete this as
     // redundant.
-    const h = harness();
+    //
+    // UNLOCKED (keyboard-semantics Task 9): see the note on 'resolves Esc then 1 as PA1' above.
+    const h = await unlockedHarness();
     h.app.start();
     const sent = vi.spyOn(h.session, 'sendAID');
     h.app.onInput(Uint8Array.from([0x31]));
@@ -779,10 +840,13 @@ describe('the overlay\'s chord column, driven through the real input decoder', (
         pressed += 1;
       }
     });
-    // 46 keys have a chord; the four arrows and Home have two encodings each (CSI and SS3), and
-    // every encoding is pressed; the Quit line adds one (Ctrl-]). Exact, so a sweep that silently
-    // skipped lines cannot pass.
-    expect(pressed).toBe(46 + 5 + 1);
+    // 45 keys have a chord, NOT 46 -- keyboard-semantics Task 9 dropped the keypad's `Ins` out of
+    // this count (see `keypadOverlay.test.ts`'s matching test): `Ins` is now `{ kind: 'insert' }`,
+    // which no terminal sequence decodes to, where it used to share `toggleInsert` with the
+    // Insert key and show that chord. The four arrows and Home have two encodings each (CSI and
+    // SS3), and every encoding is pressed; the Quit line adds one (Ctrl-]). Exact, so a sweep
+    // that silently skipped lines cannot pass.
+    expect(pressed).toBe(45 + 5 + 1);
   });
 });
 
@@ -848,10 +912,13 @@ describe('the special-keys overlay', () => {
     // which is how it shipped, and which passed only because a disconnected `sendAID` was a spied
     // no-op -- this now reads "Enter did nothing" as a pass for "Enter reached the host". A real
     // connection makes the assertion mean what its comment says.
+    //
+    // CONNECTED AND UNLOCKED, NOW (keyboard-semantics Task 9): `unlockedHarness` gives both;
+    // a merely-connected session still QUEUES the PF13 press instead of sending it, since the
+    // OIA is `AwaitingFirstWrite` until a host write restores the keyboard.
     for (const key of ['\r', '\n']) {
-      const h = harness();
+      const h = await unlockedHarness();
       h.app.start();
-      await h.session.connect('h', 23);
       const sent = vi.spyOn(h.session, 'sendAID');
       dispatchToggle(h.app);
       h.app.onInput(enc(key));
@@ -860,6 +927,12 @@ describe('the special-keys overlay', () => {
       expect(sent, key).not.toHaveBeenCalledWith(AID.ENTER);
       expect(h.app.overlayOpen, key).toBe(false);
 
+      // THE HOST ANSWERS PF13's AID, keyboard-semantics Task 9: `sendAID` locked the keyboard
+      // (`SystemWait`), and `Session.run` would otherwise QUEUE the second Enter rather than
+      // send it -- correctly, since a real host lock is up, but not what this test is about.
+      // A second write with a WCC keyboard-restore is the host's side of that exchange.
+      h.hostWrite(SnaCmd.EW, 0xc3, T.IAC, T.EOR);
+
       // The second Enter is the host's again, and does NOT re-fire the key.
       h.app.onInput(enc(key));
       expect(sent, key).toHaveBeenCalledWith(AID.ENTER);
@@ -867,13 +940,16 @@ describe('the special-keys overlay', () => {
     }
   });
 
-  it('moves the selection with either encoding of the arrow keys', () => {
+  it('moves the selection with either encoding of the arrow keys', async () => {
     // ASSERTED AFTER EACH STEP, because the end state alone does not pin the DIRECTIONS: measured
     // by mutation, transposing the two handlers still lands 'down, down, up' on KEYPAD_KEYS[1] --
     // clamped twice at the top, then one step down -- so the obvious form of this test passed while
     // proving nothing. The first down is the assertion that cannot survive a swap.
+    //
+    // UNLOCKED (keyboard-semantics Task 9): the final Enter's PF14 is a `KeyAction`, queued
+    // rather than sent on a disconnected or merely-connected session.
     for (const [down, up] of [['\x1b[B', '\x1b[A'], ['\x1bOB', '\x1bOA']]) {
-      const h = harness();
+      const h = await unlockedHarness();
       h.app.start();
       const sent = vi.spyOn(h.session, 'sendAID');
       dispatchToggle(h.app);
@@ -912,10 +988,12 @@ describe('the special-keys overlay', () => {
     }
   });
 
-  it('fires the key a letter selected, and sends nothing to the host on the way', () => {
+  it('fires the key a letter selected, and sends nothing to the host on the way', async () => {
     // The letters are navigation, not AIDs: the only thing that reaches the host is the key Enter
     // fires afterwards. `PF15` is KEYPAD_KEYS[2], so this also pins that two `j`s moved two lines.
-    const h = harness();
+    //
+    // UNLOCKED (keyboard-semantics Task 9): PF15 is a `KeyAction`.
+    const h = await unlockedHarness();
     h.app.start();
     const sent = vi.spyOn(h.session, 'sendAID');
     dispatchToggle(h.app);
@@ -926,13 +1004,15 @@ describe('the special-keys overlay', () => {
     expect(sent).toHaveBeenCalledWith(AID.PF15);
   });
 
-  it('still swallows h, l, a and d: a one-column list has no left or right', () => {
+  it('still swallows h, l, a and d: a one-column list has no left or right', async () => {
     // DELIBERATELY UNBOUND, not forgotten -- see OVERLAY_UP_LETTERS. Both halves matter: they must
     // not move the selection, AND they must not reach the field behind the list. Without the second
     // assertion the overlay would be a keylogger for whatever the operator was half-way through
     // typing, which is the whole point of the interception in `onInput`.
+    //
+    // UNLOCKED (keyboard-semantics Task 9): the closing Enter's PF14 is a `KeyAction`.
     for (const key of ['h', 'H', 'l', 'L', 'a', 'A', 'd', 'D']) {
-      const h = harness();
+      const h = await unlockedHarness();
       h.app.start();
       const sent = vi.spyOn(h.session, 'sendAID');
       dispatchToggle(h.app);
@@ -949,10 +1029,13 @@ describe('the special-keys overlay', () => {
     }
   });
 
-  it('does NOT type into the screen while the overlay is up', () => {
+  it('does NOT type into the screen while the overlay is up', async () => {
     // The overlay owns the keyboard while open. A letter reaching the field would be a silent
     // corruption of whatever the operator was in the middle of typing.
-    const h = harness();
+    //
+    // UNLOCKED (keyboard-semantics Task 9): the control assertion below needs the SECOND `A` to
+    // actually land, which `Session.run` would otherwise drop or queue.
+    const h = await unlockedHarness();
     h.app.start();
     dispatchToggle(h.app);
     h.app.onInput(enc('A'));
@@ -967,12 +1050,14 @@ describe('the special-keys overlay', () => {
     expect(cellText(h.session, 0)).toBe('A');
   });
 
-  it('does not mistake an arrow key split across two reads for Escape', () => {
+  it('does not mistake an arrow key split across two reads for Escape', async () => {
     // THE REAL HAZARD IN THIS INTERCEPTION. `\x1b` and `[B` can arrive in separate reads -- that is
     // the delivery `pump()`'s escHeld comment records a regression for, so it is not hypothetical.
     // Closing on the first read would make the down arrow close the overlay on any terminal that
     // splits, which is a coin toss the user cannot see.
-    const h = harness();
+    //
+    // UNLOCKED (keyboard-semantics Task 9): the closing Enter's PF14 is a `KeyAction`.
+    const h = await unlockedHarness();
     h.app.start();
     const sent = vi.spyOn(h.session, 'sendAID');
     dispatchToggle(h.app);
@@ -997,10 +1082,12 @@ describe('the special-keys overlay', () => {
     expect(cellText(h.session, 0)).toBe(' ');
   });
 
-  it('acts on two arrows delivered in ONE read', () => {
+  it('acts on two arrows delivered in ONE read', async () => {
     // A slow link or a busy event loop coalesces autorepeat, and a chunk-at-a-time matcher would
     // recognize neither -- the selection would silently stop moving while the key was held.
-    const h = harness();
+    //
+    // UNLOCKED (keyboard-semantics Task 9): the closing Enter's PF15 is a `KeyAction`.
+    const h = await unlockedHarness();
     h.app.start();
     const sent = vi.spyOn(h.session, 'sendAID');
     dispatchToggle(h.app);
@@ -1036,11 +1123,13 @@ describe('the special-keys overlay', () => {
     expect(h.app.overlayOpen).toBe(false);
   });
 
-  it('hands back a keystroke that shared a read with the key that closed it', () => {
+  it('hands back a keystroke that shared a read with the key that closed it', async () => {
     // The overlay owns the keyboard only while it is UP. Bytes behind the closing key belong to the
     // screen, and swallowing them would be the silent dropped keystroke `pump()`'s docstring is
     // about -- likelier the faster the user types, and invisible when it happens.
-    const h = harness();
+    //
+    // UNLOCKED (keyboard-semantics Task 9): the handed-back `A` is typed through `Session.run`.
+    const h = await unlockedHarness();
     h.app.start();
     dispatchToggle(h.app);
     h.app.onInput(enc('\x0bA'));
@@ -1360,13 +1449,20 @@ describe('the transfer form', () => {
     }
   });
 
-  it('BYTES SHARING A READ WITH THE CLOSING KEYSTROKE ARE NOT LOST', () => {
+  it('BYTES SHARING A READ WITH THE CLOSING KEYSTROKE ARE NOT LOST', async () => {
     // The silent lost keystroke `pump()` exists to prevent, and the reason closeOverlay does
     // not empty its pending buffer. `Ctrl-T A` in one read closes the form and types the A at
     // the host -- so the A must reach the screen, not vanish.
-    const h = started();
-    h.send(CTRL_T);
-    h.send(CTRL_T, 0x41);                            // close, then "A" for the host
+    //
+    // UNLOCKED, NOT `started()`'s bare `harness()` (keyboard-semantics Task 9): the handed-back
+    // `A` is typed through `Session.run`, which drops it on a disconnected session -- see
+    // `unlockedHarness`'s own note. Built inline rather than changing `started()` itself, since
+    // every other test in this block passes against a disconnected session and does not need it.
+    const h = await unlockedHarness();
+    h.app.start();
+    const send = (...bytes: number[]): void => { h.stdin.listener!(Uint8Array.from(bytes)); };
+    send(CTRL_T);
+    send(CTRL_T, 0x41);                              // close, then "A" for the host
     expect(h.app.transferOpen).toBe(false);
     expect(cellText(h.session, 0)).toBe('A');
   });
