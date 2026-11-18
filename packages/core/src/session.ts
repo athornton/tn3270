@@ -1,9 +1,10 @@
 import {
   AID, MODEL_2, TERMINAL_TYPE, Tn3270eDataType, Tn3270eFunc, Tn3270eResponseFlag,
-  Tn3270eSense, VALID_AIDS,
+  Tn3270eSense, VALID_AIDS, pfAID, paAID,
 } from './constants.js';
 import { Screen } from './screen.js';
 import { Keyboard } from './keyboard.js';
+import type { KeyAction, RunResult } from './keyAction.js';
 import { Oia, KeyboardState } from './oia.js';
 import { Trace, parseTrace } from './trace.js';
 import { TelnetLayer, type TelnetLayerOptions } from './telnet.js';
@@ -1804,6 +1805,67 @@ export class Session {
     // writing — and demoting it there would narrow the release rule from "any
     // write, or a WCC keyboard-restore" to "any write". See Oia.enterInhibit.
     this.oia.enterInhibit();
+  }
+
+  /**
+   * The one route by which an OPERATOR action -- a key, a keypad button, or a CLI keyboard
+   * action -- reaches the keyboard or the host. Everything else (`sendAID`, `sendAttn`,
+   * `sysreq`, `Keyboard`'s own methods) stays directly callable for INTERNAL callers, chiefly
+   * a CUT transfer driver's AIDs, which x3270 tests separately for the keyboard lock and which
+   * must never sit behind an operator's typeahead queue.
+   *
+   * x3270's `enq_xta` (Common/kybd.c:270-330) in order; only the first two are implemented by
+   * this task, which covers only the UNLOCKED path:
+   *
+   *  1. Not connected: drop. (The reconnect-on-Enter divergence lives in `applyAction`,
+   *     above this.)
+   *  2. No lock: perform now.
+   *  3. Task 2 adds the queue: a host lock parks the action (or drops it, during a transfer);
+   *     Task 3 adds the operator-error lock's clear-then-act-or-drop, ahead of the queue; Task
+   *     4 adds Reset's own priority over both.
+   */
+  run(action: KeyAction): RunResult {
+    if (!this.isConnected()) return 'dropped';
+    return this.perform(action);
+  }
+
+  /**
+   * The immediate operation: `Keyboard`'s methods and the AID senders, with NO lock logic of
+   * its own. `run` calls this once a lock has already been found absent; Task 2's drain will
+   * call it directly for the same reason.
+   *
+   * Every kind maps to the method `applyAction` uses today, so this task changes no front-end
+   * behaviour -- only where the call comes from.
+   */
+  private perform(action: KeyAction): RunResult {
+    const k = this.keyboard;
+    switch (action.kind) {
+      case 'type': return k.typeString(action.text) ? 'done' : 'refused';
+      case 'enter': this.sendAID(AID.ENTER); return 'done';
+      case 'clear': this.sendAID(AID.CLEAR); return 'done';
+      case 'pf': this.sendAID(pfAID(action.n)); return 'done';
+      case 'pa': this.sendAID(paAID(action.n)); return 'done';
+      case 'reset': k.reset(); return 'done';
+      case 'up': k.up(); return 'done';
+      case 'down': k.down(); return 'done';
+      case 'left': k.left(); return 'done';
+      case 'right': k.right(); return 'done';
+      case 'home': k.home(); return 'done';
+      case 'tab': k.tab(); return 'done';
+      case 'backTab': k.backTab(); return 'done';
+      case 'newline': k.newline(); return 'done';
+      case 'backspace': k.backspace(); return 'done';
+      case 'delete': k.deleteChar(); return 'done';
+      case 'eraseEOF': k.eraseEOF(); return 'done';
+      case 'eraseInput': k.eraseInput(); return 'done';
+      case 'dup': return k.dup() ? 'done' : 'refused';
+      case 'fieldMark': return k.fieldMark() ? 'done' : 'refused';
+      case 'insert': k.setInsertMode(true); return 'done';
+      case 'toggleInsert': k.setInsertMode(!k.insertMode); return 'done';
+      case 'attn': this.sendAttn(); return 'done';
+      case 'sysreq': this.sysreq(); return 'done';
+      default: return action satisfies never;
+    }
   }
 
   /**
