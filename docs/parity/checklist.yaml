@@ -748,11 +748,11 @@
   title: Draw intensified text bold (highlightBold)
   covers: [resource:highlightBold]
   x3270: "highlightBold resource, off by default (x3270/resources.c:346-347): in 3279 mode intensified fields are bold only if set; in 3278 mode always (x3270/screen.c:706-712)"
-  gui: "none: an intensified field is drawn in its color (red or white) and never bold, which is x3270's 3279 default"
+  gui: "an intensified cell's glyph is drawn again one source pixel to the right, the overstrike x3270 always does for the extended Intensify highlight (SA/SFE) whatever highlightBold says (x3270/screen.c:2917-2921); an intensified FIELD is drawn in its color (red or white) and never bold, which is x3270's 3279 default"
   status: partial
-  gap: "matches x3270's 3279-mode default for intensified FIELDS (not bold), but has no flag to turn bold on; and x3270 always draws the extended Intensify highlight (SA/SFE) bold by overstrike, whatever highlightBold says (x3270/screen.c:2917-2921), where ours never draws it: drawlist.ts:115 sets intensify and blit.ts never reads it"
+  gap: "matches x3270's 3279-mode default for intensified FIELDS (not bold), but has no highlightBold flag to turn bold on"
   evidence:
-    code: [packages/core/src/render.ts:188, packages/canvas/src/drawlist.ts:115, packages/canvas/src/blit.ts:129]
+    code: [packages/core/src/render.ts:188, packages/canvas/src/drawlist.ts:115, packages/canvas/src/blit.ts:141]
     tests: [packages/core/test/render.test.ts, packages/canvas/test/blit.test.ts]
   browser: "the same canvas"
 - id: field-highlight-colors
@@ -896,9 +896,14 @@
   title: The bell, audible or visual
   covers: [action:Bell, resource:visualBell, resource:bellVolume]
   x3270: "a WCC Sound Alarm rings the bell (Common/ctlr.c:2176), as does the Bell() action (Common/task.c:610); visualBell (off by default) flashes the screen instead, and bellVolume sets the volume (x3270/resources.c:270-271, :304-305; x3270/screen.c:5458-5470)"
-  gui: "none: core records the alarm and emits 'alarm' (core/src/session.ts:1219-1221), and no front end listens"
-  status: missing
-  browser: "none"
+  gui: "on core's 'alarm' (session.ts:1219-1221), the system beep (shell.beep()); -visualbell flashes the canvas (~100 ms, inverted) instead -- the same flag, equivalent reach to visualBell"
+  status: partial
+  gap: "no scripted Bell() action, and no bellVolume setting"
+  evidence:
+    code: [packages/core/src/session.ts:1221, packages/gui/src/main.ts:1352, packages/gui/src/args.ts:88, packages/tui/src/app.ts:424, packages/tui/src/args.ts:70, packages/web/src/main.ts:319, packages/web/src/protocol.ts:121, packages/web/src/args.ts:117, packages/web/src/bridgecore.ts:514, packages/web/src/bridgecore.ts:700]
+    tests: [packages/gui/test/bell.test.ts, packages/gui/test/args.test.ts, packages/tui/test/app.test.ts, packages/tui/test/main.test.ts, packages/web/test/args.test.ts, packages/web/test/protocol.test.ts, packages/web/test/bridgecore.test.ts, packages/web/test/integration.test.ts, packages/core/test/execute.test.ts]
+    live: "Blink, intensify and the bell, from the GUI and TUI — 2026-11-17"
+  browser: "a short WebAudio tone on the gateway's 'alarm' message, or a flash with -visualbell; a browser's autoplay policy can leave the very first alarm silent until the page has had a keypress or click. Tests only (packages/web/test/bridgecore.test.ts); no live witness."
 - id: window-title
   area: display
   title: Window title naming the model and host, and the Title action

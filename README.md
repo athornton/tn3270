@@ -200,12 +200,15 @@ npm run build                                           # or from a checkout
 
 With no host it opens the Connect dialog (see *Installing*). The flags are the TUI's —
 `-model`, `--terminal-type`, `-oversize`, `-tn3270e on|off`, `-bind-image`, `-bind-limit`, `-ddm`,
-`-devname`, `-scheme`, the TLS set, and the full `[prefix:][LU,LU@]host[:port]` shape — except
-`--colors`, since a canvas draws 24-bit RGB straight from the scheme. That is not a coincidence:
-the front ends parse them with the same code in `packages/frontend`. `-scheme` is the one flag not
-shared with the CLI, since a script-driven client has nothing to render; see *Using the TUI* for
-what it picks between. (`-oversize auto` measures the display here; see *Oversize*.) The web
-gateway takes a smaller set; see *Using the web gateway*.
+`-devname`, `-scheme`, `-visualbell`, the TLS set, and the full `[prefix:][LU,LU@]host[:port]`
+shape — except `--colors`, since a canvas draws 24-bit RGB straight from the scheme. That is not a
+coincidence: the front ends parse them with the same code in `packages/frontend`. `-scheme` is the
+one flag not shared with the CLI, since a script-driven client has nothing to render; see *Using
+the TUI* for what it picks between. (`-oversize auto` measures the display here; see *Oversize*.)
+The web gateway takes a smaller set; see *Using the web gateway*.
+
+**The host's alarm rings as the system beep (`shell.beep()`); `-visualbell` flashes the canvas
+(~100 ms, inverted) instead of ringing it.**
 
 **`Ctrl-]` or `Ctrl-Q` quits** (`Ctrl-Q` works on every keyboard layout; `Ctrl-]` needs AltGr
 on German and French ones), as does File → Quit on Linux and Windows and Cmd-Q on macOS.
@@ -531,8 +534,8 @@ window and `Cmd-Q` end the process, so they are covered only by the fake-transfe
 ```sh
 node packages/tui/dist/main.js [-model M] [--terminal-type T] [--colors N] [-scheme S] \
     [-tn3270e on|off] [-bind-image on|off] [-bind-limit on|off] [-ddm on|off] [-devname NAME] \
-    [-oversize <cols>x<rows>|auto|none] [-insecure] [-noverifycert] [-verifycert] [-cafile FILE] \
-    [prefix:][LU,LU@]host[:port]
+    [-visualbell] [-oversize <cols>x<rows>|auto|none] [-insecure] [-noverifycert] \
+    [-verifycert] [-cafile FILE] [prefix:][LU,LU@]host[:port]
 ```
 
 `-model 3278-2-E` is usually what you want: TSO rejects a plain `IBM-3278-2`. Port
@@ -540,6 +543,9 @@ defaults to 23. Models 2–5 are accepted, with or without `-E`; see *Screen mod
 `--colors` takes `0|8|16|256|16m|auto`, where `auto` asks terminfo and
 `0` is monochrome because you said so — the distinction matters, since it is how the
 monochrome path gets tested on a color terminal.
+
+**The host's alarm rings as BEL (`\a`); `-visualbell` flashes the terminal instead (DECSCNM
+reverse video, ~100 ms), as xterm's own visual bell does.**
 
 **`tn3270` with no host, run AT A TERMINAL, prompts for one instead of the usage error**, the
 TUI's counterpart of the GUI's Connect dialog:
@@ -1168,10 +1174,15 @@ Its own options are double-dashed (`--listen`, `--bind`, `--auth`, `--token`, `-
 `--max-sessions`, `--allow-origin`, `--tls-cert`, `--tls-key`, `--tls-chain`, and the harness
 flags `--replay` and `--log-actions`); the client options it inherits keep s3270's single dash
 (`-insecure`, `-cafile`, `-noverifycert`, `-verifycert`, `-model`, `-oversize`, `-scheme`,
-`-bind-image`, `-bind-limit`, `-ddm`, `-devname`). `-oversize auto`
+`-bind-image`, `-bind-limit`, `-ddm`, `-devname`, `-visualbell`). `-oversize auto`
 measures each browser's viewport, separately for each session; see *Oversize*. **`--scheme` is refused as an
 unknown flag** — that asymmetry is deliberate, since those flags mean the same thing in every
 front end.
+
+**The host's alarm plays a short WebAudio tone in the page; `-visualbell` flashes the canvas
+(~100 ms, inverted) instead of toning it.** A browser's autoplay policy can start the page's audio
+context suspended, so the very first alarm before any keypress or click on the page may be silent;
+later ones are not.
 
 **It shares FEWER client flags than the other three, and refuses the rest by name rather than
 ignoring them.** `--terminal-type` and `-tn3270e` are not accepted at all, so a gateway
@@ -1319,9 +1330,11 @@ gate, in the order agreed 2026-11-17; each milestone gets its own spec, plan and
      shares: AID and editing keys act while the keyboard is locked, where x3270 queues them
      (`typeahead`, `aid-keys`, `cursor-movement`, the erase keys); insert mode survives an AID and
      Reset (`insert-mode`, `reset-key`); `oerr-lock`, `numeric-lock`; `attn` sends BREAK on TN3270E
-     where x3270 sends IP. Also blink and intensify are never drawn (`highlight-bold`), the host's
-     alarm never rings (`bell`), ascii transfers do no local CR/LF conversion (`file-transfer`), and
-     x3270's default code page is `bracket`, not cp037 (`code-page`).
+     where x3270 sends IP. Blink and intensify are now drawn in the canvas front ends, and the
+     host's alarm now rings, with `-visualbell` to flash instead of ringing it (`highlight-bold`,
+     `bell`; see *Using the GUI*, *Using the TUI* and *Using the web gateway*). ascii transfers do
+     no local CR/LF conversion (`file-transfer`), and x3270's default code page is `bracket`, not
+     cp037 (`code-page`).
    - **15b. The rest of the GUI ("milestone B").** `File` → `Connect…` and Disconnect in a running
      window (`connect-host`, `disconnect`), recent hosts and a host list, a config file and
      preferences (`save-options`), color scheme, model and font menus, light and dark modes, the
