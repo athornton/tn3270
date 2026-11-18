@@ -410,6 +410,25 @@ export class Session {
    */
   private pendingAid: number = AID.NONE;
 
+  /**
+   * x3270's `ta_head`/`ta_tail` (Common/kybd.c:270): operator actions parked while the
+   * keyboard is host-locked (`Session.run`), run oldest-first by `drainTypeahead` once the
+   * lock lifts.
+   *
+   * A property of the CONNECTION, not the session: a reconnect must not replay a queue
+   * built for the host that just went away. Emptied in `handleClose`, alongside
+   * `oia.typeahead` -- x3270's `flush_ta`, called from `kybd_connect` (kybd.c:591).
+   */
+  private readonly typeahead: KeyAction[] = [];
+  /**
+   * Set by a transfer driver (Task 10) for the whole of a DFT or CUT transfer in progress --
+   * x3270's `KL_FT`. While true, `run` drops a locked-keyboard action with the alarm instead
+   * of queuing it, so an operator keystroke made during a transfer does not land, unannounced,
+   * on the host's post-transfer READY screen. Cleared by the transfer driver and, as a
+   * backstop, by `handleClose`, so a dropped connection can never leave it stuck on.
+   */
+  transferring = false;
+
   constructor(opts: SessionOptions) {
     this.opts = opts;
     this.bindLimit = opts.bindLimit ?? true;
@@ -1027,6 +1046,18 @@ export class Session {
     // to one host must never be reported to the next one. See `pendingAid`, and note this
     // is the same one-teardown-path-clears-it shape already fixed here for `e` and `dft`.
     this.pendingAid = AID.NONE;
+    // THE TYPEAHEAD QUEUE BELONGS TO THE CONNECTION, same reasoning as `pendingAid`
+    // immediately above: x3270's `kybd_connect` -> `flush_ta` (kybd.c:591) empties it on
+    // disconnect, and a queue left standing would run on the NEXT connection's first unlock,
+    // typing keystrokes the operator aimed at a host that is already gone.
+    this.typeahead.length = 0;
+    this.oia.typeahead = false;
+    // `transferring` IS ALSO A BACKSTOP HERE, not only the transfer driver's job (Task 10):
+    // a dropped connection must never leave future keystrokes dropped-with-alarm forever
+    // because nothing else cleared the flag -- the same "one teardown path clears it, another
+    // doesn't" shape this file keeps finding (see `pendingAid`'s own comment, three
+    // paragraphs up).
+    this.transferring = false;
     // A DFT TRANSFER BELONGS TO THE CONNECTION CARRYING IT. Without this, a transfer
     // registered on one connection stays registered on the next, and `answerRead`'s
     // retained-frame replay would answer a host that knows nothing about it.
@@ -1278,6 +1309,18 @@ export class Session {
         throw err;
       }
     }
+    // x3270 calls `ps_process()` -- and so `run_ta()` -- unconditionally near the end of
+    // `ctlr_write` (ctlr.c:2188-2189), AFTER a bad order or address has already set
+    // `rv = PDS_BAD_ADDR` (:2184): that is a local variable checked only by the function's
+    // own `return rv` at the very end, not an early return, so a mid-stream error there
+    // still reaches `ps_process()`. (ctlr_write's actual early `return` for a too-short
+    // record, :1411, is this codebase's `decodeHeader() === null` check in `handleRecord`,
+    // which never reaches `executeRecord` at all -- so there is no case here that should
+    // skip the drain but does reach this line.) Placed after the whole try/catch, covering
+    // both of `executeRecord`'s `emit('screen')` sites (the one above, and `programCheck`'s)
+    // with one call. Never reached if the catch's own re-throw fires (our bug, not the
+    // host's) -- a client that has crashed does not go on to drain a queue.
+    this.drainTypeahead();
   }
 
   /**
@@ -1814,25 +1857,39 @@ export class Session {
    * a CUT transfer driver's AIDs, which x3270 tests separately for the keyboard lock and which
    * must never sit behind an operator's typeahead queue.
    *
-   * x3270's `enq_xta` (Common/kybd.c:270-330) in order; only the first two are implemented by
-   * this task, which covers only the UNLOCKED path:
+   * x3270's `enq_xta` (Common/kybd.c:270-330) in order:
    *
    *  1. Not connected: drop. (The reconnect-on-Enter divergence lives in `applyAction`,
    *     above this.)
-   *  2. No lock: perform now.
-   *  3. Task 2 adds the queue: a host lock parks the action (or drops it, during a transfer);
-   *     Task 3 adds the operator-error lock's clear-then-act-or-drop, ahead of the queue; Task
-   *     4 adds Reset's own priority over both.
+   *  2. Explicit Reset: Task 4 inserts its half-reset handling HERE, before every lock test,
+   *     because Reset is how an operator escapes a lock rather than something a lock defers.
+   *     Tasks 1-2 route it through `perform` like any other unlocked action; it is not yet
+   *     given priority over the queue, which is still a faithful x3270 behaviour since a
+   *     locked Reset has nowhere to queue TO until Task 3/4 give the lock its shape.
+   *  3. No lock: perform now.
+   *  4. Operator-error lock (`oia.isOperatorError()`): Task 3 inserts its
+   *     clear-then-act-or-drop branch HERE, before the host-lock branch below -- x3270's
+   *     `KYBDLOCK_IS_OERR` is checked first, and an OERR bit present alongside a host lock
+   *     drops rather than queues (`enq_xta`'s own first test).
+   *  5. Host lock: during a transfer, drop with the alarm (`KL_FT`); otherwise queue.
    */
   run(action: KeyAction): RunResult {
     if (!this.isConnected()) return 'dropped';
-    return this.perform(action);
+    if (!this.oia.isInhibited()) return this.perform(action);
+    // Task 3 adds the operator-error branch HERE, before the host-lock branch.
+    if (this.transferring) {
+      this.emit('alarm');
+      return 'dropped';
+    }
+    this.typeahead.push(action);
+    this.oia.typeahead = true;
+    return 'queued';
   }
 
   /**
    * The immediate operation: `Keyboard`'s methods and the AID senders, with NO lock logic of
-   * its own. `run` calls this once a lock has already been found absent; Task 2's drain will
-   * call it directly for the same reason.
+   * its own. `run` calls this once a lock has already been found absent (or, for a drained
+   * action, just lifted); `drainTypeahead` calls it directly for the same reason.
    *
    * Every kind maps to the method `applyAction` uses today, so this task changes no front-end
    * behaviour -- only where the call comes from.
@@ -1866,6 +1923,45 @@ export class Session {
       case 'sysreq': this.sysreq(); return 'done';
       default: return action satisfies never;
     }
+  }
+
+  /**
+   * x3270's `while (run_ta())`, called from `ps_process()` at the end of `ctlr_write`
+   * (Common/ctlr.c:2189, the loop itself at :2654) -- i.e. after a 3270 DATA WRITE ONLY.
+   * Called from `executeRecord`, the one place in `handleRecord` that parses and applies a
+   * write; the SSCP-LU-DATA, NVT-DATA, RESPONSE and PRINT-EOJ paths return before reaching
+   * it, and BIND/UNBIND (which are not writes either) do not call it directly -- a BIND that
+   * released a retained pre-BIND record reaches it THROUGH that record's own `executeRecord`
+   * call, exactly as a live write would.
+   *
+   * Runs queued actions oldest-first through `perform` -- the same immediate path an unlocked
+   * `run` takes -- for as long as the keyboard stays unlocked and the queue is non-empty. A
+   * drained AID locks the keyboard again (`sendAID`'s `SystemWait`), so the loop stops there
+   * and whatever follows waits for the next unlock, exactly as `run`'s own queueing would have
+   * left it.
+   *
+   * ONE trailing `'screen'` event for however many actions ran, not one per action: a front
+   * end repaints on 'screen' and a burst of drained keystrokes is one user-visible update, not
+   * several. `executeRecord` emits its OWN 'screen' for the write itself regardless of whether
+   * anything drains, so a write that unlocks and drains something fires 'screen' twice --
+   * once for the host's write, once for the drain -- which is the same two-events-for-two-
+   * causes shape as `sendAID(AID.CLEAR)`'s separate screen clear.
+   */
+  private drainTypeahead(): void {
+    let ran = false;
+    while (this.typeahead.length > 0 && !this.oia.isInhibited()) {
+      const next = this.typeahead.shift()!;
+      this.oia.typeahead = this.typeahead.length > 0;
+      try {
+        this.perform(next);
+      } catch {
+        // As applyAction's own catch-all: a throwing key (an out-of-range `pf`/`pa`, the
+        // only `perform` case that can throw) does nothing rather than crashing the drain
+        // and stranding the rest of the queue undrained.
+      }
+      ran = true;
+    }
+    if (ran) this.emit('screen');
   }
 
   /**
