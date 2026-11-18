@@ -1233,6 +1233,13 @@ export class Session {
         this.pendingAid = AID.NONE;
         this.oia.waitingForHost = false;
         this.oia.reset();
+        // INSERT MODE OFF TOO: this IS x3270's `do_reset(false)` (ctlr.c:2168-2170's
+        // `if (wcc_keyboard_restore) { aid = AID_NO; do_reset(false); }`), and `do_reset`
+        // sets insert mode to the `alwaysInsert` default -- off -- whenever CONNECTED,
+        // explicit or not (kybd.c ~2037). A write that does not restore the keyboard (the
+        // `else if` below) must leave insert mode alone: the operator has not been given
+        // the screen back either.
+        this.keyboard.setInsertMode(false);
       } else if (this.oia.keyboard === KeyboardState.AwaitingFirstWrite
         && parsed.command !== 'WriteStructuredField') {
         // "Wait for any output OR a WCC(restore)" (x3270 kybd.c:583): the
@@ -1859,13 +1866,17 @@ export class Session {
    *
    * x3270's `enq_xta` (Common/kybd.c:270-330) in order:
    *
-   *  1. Not connected: drop. (The reconnect-on-Enter divergence lives in `applyAction`,
-   *     above this.)
-   *  2. Explicit Reset: Task 4 inserts its half-reset handling HERE, before every lock test,
-   *     because Reset is how an operator escapes a lock rather than something a lock defers.
-   *     Tasks 1-2 route it through `perform` like any other unlocked action; it is not yet
-   *     given priority over the queue, which is still a faithful x3270 behaviour since a
-   *     locked Reset has nowhere to queue TO until Task 3/4 give the lock its shape.
+   *  1. Explicit Reset is handled FIRST, before every lock test and even before the
+   *     not-connected check -- x3270's `Reset_action` calls `do_reset(true)`
+   *     unconditionally, with no `kybdlock` test anywhere in it: Reset is how an operator
+   *     ESCAPES a lock, not an action a lock can defer or drop. `do_reset` (kybd.c
+   *     ~2010-2060), in order: a non-empty typeahead queue is flushed and nothing else
+   *     happens -- the "half reset"; a SECOND Reset, with the queue now empty, does the
+   *     rest. Otherwise, not connected: insert mode off, nothing else (there is no lock to
+   *     clear). Otherwise: insert mode off (the `alwaysInsert` default) and the lock
+   *     cleared, as `Keyboard.reset()` already did before this task.
+   *  2. Not connected (every other action): drop. (The reconnect-on-Enter divergence
+   *     lives in `applyAction`, above this.)
    *  3. No lock: perform now.
    *  4. Operator-error lock (`oia.isOperatorError()`): `KYBDLOCK_IS_OERR` is checked
    *     before the host-lock branch below -- an OERR bit present alongside a host lock
@@ -1888,6 +1899,20 @@ export class Session {
    *  5. Host lock: during a transfer, drop with the alarm (`KL_FT`); otherwise queue.
    */
   run(action: KeyAction): RunResult {
+    if (action.kind === 'reset') {
+      // THE HALF RESET, checked whether or not we are connected: a disconnect already
+      // empties the queue (`handleClose`), so the two can never both be true, but the
+      // ORDER mirrors `do_reset`'s own (flush first, unconditionally) rather than
+      // asserting that they are mutually exclusive.
+      if (this.typeahead.length > 0) {
+        this.typeahead.length = 0;
+        this.oia.typeahead = false;
+        return 'done';
+      }
+      this.keyboard.setInsertMode(false);
+      if (this.isConnected()) this.keyboard.reset();
+      return 'done';
+    }
     if (!this.isConnected()) return 'dropped';
     if (!this.oia.isInhibited()) return this.perform(action);
     if (this.oia.isOperatorError()) {
@@ -1923,6 +1948,11 @@ export class Session {
       case 'clear': this.sendAID(AID.CLEAR); return 'done';
       case 'pf': this.sendAID(pfAID(action.n)); return 'done';
       case 'pa': this.sendAID(paAID(action.n)); return 'done';
+      // UNREACHABLE THROUGH `run`/`drainTypeahead`: Reset is handled at the very top of
+      // `run`, before anything that could call `perform` with it, and is therefore never
+      // queued either. Kept so the switch stays exhaustive over every `KeyAction['kind']`
+      // and so a DIRECT `perform` caller (there are none today) still gets Reset's plain
+      // effect rather than a silent no-op.
       case 'reset': k.reset(); return 'done';
       case 'up': k.up(); return 'done';
       case 'down': k.down(); return 'done';
@@ -2002,6 +2032,14 @@ export class Session {
       throw new RangeError(`${aid} is not an AID byte; use AID, pfAID(n) or paAID(n)`);
     }
     if (this.telnet === undefined) throw new Error('not connected');
+
+    // EVERY AID TURNS INSERT MODE OFF (the `alwaysInsert` default, off), not only Enter
+    // and not only an operator one: `key_AID` -- the function this method IS -- calls
+    // `insert_mode(toggled(ALWAYS_INSERT))` before anything else it does (kybd.c:920,
+    // ahead of the `aid = aid_code` two lines below). That includes a CUT transfer
+    // driver's own AIDs (`sendAID` stays directly callable for them; see `run`'s doc
+    // comment), because x3270 draws no such exception either -- `key_AID` has none.
+    this.keyboard.setInsertMode(false);
 
     // RECORDED BEFORE IT IS SENT, and it OUTLIVES this record. x3270 does both in two
     // adjacent lines -- `aid = aid_code; ctlr_read_modified(aid, false);` (kybd.c:922-923)

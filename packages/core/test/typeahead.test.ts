@@ -469,3 +469,98 @@ describe('Session.run: operator-error lock (Task 3, oerrLock)', () => {
     expect(session.oia.keyboard).toBe(KeyboardState.ProtectedField);
   });
 });
+
+describe('Session.run: Reset half/full, and insert mode off on an AID/Reset/restore (Task 4)', () => {
+  it('a Reset with the queue non-empty flushes it and leaves the keyboard locked (half reset)', async () => {
+    const { session, conn } = await connectedWithField();
+    session.keyboard.moveCursor(1);
+    session.run({ kind: 'enter' }); // locks: SystemWait
+    session.run({ kind: 'type', text: 'A' }); // queued
+    session.run({ kind: 'type', text: 'B' }); // queued
+    expect(session.oia.typeahead).toBe(true);
+
+    const r = session.run({ kind: 'reset' });
+
+    expect(r).toBe('done');
+    expect(session.oia.typeahead).toBe(false);
+    // Still locked: do_reset's half reset returns before touching the lock at all
+    // (kybd.c ~2015-2028).
+    expect(session.oia.keyboard).toBe(KeyboardState.SystemWait);
+
+    // A second Reset, queue now empty, does the rest.
+    expect(session.run({ kind: 'reset' })).toBe('done');
+    expect(session.oia.keyboard).toBe(KeyboardState.Unlocked);
+
+    // And the flushed queue never ran, even once unlocked and a write arrives to drain.
+    conn.host(SnaCmd.W, 0x02, T.IAC, T.EOR);
+    expect(session.screen.cellAt(1).ebcdic).toBe(0x00);
+  });
+
+  it('a Reset with an empty queue unlocks and turns insert mode off', async () => {
+    const { session } = await connectedWithField();
+    session.keyboard.setInsertMode(true);
+    session.oia.inhibit(KeyboardState.EnterInhibit); // a host lock, queue empty
+
+    const r = session.run({ kind: 'reset' });
+
+    expect(r).toBe('done');
+    expect(session.oia.keyboard).toBe(KeyboardState.Unlocked);
+    expect(session.keyboard.insertMode).toBe(false);
+  });
+
+  it('Reset while not connected turns insert mode off and does nothing else (do_reset\'s !CONNECTED arm)', () => {
+    const { session } = newSession();
+    session.keyboard.setInsertMode(true);
+
+    const r = session.run({ kind: 'reset' });
+
+    expect(r).toBe('done');
+    expect(session.keyboard.insertMode).toBe(false);
+  });
+
+  it('an AID turns insert mode off, as key_AID does for every AID (kybd.c:920)', async () => {
+    const { session } = await connectedWithField();
+    session.keyboard.moveCursor(1);
+    session.keyboard.setInsertMode(true);
+
+    expect(session.run({ kind: 'enter' })).toBe('done');
+
+    expect(session.keyboard.insertMode).toBe(false);
+  });
+
+  it('a host write WITH keyboard-restore turns insert mode off', async () => {
+    const { session, conn } = await connectedWithField();
+    session.keyboard.setInsertMode(true);
+
+    conn.host(SnaCmd.W, 0x02, T.IAC, T.EOR); // WCC keyboard-restore
+
+    expect(session.keyboard.insertMode).toBe(false);
+  });
+
+  it('a host write WITHOUT keyboard-restore leaves insert mode alone', async () => {
+    const { session, conn } = await connectedWithField();
+    session.keyboard.setInsertMode(true);
+
+    conn.host(SnaCmd.W, 0x00, T.IAC, T.EOR); // WCC with no restore bit
+
+    expect(session.keyboard.insertMode).toBe(true);
+  });
+
+  it('run({kind:"insert"}) sets insert on and stays on when pressed twice', async () => {
+    const { session } = await connectedWithField();
+
+    expect(session.run({ kind: 'insert' })).toBe('done');
+    expect(session.keyboard.insertMode).toBe(true);
+    expect(session.run({ kind: 'insert' })).toBe('done');
+    expect(session.keyboard.insertMode).toBe(true);
+  });
+
+  it('run({kind:"toggleInsert"}) twice leaves insert mode off again', async () => {
+    const { session } = await connectedWithField();
+
+    expect(session.run({ kind: 'toggleInsert' })).toBe('done');
+    expect(session.keyboard.insertMode).toBe(true);
+    expect(session.run({ kind: 'toggleInsert' })).toBe('done');
+    expect(session.keyboard.insertMode).toBe(false);
+  });
+});
