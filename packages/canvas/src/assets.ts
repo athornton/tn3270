@@ -98,6 +98,11 @@ export const BROWSER_MODULES: readonly string[] = Object.freeze([
   // serve: its only import is `import type { CellRect }`, which erases. The same guard catches its
   // absence -- `httpstatic.test.ts`'s graph closure, in `web` -- verified by removing this line.
   'copyCache.js',
+  // `blinker.js` joins 2026-11-17, the renderer's sixth relative import and, like the two above,
+  // inside its graph: `renderer.ts` drives the 500 ms blink phase through `createBlinker`. Safe to
+  // serve: its only import is `import type { DrawList }`, which erases. The same guard catches its
+  // absence -- `httpstatic.test.ts`'s graph closure, in `web`.
+  'blinker.js',
 ]);
 
 /**

@@ -38,4 +38,8 @@ contextBridge.exposeInMainWorld('tn3270', {
   },
   /** Send one named 3270 action up to the session. */
   sendAction: (action: unknown) => { ipcRenderer.send('action', action); },
+  /** The host's alarm with `-visualbell`: flash the canvas instead of `shell.beep()`. See main.ts. */
+  onFlash: (fn: () => void) => {
+    ipcRenderer.on('flash', () => { fn(); });
+  },
 });

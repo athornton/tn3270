@@ -61,6 +61,13 @@ export interface TuiArgs {
    * refused at parse time instead; see `parseArgs`'s check after the flag loop.
    */
   oversize?: Oversize;
+  /**
+   * `-visualbell`: ring the host's alarm (core's `'alarm'` event) as a reverse-screen flash
+   * (`ESC [ ? 5 h` then `ESC [ ? 5 l`, as xterm's own visual bell does) instead of writing BEL --
+   * the same spelling the GUI's and the web gateway's `-visualbell` use, since the spec calls for
+   * one flag across every front end. Absent means the default, which is BEL.
+   */
+  visualBell?: boolean;
 }
 
 /**
@@ -187,6 +194,11 @@ export function parseArgs(argv: readonly string[]): TuiArgs {
         if (value === undefined) throw new UsageError('-devname needs a value, e.g. -devname foo===');
         args.devname = value;
         i++;
+        break;
+      // Bare, like the GUI's and the web gateway's own `-visualbell` -- no `on`/`off` value,
+      // unlike the mainframe-client flags just above.
+      case '-visualbell':
+        args.visualBell = true;
         break;
       default:
         if (flag.startsWith('-')) {

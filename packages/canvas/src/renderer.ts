@@ -13,6 +13,12 @@ import { normalizeRect, movedPastThreshold, type CellAddr, type CellRect } from 
 // The same rule as `selection.js` above, and served from `BROWSER_MODULES` for the same reason.
 // `copyCache.ts`'s only import is `import type { CellRect }`, which erases.
 import { createCopyCache } from './copyCache.js';
+// The renderer's SIXTH relative import, 2026-11-17, and like `forwardKeys.js`/`copyCache.js` it is
+// INSIDE the graph: `blinker.ts` value-imports nothing (its only import is `import type { DrawList }`,
+// which erases), so it is as safe to serve as `selection.js`. Added to `BROWSER_MODULES`
+// (`assets.ts`) for the same reason those two were: an omission there 404s and the whole bundle
+// fails to evaluate, which `httpstatic.test.ts`'s graph closure over in `web` is what catches it.
+import { createBlinker } from './blinker.js';
 
 /**
  * The renderer: a canvas, key events, and nothing else.
@@ -54,6 +60,8 @@ declare global {
       fetchSelection?(rect: CellRect): Promise<string>;
       /** OPTIONAL, the same way: a failed clipboard write, painted as a notice. See bridgecore.ts. */
       onCopyFailed?(fn: (message: string) => void): void;
+      /** OPTIONAL: the host's alarm with `-visualbell`/the gateway's flash choice. See `flash()` below. */
+      onFlash?(fn: () => void): void;
     };
   }
 }
@@ -208,9 +216,39 @@ function tintOf(color: Rgb): ImageBitmap | undefined {
   return undefined;
 }
 
+/**
+ * The 500 ms blink phase (x3270's `text_blink_it`), driven from `paint` below. `createBlinker`
+ * is pure and timer-injected (see `blinker.ts`); here it is wired to the DOM's own `setInterval`
+ * (the default) and to a repaint.
+ *
+ * GATED ON `!errored`, and that is NOT the same gate the `resize` listener below gets away without
+ * (`window.addEventListener('resize', () => { if (last !== undefined) paint(last); });`): comparing
+ * the tick to resize is what this comment used to do, and it was wrong. `paint(last)` draws the
+ * SCREEN, which is `last` -- and `onError`/`onCopyFailed` paint their message over the canvas
+ * WITHOUT touching `last` (see `errored`'s own docstring above, and `paintMessage`), so a tick that
+ * fires while one is up would paint the stale screen right back over it, on a two-per-second clock,
+ * for as long as that screen had a blinking cell. `errored` alone is the right gate and not
+ * `errored && !noticeOnly`: a copy notice is ALSO painted by `paintMessage` over the canvas
+ * (`noticeOnly` only distinguishes which message, for the click and prefetch guards elsewhere), so
+ * either one up must hold off this repaint the same way.
+ *
+ * NOT RESET HERE: `onFrame` and `onAtlas` already clear `errored`/`noticeOnly` before their own
+ * `paint(...)`, and `copiedFromCache` does the same before its repaint, so the very next of those
+ * un-gates the tick's future repaints too -- the blink resumes being drawn once any of them run,
+ * with no separate wiring needed here.
+ */
+const blinker = createBlinker({
+  repaint: () => { if (!errored && last !== undefined) paint(last); },
+});
+
 function paint(list: DrawList): void {
   last = list;
   if (atlas === undefined || canvas === null) return;   // nothing to draw with yet
+
+  // Tell the blinker about this frame BEFORE blitting, so `blinker.off` reflects this frame's
+  // blink phase in the `options` built just below, and so a frame with no blinkers stops the
+  // timer before the first paint that no longer needs it.
+  blinker.frame(list);
 
   const within = { width: window.innerWidth, height: window.innerHeight };
   const scale = bestScale(list, within);
@@ -243,6 +281,7 @@ function paint(list: DrawList): void {
     offsetX: at.x,
     offsetY: at.y,
     blank,
+    blinkOff: blinker.off,
     // undefined skips the glyph this frame; tintOf repaints when the bitmap is ready.
     tinted: (color: Rgb): unknown | undefined => tintOf(color),
   };
@@ -383,6 +422,32 @@ window.tn3270.onCopyFailed?.((message) => {
   noticeOnly = true;
   paintMessage(message);
 });
+
+/**
+ * THE VISUAL BELL: the whole canvas inverted for ~100 ms, then repainted, as x3270's `ring_bell`
+ * flashes with `visualBell` set (x3270/screen.c:5457). `difference` against white is an inversion,
+ * the same composition the selection highlight uses (above, in `paint`) -- `ctx.save()`/
+ * `ctx.restore()` around it rather than setting `globalCompositeOperation` back by hand, following
+ * that block.
+ *
+ * GATED ON `!errored`, the SAME REASONING the blink tick's `repaint` is gated on (see `blinker`
+ * above): `errored` covers a real error AND a copy notice (`paintMessage`, not `paint`), and either
+ * one up means the canvas is NOT showing `last` -- inverting it would flash whatever message is on
+ * screen, and the plain `canvas === null` check the draft plan had would not catch that. Skipping
+ * the flash entirely (rather than flashing and then skipping only the repaint) avoids leaving that
+ * message inverted with nothing to flip it back. The repaint after the timeout re-checks `!errored`
+ * too, for the error that can arrive during the 100 ms the flash is up.
+ */
+function flash(): void {
+  if (canvas === null || errored) return;
+  ctx.save();
+  ctx.globalCompositeOperation = 'difference';
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.restore();
+  setTimeout(() => { if (!errored && last !== undefined) paint(last); }, 100);
+}
+window.tn3270.onFlash?.(() => { flash(); });
 
 window.addEventListener('keydown', (e) => {
   /**

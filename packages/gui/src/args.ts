@@ -80,11 +80,17 @@ export interface GuiArgs {
    * A combination `resolveGeometry` would refuse at connect is refused here instead.
    */
   oversize?: Oversize;
+  /**
+   * `-visualbell`: ring the host's alarm (core's `'alarm'` event) as a ~100 ms inverted flash of
+   * the window instead of `shell.beep()` -- x3270's `visualBell` resource (`screen.c:5457`).
+   * Absent means the default, which is the audible beep.
+   */
+  visualBell?: boolean;
 }
 
 export const USAGE =
   `usage: tn3270-gui [-model M] [--terminal-type T] [-scheme S] [-tn3270e on|off] `
-  + `[-bind-image on|off] [-bind-limit on|off] [-ddm on|off] [-devname NAME] `
+  + `[-bind-image on|off] [-bind-limit on|off] [-ddm on|off] [-devname NAME] [-visualbell] `
   + `${OVERSIZE_USAGE} ${TLS_USAGE} [prefix:][LU,LU@]host[:port]`;
 
 export function parseGuiArgs(argv: readonly string[]): GuiArgs {
@@ -171,6 +177,9 @@ export function parseGuiArgs(argv: readonly string[]): GuiArgs {
         if (value === undefined) throw new UsageError('-devname needs a value, e.g. -devname foo===');
         args.devname = value;
         i++;
+        break;
+      case '-visualbell':
+        args.visualBell = true;
         break;
       default:
         if (flag.startsWith('-')) {

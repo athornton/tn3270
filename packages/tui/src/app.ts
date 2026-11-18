@@ -205,6 +205,11 @@ export interface AppOptions {
    * rather than crashing.
    */
   files?: TransferFiles;
+  /**
+   * `-visualbell`: ring the host's alarm as a reverse-screen flash instead of BEL. Absent means
+   * the default, which is BEL. See `args.ts`'s `TuiArgs.visualBell`.
+   */
+  visualBell?: boolean;
 }
 
 export class App {
@@ -214,8 +219,16 @@ export class App {
   private readonly host: HostProcess;
   private readonly renderer: TerminalRenderer;
   private readonly mode3279: boolean;
+  private readonly visualBell: boolean;
   private buffer: number[] = [];
   private escTimer: ReturnType<typeof setTimeout> | undefined;
+  /**
+   * Armed while a `-visualbell` flash's reverse screen is ON, waiting out the 100ms before it
+   * goes off again -- the fifth `setTimeout` call site, and the fifth line in `restore()`'s list
+   * for the reason `overlayTimer`'s comment gives: every one is represented there, so a new one
+   * is a visibly missing line rather than a terminal left showing reverse video forever.
+   */
+  private flashTimer: ReturnType<typeof setTimeout> | undefined;
   /**
    * True once a held lone ESC's timer has FIRED, promoting it to a Meta prefix,
    * until the next `pump()` call resolves it. Before the timer fires, more
@@ -339,6 +352,7 @@ export class App {
     this.host = opts.host;
     this.files = opts.files;
     this.mode3279 = opts.mode3279 ?? true;
+    this.visualBell = opts.visualBell ?? false;
     const screen = { rows: this.session.screen.rows, cols: this.session.screen.cols };
     this.renderer = new TerminalRenderer({
       ...screen,
@@ -399,6 +413,31 @@ export class App {
     // repaint (or the suspension) has happened and this message is not painted over by it. Only
     // reconnects reach here -- main.ts prints the FIRST connect's notice itself, before start().
     this.session.on('geometry', () => this.onGeometry());
+    // THE HOST'S ALARM: BEL, which the terminal sounds or flashes by its own setting; with
+    // -visualbell, a reverse-screen flash instead (DECSCNM on, then off), as xterm's own visual
+    // bell looks. x3270's ring_bell, screen.c:5457. NOT guarded on `suspended` -- unlike `draw()`
+    // and `showMessage()`, nothing here paints 3270 cells over the too-small notice; the flash
+    // only inverts and un-inverts the whole terminal, and the host's alarm is worth hearing even
+    // when the window cannot currently show the screen.
+    this.session.on('alarm', () => {
+      if (this.quitting || this.restored) return;
+      if (!this.visualBell) { this.stdout.write('\x07'); return; }
+      this.stdout.write('\x1b[?5h');
+      // A second alarm arriving mid-flash must not leave the FIRST timer in the field: that
+      // timer's own 100ms is still counting down from the first alarm, so it would turn the
+      // flash off early -- cutting the second flash short -- and then this (second) timer
+      // would fire again later and write a redundant second "off". Clearing the old one first
+      // means one flash restarts the window rather than two races: the terminal stays reverse
+      // video until 100ms after the LATEST alarm, and exactly one "off" is ever written. It
+      // also closes the other half of the bug: a timer this never clears is one `restore()`
+      // cannot clear either once it is overwritten, which is exactly how a stray timer used to
+      // survive quitting and keep the event loop alive.
+      if (this.flashTimer !== undefined) clearTimeout(this.flashTimer);
+      this.flashTimer = setTimeout(() => {
+        this.flashTimer = undefined;
+        if (!this.quitting && !this.restored) this.stdout.write('\x1b[?5l');
+      }, 100);
+    });
     this.stdin.on('data', (b: Uint8Array) => this.onInput(b));
     this.renderer.invalidate();
     this.draw();
@@ -431,6 +470,17 @@ export class App {
     this.overlayPending = [];
     this.clearTransferTimer();
     this.transferPending = [];
+    // A FIFTH TIMER, the flash's: cleared the same way, but UNLIKE the others it must also leave
+    // a WRITE behind -- a `-visualbell` flash caught mid-way leaves the real terminal's reverse
+    // screen (DECSCNM) ON, and the timer above that would turn it off checks `restored` and
+    // would no-op once this flag is set. Without this, quitting (or any other exit path) during
+    // the 100ms window left `\x1b[?5h` as the LAST thing ever written: the user's shell prompt
+    // comes back in reverse video, with no second alarm ever due to turn it off again.
+    if (this.flashTimer !== undefined) {
+      clearTimeout(this.flashTimer);
+      this.flashTimer = undefined;
+      this.stdout.write('\x1b[?5l');
+    }
     this.stdout.write(CURSOR_OFF);
     this.stdout.write('\x1b[?1049l');          // leave the alternate buffer
     this.stdin.setRawMode?.(false);

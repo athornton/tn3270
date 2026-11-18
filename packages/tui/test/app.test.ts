@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  AckAid, AID, BIND_OFF, BIND_RU, resolve, Session, TelnetCmd as T, TelnetOpt as O, Tn3270eDataType,
-  Tn3270eFunc, Tn3270eOp, type Connection, type GeometrySetting,
+  AckAid, AID, BIND_OFF, BIND_RU, resolve, Session, SnaCmd, TelnetCmd as T, TelnetOpt as O,
+  TelnetSubopt as S, Tn3270eDataType, Tn3270eFunc, Tn3270eOp, WCC,
+  type Connection, type GeometrySetting,
 } from '@tn3270/core';
 import {
   applicable, KEYPAD_KEYS, TERMINAL_BINDINGS, TRANSFER_FIELDS, type Action, type TransferFiles,
@@ -376,6 +377,161 @@ describe('quitting', () => {
     h.session.keyboard.typeString('ZZZ');
     h.app.onInput(Uint8Array.from([0x41]));
     expect(h.stdout.written.length).toBe(after);
+  });
+});
+
+/**
+ * THE HOST'S ALARM (core's `'alarm'` event, Task 5 of the blink/intensify/bell plan): BEL, or
+ * with `-visualbell` a reverse-screen flash (DECSCNM on, then off 100ms later) instead -- as
+ * xterm's own visual bell does. See `app.ts`'s `session.on('alarm', ...)`.
+ *
+ * FIRED FOR REAL, not synthesized by calling a private method: `conn.host(...)` plays the WCC
+ * sound-alarm bit (`WCC.SOUND_ALARM`, 0x04) through a connected, negotiated `Session` exactly as
+ * `core/test/session.test.ts` does, so this proves the whole path from the wire to `stdout`, the
+ * same standard every other `harness()` test in this file holds input and screen events to.
+ */
+describe('the host alarm', () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  interface AlarmHarness extends Harness {
+    /** Play the WCC sound-alarm bit through the (already connected, negotiated) session. */
+    fireAlarm(): void;
+  }
+
+  /** Like `harness()`, but with a real `Connection` the test can write host bytes through. */
+  async function alarmHarness(visualBell?: boolean): Promise<AlarmHarness> {
+    const conn: Connection = {
+      write: () => {}, close: () => {}, onData: undefined, onClose: undefined, onError: undefined,
+    };
+    const session = new Session({ connect: () => conn });
+    const stdin = new FakeStdin();
+    const stdout = new FakeStdout();
+    const host = new FakeHost();
+    const app = new App({
+      session, stdin, stdout, host, depth: 0,
+      ...(visualBell !== undefined ? { visualBell } : {}),
+    });
+    await session.connect('h', 23);
+    // The minimal negotiation `core/test/session.test.ts`'s `FakeConnection.negotiate()` uses, so
+    // `conn.onData` below is read as 3270 data (IAC EOR terminated) rather than NVT text.
+    const send = (...bytes: number[]): void => { conn.onData?.(Uint8Array.from(bytes)); };
+    send(T.IAC, T.DO, O.TERMINAL_TYPE);
+    send(T.IAC, T.SB, O.TERMINAL_TYPE, S.SEND, T.IAC, T.SE);
+    send(T.IAC, T.DO, O.EOR, T.IAC, T.WILL, O.EOR);
+    send(T.IAC, T.DO, O.BINARY, T.IAC, T.WILL, O.BINARY);
+    const fireAlarm = (): void => { send(SnaCmd.W, WCC.SOUND_ALARM, T.IAC, T.EOR); };
+    return { app, session, stdin, stdout, host, fireAlarm };
+  }
+
+  it('writes BEL', async () => {
+    const h = await alarmHarness();
+    h.app.start();
+    h.stdout.written = [];                 // drop start()'s own writes
+    h.fireAlarm();
+    // The WCC write that carries the alarm bit is also an ordinary host write, so it redraws the
+    // screen too (session 'screen' event) -- real and unrelated to the bell. The alarm listener
+    // runs FIRST (core/session.ts emits 'alarm' before 'screen' from the same write), so its own
+    // write is the earliest one, checked alone rather than against the whole, noisier stream.
+    expect(h.stdout.written[0]).toBe('\x07');
+  });
+
+  it('with -visualbell, flashes instead: on now, off 100ms later, and never BEL', async () => {
+    const h = await alarmHarness(true);
+    h.app.start();
+    h.stdout.written = [];
+    h.fireAlarm();
+    expect(h.stdout.written[0]).toBe('\x1b[?5h');
+    vi.advanceTimersByTime(100);
+    expect(h.stdout.written.at(-1)).toBe('\x1b[?5l');
+    expect(h.stdout.all).not.toContain('\x07');
+  });
+
+  it('writes nothing after quitting, even if an alarm arrives', async () => {
+    const h = await alarmHarness();
+    h.app.start();
+    h.app.onInput(Uint8Array.from([0x1d]));          // Ctrl-]: quit
+    const before = h.stdout.written.length;
+    h.fireAlarm();
+    expect(h.stdout.written.length).toBe(before);
+  });
+
+  it('quit during the flash leaves the terminal with reverse screen OFF, and nothing written after', async () => {
+    const h = await alarmHarness(true);
+    h.app.start();
+    h.fireAlarm();
+    expect(h.stdout.all).toContain('\x1b[?5h');
+    expect(h.stdout.all).not.toContain('\x1b[?5l');
+    h.app.onInput(Uint8Array.from([0x1d]));          // Ctrl-]: quit, mid-flash
+    // The terminal ends with reverse screen OFF, written as part of quitting -- NOT left for the
+    // original 100ms timer, which must never fire again (it would write after the TUI has handed
+    // the terminal back, landing a stray DECSCNM "off" on the user's shell).
+    expect(h.stdout.all).toContain('\x1b[?5l');
+    // The "off" must land BEFORE leaving the alternate screen buffer: `restore()` writes
+    // the flash's own cancel first, so the reverse video is gone before the real
+    // terminal ever sees the alternate-buffer-off sequence, not after.
+    const offIndex = h.stdout.all.indexOf('\x1b[?5l');
+    const altOffIndex = h.stdout.all.indexOf('\x1b[?1049l');
+    expect(offIndex).toBeGreaterThanOrEqual(0);
+    expect(altOffIndex).toBeGreaterThan(offIndex);
+    // And the flash's own 100ms timer was cleared, not merely raced -- quitting leaves
+    // NO timer alive to keep the event loop running after the terminal is handed back.
+    expect(vi.getTimerCount()).toBe(0);
+    const before = h.stdout.written.length;
+    vi.advanceTimersByTime(1000);
+    expect(h.stdout.written.length).toBe(before);
+  });
+
+  it('a second alarm during a flash restarts the 100ms window, rather than racing it', async () => {
+    // Found by inspection: the handler used to overwrite `flashTimer` with the new
+    // setTimeout WITHOUT clearing the old one, so the first alarm's timer still fired
+    // at 100ms and wrote the "off" sequence early -- cutting the second flash short --
+    // and then the second alarm's own timer fired again at 100ms after ITS start (150ms
+    // overall), writing "off" a second time and leaving no timer this test could catch,
+    // because by then it had already fired. Two alarms 50ms apart must leave exactly
+    // ONE flash window open, running from the SECOND alarm: "off" at 150ms, not 100ms.
+    const h = await alarmHarness(true);
+    h.app.start();
+    h.stdout.written = [];
+    h.fireAlarm();
+    vi.advanceTimersByTime(50);
+    h.fireAlarm();                        // 50ms into the first flash: restarts the window
+    vi.advanceTimersByTime(50);            // 100ms overall: the FIRST timer must not fire here
+    expect(h.stdout.all).not.toContain('\x1b[?5l');
+    vi.advanceTimersByTime(50);            // 150ms overall: the SECOND timer fires now
+    expect(h.stdout.all.endsWith('\x1b[?5l')).toBe(true);
+    // Only one "off" was ever written -- not one from each alarm's timer.
+    expect(h.stdout.all.split('\x1b[?5l')).toHaveLength(2);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('still rings (or flashes) while the terminal is too small to show the screen', async () => {
+    // "Suspended" means too small, not SIGTSTP -- see the comment on this listener in
+    // app.ts. BEL and the DECSCNM flash invert the too-small notice in place rather than
+    // overwriting it, so there is nothing for `suspended` to guard here, unlike `draw()`
+    // and `showMessage()`. Pinned so a future guard added "for consistency" with those
+    // two is caught: the host's alarm is worth hearing even when the screen cannot be
+    // shown.
+    const h = await alarmHarness();
+    h.app.start();
+    h.stdout.resize(10, 20);
+    h.host.fire('SIGWINCH');
+    expect(h.stdout.all.toLowerCase()).toContain('too small');
+    h.stdout.written = [];
+    h.fireAlarm();
+    expect(h.stdout.written[0]).toBe('\x07');
+  });
+
+  it('flashes while suspended too, inverting the too-small notice rather than hiding it', async () => {
+    const h = await alarmHarness(true);
+    h.app.start();
+    h.stdout.resize(10, 20);
+    h.host.fire('SIGWINCH');
+    h.stdout.written = [];
+    h.fireAlarm();
+    expect(h.stdout.written[0]).toBe('\x1b[?5h');
+    vi.advanceTimersByTime(100);
+    expect(h.stdout.written.at(-1)).toBe('\x1b[?5l');
   });
 });
 

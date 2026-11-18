@@ -1,5 +1,5 @@
 import {
-  app, BrowserWindow, clipboard, dialog, ipcMain, Menu, screen,
+  app, BrowserWindow, clipboard, dialog, ipcMain, Menu, screen, shell,
 } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { writeFileSync, readFileSync } from 'node:fs';
@@ -266,6 +266,15 @@ const SEAM = Object.freeze({
    */
   connect: process.env['TN3270_GUI_CONNECT'] ?? '',
 });
+
+/**
+ * TRUE WHEN ANY TEST SEAM IS SET, so the offline bell proof (`SEAM.replay`, driven by `SEAM.keys`
+ * or ended by `SEAM.shot`) can see `bell: audible`/`bell: visual` on stdout while a normal run --
+ * none of these set -- prints nothing. Not every `SEAM.*` field: `SEAM.size`, `SEAM.url`,
+ * `SEAM.connect` and the rest gate their OWN prints already; this is only the three the alarm
+ * listener below needs to recognise a harness by.
+ */
+const SEAM_ACTIVE = SEAM.keys !== '' || SEAM.replay !== '' || SEAM.shot !== '';
 
 /** The `wait:` prefix on a `TN3270_GUI_KEYS` step. Exported for the test that pins the seam. */
 export const WAIT_PREFIX = 'wait:';
@@ -1337,6 +1346,13 @@ async function startSession(
   session.on('screen', send);
   session.on('connect', send);
   session.on('disconnect', send);
+
+  // THE HOST'S ALARM (WCC bit; core emits 'alarm'), rung as x3270's ring_bell does: the system
+  // beep, or with -visualbell a flash of the window instead (x3270/screen.c:5457).
+  session.on('alarm', () => {
+    if (args.visualBell) win.webContents.send('flash'); else shell.beep();
+    if (SEAM_ACTIVE) process.stdout.write(`bell: ${args.visualBell ? 'visual' : 'audible'}\n`);
+  });
 
   /**
    * THE APPLICATION MENU, and the app's first -- `setApplicationMenu` was never called before

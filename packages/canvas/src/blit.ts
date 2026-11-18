@@ -79,6 +79,11 @@ export interface BlitOptions {
    * test asserting an empty screen issues no draws.
    */
   readonly blank: ReadonlySet<number>;
+  /**
+   * The blink phase: when true, a cell with `blink` gets its background and underline but no
+   * glyph, as x3270's `text_blink_it` blanks it (x3270/screen.c:1411-1435). Absent means "on".
+   */
+  readonly blinkOff?: boolean;
 }
 
 export const rgbCss = ([r, g, b]: Rgb): string => `rgb(${r},${g},${b})`;
@@ -126,14 +131,16 @@ export function blit(ctx: Ctx2D, list: DrawList, opts: BlitOptions): void {
     ctx.fillStyle = rgbCss(cell.bg);
     ctx.fillRect(dx, dy, w, h);
 
-    if (!opts.blank.has(cell.glyph)) {
+    if (!opts.blank.has(cell.glyph) && !(cell.blink && opts.blinkOff === true)) {
       const image = opts.tinted(cell.fg);
       if (image !== undefined) {
-        ctx.drawImage(
-          image,
-          cell.glyph * atlas.cellWidth, 0, atlas.cellWidth, atlas.cellHeight,
-          dx, dy, w, h,
-        );
+        const sx = cell.glyph * atlas.cellWidth;
+        ctx.drawImage(image, sx, 0, atlas.cellWidth, atlas.cellHeight, dx, dy, w, h);
+        // INTENSIFY IS AN OVERSTRIKE: the glyph again, one source pixel right, as x3270 draws it
+        // (x3270/screen.c:2917-2921). Not a bolder font and not a brighter color.
+        if (cell.intensify) {
+          ctx.drawImage(image, sx, 0, atlas.cellWidth, atlas.cellHeight, dx + scale, dy, w, h);
+        }
       }
     }
 

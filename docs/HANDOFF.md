@@ -1,13 +1,45 @@
-# Handoff — state as of 2026-11-17 (PARITY TRIAGED, gate 113 blocking; ROADMAP = README item 15a-15h, next 15a; x3270 PARITY CHECKLIST MERGED (`df62e6f`); THE PACKAGED GUI'S DROPPED FIRST ARGUMENT AND SYSTEM-WIDE Ctrl-] FIXED (`gui-argv-and-quit`): 413 x3270 names, 158 checklist rows, `parity.mjs gate` FAIL 157 blocking; 0.1.4 RELEASED: npm by the tag workflow with provenance, and the first GitHub release with the seven installers, SHA256SUMS and scriv notes; macOS CODE SIGNING MERGED (`db5a93d`; released installers up to 0.1.4 are UNSIGNED), Windows CI signing DROPPED for the Microsoft Store; STORE PROBE MERGED (`559ea78`); README AUDIT + FIXES MERGED (`ae8724f`); WEB RECEIVE DOWNLOADS ON COMPLETION (`4a940fe`, live-verified); `Exist` PER DIRECTION (`f533bff`); next: the user triages the parity checklist's proposed-* and unwitnessed `ours` rows, then the store roadmap)
+# Handoff — state as of 2026-11-18 (README *STAGING* 15a PART 2, BLINK/INTENSIFY/THE BELL, on branch `blink-intensify-bell` (NOT YET MERGED): canvas blink and intensify drawn, the host's alarm rings in the GUI, the browser and the TUI, `-visualbell` flashes instead, gate still FAIL 113 blocking; 15a PART 1, ASCII LINE ENDS, MERGED (`13e41b2`); PARITY TRIAGED, gate 113 blocking; ROADMAP = README item 15a-15h; x3270 PARITY CHECKLIST MERGED (`df62e6f`); THE PACKAGED GUI'S DROPPED FIRST ARGUMENT AND SYSTEM-WIDE Ctrl-] FIXED (`gui-argv-and-quit`): 413 x3270 names, 158 checklist rows, `parity.mjs gate` FAIL 157 blocking; 0.1.4 RELEASED: npm by the tag workflow with provenance, and the first GitHub release with the seven installers, SHA256SUMS and scriv notes; macOS CODE SIGNING MERGED (`db5a93d`; released installers up to 0.1.4 are UNSIGNED), Windows CI signing DROPPED for the Microsoft Store; STORE PROBE MERGED (`559ea78`); README AUDIT + FIXES MERGED (`ae8724f`); WEB RECEIVE DOWNLOADS ON COMPLETION (`4a940fe`, live-verified); `Exist` PER DIRECTION (`f533bff`); next: README *Staging* 15a part 3, the keyboard semantics (typeahead and keyboard lock, insert-mode reset, x3270's erase rules, oerr-lock))
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log). For the most recent work, read the spec and plan the
 latest START HERE entry names. Each finished feature has its own pair under `docs/superpowers/`.
 
-## START HERE — LATEST FIRST; NEXT: README *Staging* item 15a (CORRECTNESS), THE FIRST OF THE EIGHT STORE-PARITY MILESTONES
+## START HERE — LATEST FIRST; NEXT: README *Staging* item 15a PART 3 (THE KEYBOARD SEMANTICS)
 
-**2026-11-17, LATEST: PARITY TRIAGED, FOUR KEYS WITNESSED FROM THE GUI, THE ROADMAP WRITTEN**
+**2026-11-17/18, LATEST: README *STAGING* 15a PART 2, BLINK, INTENSIFY AND THE BELL** (branch
+`blink-intensify-bell`, head `8a82aa3`, **NOT YET MERGED**). The gate is still
+`parity gate: FAIL, 113 blocking` — unchanged, since both touched rows (`highlight-bold`, `bell`)
+were already blocking and stay `partial` rather than `ours` (see below).
+- **Blink and intensify are now drawn in the canvas front ends (GUI, browser), as x3270 draws
+  them.** `canvas/src/blit.ts` takes a `blinkOff` phase (the glyph hidden, background and
+  underline kept) and overstrikes an intensified glyph one source pixel right;
+  `canvas/src/blinker.ts` owns the 500 ms phase timer the renderer drives. The TUI already drew
+  both, through SGR 5 and SGR 1.
+- **The host's alarm now rings everywhere, and `-visualbell` (the same flag in the GUI, the TUI
+  and the browser) flashes instead.** GUI: `shell.beep()`, or a ~100 ms inverted canvas flash. TUI:
+  BEL, or a DECSCNM reverse-video flash. Browser (the gateway's new `alarm` message): a short
+  WebAudio tone, or a flash; a browser's autoplay policy can leave the very first tone silent
+  until the page has had a keypress or click.
+- **Live:** the bell from the GUI and the TUI, audible and `-visualbell`, against VM/370 (the logo
+  screen's WCC alarm) and MVS TK5 (VTAM's `IKT00405I SCREEN ERROR` rejection). **Offline only:**
+  blink and intensify, from a synthetic trace replayed through the GUI — no host here sends either
+  (measured 2026-11-17 by replaying every `packages/fixtures/traces/*.trace`). **Tests only:** the
+  browser's bell; no audio exists under Xvfb, so the GUI witness proves the handler chose the
+  right branch. `docs/live-testing.md`, *Blink, intensify and the bell, from the GUI and TUI —
+  2026-11-17*, has the recordings, the pty-driven TUI runs and the offline pixel captures.
+- **Parity rows `highlight-bold` and `bell`** re-read and updated: `highlight-bold` stays
+  `partial` (intensify is drawn now; the gap is x3270's `highlightBold` resource, which has no
+  equivalent flag here). `bell` moves from `missing` to `partial`, not `ours`: `-visualbell` is
+  equivalent reach for x3270's `visualBell` resource, but there is still no scripted `Bell()`
+  action and no `bellVolume` setting.
+- **This finishes 15a part 2 of 3.** Part 1, ascii line ends (`Mode=ascii` converting line ends
+  as x3270 does, in every front end), merged earlier today as `13e41b2`. Part 3, the keyboard
+  semantics, is next: typeahead and keyboard lock (AID and editing keys acting while the keyboard
+  is locked, where x3270 queues them), insert mode surviving an AID and Reset, x3270's erase-key
+  rules, and `oerr-lock`.
+
+**2026-11-17, EARLIER: PARITY TRIAGED, FOUR KEYS WITNESSED FROM THE GUI, THE ROADMAP WRITTEN**
 (branch `parity-triage`). The gate is `parity gate: FAIL, 113 blocking`; 45 of 158 rows pass
 (`docs/parity.md`'s header has the counts).
 - **The user's triage (2026-11-17):** 17 mechanical skips, 7 declined skips and 3 deferrals
@@ -85,10 +117,20 @@ probe. Items 1-2 were fixed afterwards in `a5aa71e`; the rest are open.
 5. **Core:** insert mode survives an AID, a keyboard restore and Reset (x3270 resets it).
 6. **Core:** Backspace nulls the cell instead of closing up the field; Delete and EraseEOF are
    no-ops on an unformatted screen.
-7. **Canvas:** blink and intensify are never drawn (`drawlist.ts:114-115` set them; `blit.ts`
-   never reads them).
-8. **GUI:** the host's alarm is never rung (core emits `'alarm'` at `session.ts:1221`; nothing
-   listens).
+7. ~~**Canvas:** blink and intensify are never drawn (`drawlist.ts:114-115` set them; `blit.ts`
+   never reads them).~~ **FIXED on branch `blink-intensify-bell` (2026-11-17/18)**: `blit.ts` draws
+   both in the GUI and the browser, as x3270 does -- blink hides the glyph for a 500 ms off phase
+   (background and underline stay; `canvas/src/blinker.ts` owns the timer), and intensify
+   overstrikes the glyph one source pixel right. The TUI already drew both, through SGR 5 and
+   SGR 1. Witnessed OFFLINE only, from a synthetic trace replayed through the GUI (no host here
+   sends either); `docs/live-testing.md`, *Blink, intensify and the bell, from the GUI and TUI —
+   2026-11-17*.
+8. ~~**GUI:** the host's alarm is never rung (core emits `'alarm'` at `session.ts:1221`; nothing
+   listens).~~ **FIXED on branch `blink-intensify-bell` (2026-11-17/18)**: on core's `'alarm'`, the
+   GUI beeps (`shell.beep()`), the browser plays a short WebAudio tone, and the TUI writes BEL;
+   `-visualbell` (the same flag in all three) flashes instead. Live-witnessed from the GUI and the
+   TUI on VM/370 (logo screen) and TK5 (VTAM rejection); the browser's bell is tests-only.
+   `docs/live-testing.md`, *Blink, intensify and the bell, from the GUI and TUI — 2026-11-17*.
 9. **Code page:** x3270 defaults to `bracket`, not cp037, so `[ ]` map differently at defaults;
    the canvas glyph path (`canvas/src/cg.ts:89`) is cp037-fixed.
 10. ~~**Transfer:** `Mode=ascii` did no local CR/LF or `^Z` conversion.~~ **FIXED on branch

@@ -121,7 +121,7 @@ export async function run(
       throw new UsageError(
         `usage: tn3270 [-model M] [--terminal-type T] [--colors N] [-scheme S] `
         + `[-tn3270e on|off] [-bind-image on|off] [-bind-limit on|off] [-ddm on|off] [-devname NAME] `
-        + `${OVERSIZE_USAGE} ${TLS_USAGE} [prefix:][LU,LU@]host[:port]`,
+        + `[-visualbell] ${OVERSIZE_USAGE} ${TLS_USAGE} [prefix:][LU,LU@]host[:port]`,
       );
     }
     // The prompt closes its readline before resolving, which pauses stdin and takes it out of raw
@@ -161,6 +161,7 @@ export async function run(
     files: nodeTransferFiles,
     ...(args.colors !== undefined ? { depth: args.colors } : {}),
     ...(args.scheme !== undefined ? { scheme: args.scheme } : {}),
+    ...(args.visualBell !== undefined ? { visualBell: args.visualBell } : {}),
   });
   app.start();
   return 0;

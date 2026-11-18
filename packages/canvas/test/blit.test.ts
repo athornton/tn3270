@@ -5,7 +5,8 @@ import { dirname, join } from 'node:path';
 import { Screen, resolve, Color } from '@tn3270/core';
 import { SCHEMES, schemeRgb } from '@tn3270/frontend';
 import { drawList } from '../src/drawlist.js';
-import type { AtlasGeometry } from '../src/geometry.js';
+import type { AtlasGeometry, DrawCell } from '../src/geometry.js';
+import type { DrawList } from '../src/drawlist.js';
 import {
   blit, bestScale, center, rgbCss, tintKey, blankColumns, type Ctx2D,
 } from '../src/blit.js';
@@ -141,6 +142,54 @@ describe('blit', () => {
     expect(r.draws).toHaveLength(1);                    // the glyph was still stamped
     const bars = r.fills.filter((f) => f.h < atlas.cellHeight);
     expect(bars.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('blink and intensify, as x3270 draws them', () => {
+  // A one-cell list with a visible glyph; the helpers above build lists from a Screen, so the
+  // cell is built directly here: x, y, glyph, fg, bg, cursor, underline, blink, intensify.
+  // `Rgb` is a tuple (`packages/core/src/palette.ts`'s `readonly [number, number, number]`), not
+  // the `{r,g,b}` object the plan's draft used -- `rgbCss`'s own destructuring in this file
+  // (`([r, g, b]: Rgb) =>`) says so.
+  const INKED = atlas.index[160]!;                    // CG 160 = 'A', not in `blank`
+  const one = (over: Partial<DrawCell>): DrawList => ({
+    width: atlas.cellWidth, height: atlas.cellHeight,
+    cells: [{
+      x: 0, y: 0, glyph: INKED, fg: [0, 255, 0], bg: [0, 0, 0],
+      cursor: false, underline: false, blink: false, intensify: false, ...over,
+    }],
+  });
+
+  it('a blinking cell keeps its background and underline but loses its glyph in the off phase', () => {
+    const r = recorder();
+    blit(r.ctx, one({ blink: true, underline: true }), { ...opts(), blinkOff: true });
+    expect(r.draws).toHaveLength(0);
+    expect(r.fills).toHaveLength(2);                  // background, underline
+  });
+
+  it('a blinking cell draws normally in the on phase, and blinkOff spares non-blinking cells', () => {
+    const r = recorder();
+    blit(r.ctx, one({ blink: true }), { ...opts(), blinkOff: false });
+    expect(r.draws).toHaveLength(1);
+    const q = recorder();
+    blit(q.ctx, one({}), { ...opts(), blinkOff: true });
+    expect(q.draws).toHaveLength(1);
+  });
+
+  it('intensify overstrikes: the same glyph again, one SOURCE pixel (scale device pixels) right', () => {
+    const r = recorder();
+    blit(r.ctx, one({ intensify: true }), { ...opts(), scale: 3 });
+    expect(r.draws).toHaveLength(2);
+    expect(r.draws[1]!.sx).toBe(r.draws[0]!.sx);
+    expect(r.draws[1]!.dx - r.draws[0]!.dx).toBe(3);
+  });
+
+  it('a blinking AND intensified cell draws neither the glyph nor its overstrike in the off phase', () => {
+    // The overstrike is reached only from inside the same guard as the glyph itself (blit.ts), so
+    // a cell that is both must lose BOTH draws in the off phase, not just the first.
+    const r = recorder();
+    blit(r.ctx, one({ blink: true, intensify: true }), { ...opts(), blinkOff: true });
+    expect(r.draws).toHaveLength(0);
   });
 });
 

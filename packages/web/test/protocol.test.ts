@@ -73,6 +73,13 @@ describe('encodeServerMessage', () => {
     expect(JSON.parse(inflateSync(encodeServerMessage(msg)).toString())).toEqual(msg);
   });
 
+  it("round-trips alarm, the host's WCC sound-alarm bit forwarded to the browser", () => {
+    const visual: ServerMessage = { kind: 'alarm', visual: true };
+    expect(JSON.parse(inflateSync(encodeServerMessage(visual)).toString())).toEqual(visual);
+    const audible: ServerMessage = { kind: 'alarm', visual: false };
+    expect(JSON.parse(inflateSync(encodeServerMessage(audible)).toString())).toEqual(audible);
+  });
+
   it('compresses a realistic frame by more than 20x', () => {
     // The measured figure is 237220 -> 6760 for a 24x80 screen. This asserts the PROPERTY that
     // makes full frames acceptable over a network, without pinning an exact byte count that a

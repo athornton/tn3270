@@ -568,6 +568,146 @@ describe('createBridge', () => {
     expect(errors).toEqual(['copy failed: because']);
   });
 
+  /*
+    THE HOST'S ALARM, 2026-11-17 (Task 4 of the blink/intensify/bell plan). `main.ts` forwards
+    core's `'alarm'` as `{kind:'alarm', visual}`; this is the receiving half, which either calls
+    every `onFlash` handler (`visual: true`, `-visualbell`) or plays a tone through an injected
+    `AudioContext` factory (`visual: false`, the default).
+  */
+  it('calls every onFlash handler when the alarm is visual', async () => {
+    const socket = fakeSocket();
+    const api = createBridge({
+      socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+    });
+    const flashedA: number[] = [];
+    const flashedB: number[] = [];
+    api.onFlash?.(() => { flashedA.push(1); });
+    api.onFlash?.(() => { flashedB.push(1); });
+    deliver(socket, { kind: 'alarm', visual: true });
+    await settle();
+    expect(flashedA).toEqual([1]);
+    expect(flashedB).toEqual([1]);
+  });
+
+  /** A MINIMAL FAKE `AudioContext`, shared by the two tests below that need one. */
+  function makeFakeAc() {
+    const oscs: { freq: number; started: boolean; stopAt: number }[] = [];
+    const gainNode = { gain: 0 };
+    let resumeCalls = 0;
+    const fakeAc = {
+      currentTime: 10,
+      resumeCalls: () => resumeCalls,
+      resume: () => { resumeCalls++; return Promise.resolve(); },
+      // A MINIMAL FAKE OF THE THREE CALLS `tone` MAKES: `createOscillator`, `createGain` and the
+      // chained `connect`s, which `AudioNode.connect` returns ITS ARGUMENT for -- the real API's
+      // chaining contract, reproduced here rather than approximated, since a fake that returned
+      // `this` instead would still let a reversed call order pass.
+      createOscillator: () => {
+        const osc = { freq: 0, started: false, stopAt: -1 };
+        oscs.push(osc);
+        return {
+          frequency: { set value(v: number) { osc.freq = v; }, get value() { return osc.freq; } },
+          connect: (dest: unknown) => dest,
+          start: () => { osc.started = true; },
+          stop: (t: number) => { osc.stopAt = t; },
+        };
+      },
+      createGain: () => ({
+        gain: { set value(v: number) { gainNode.gain = v; }, get value() { return gainNode.gain; } },
+        connect: (dest: unknown) => dest,
+      }),
+      destination: {},
+    };
+    return { fakeAc, oscs, gainNode };
+  }
+
+  it('plays a tone through the injected AudioContext when the alarm is audible', async () => {
+    const socket = fakeSocket();
+    const { fakeAc, oscs, gainNode } = makeFakeAc();
+    const api = createBridge({
+      socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+      audioContext: () => fakeAc as never,
+    });
+    deliver(socket, { kind: 'alarm', visual: false });
+    await settle();
+    expect(oscs).toHaveLength(1);
+    expect(oscs[0]!.freq).toBe(880);
+    expect(gainNode.gain).toBeCloseTo(0.1);
+    expect(oscs[0]!.started).toBe(true);
+    expect(oscs[0]!.stopAt).toBeCloseTo(10.1);
+    expect(fakeAc.resumeCalls()).toBe(1);        // resumed before playing
+  });
+
+  /*
+    THE CONTEXT IS REUSED, 2026-11-18 (review finding on Task 4). `tone` used to call `make()`
+    on EVERY alarm and never close what it got back -- a fresh `AudioContext` per bell, leaked
+    forever. A context is now built lazily on the FIRST alarm and kept for every alarm after,
+    with `resume()` called each time before playing -- the browser suspends a context created
+    before a user gesture, and `resume()` is what lets a later gesture un-suspend the SAME
+    context rather than this code building a new one and hoping.
+  */
+  it('reuses one AudioContext across alarms: the factory runs once, two oscillators play', async () => {
+    const socket = fakeSocket();
+    const { fakeAc, oscs } = makeFakeAc();
+    let factoryCalls = 0;
+    const api = createBridge({
+      socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+      audioContext: () => { factoryCalls++; return fakeAc as never; },
+    });
+    deliver(socket, { kind: 'alarm', visual: false });
+    await settle();
+    deliver(socket, { kind: 'alarm', visual: false });
+    await settle();
+    expect(factoryCalls).toBe(1);
+    expect(oscs).toHaveLength(2);
+    expect(oscs.every((o) => o.started)).toBe(true);
+    expect(fakeAc.resumeCalls()).toBe(2);        // resumed before EVERY play, not just the first
+  });
+
+  it('swallows a MISSING AudioContext dep, never throwing', async () => {
+    const socket = fakeSocket();
+    const api = createBridge({
+      socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+    });
+    const errors: string[] = [];
+    api.onError((m) => errors.push(m));
+    deliver(socket, { kind: 'alarm', visual: false });
+    await settle();
+    expect(errors).toEqual([]);
+  });
+
+  it('swallows a THROWING audioContext factory, never throwing out of the message handler', async () => {
+    const socket = fakeSocket();
+    const api = createBridge({
+      socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+      audioContext: () => { throw new Error('NotAllowedError: no user gesture yet'); },
+    });
+    const errors: string[] = [];
+    api.onError((m) => errors.push(m));
+    deliver(socket, { kind: 'alarm', visual: false });
+    await settle();
+    expect(errors).toEqual([]);
+  });
+
+  it('DROPS a malformed alarm (visual not a boolean) rather than acting on it or throwing', async () => {
+    const socket = fakeSocket();
+    const api = createBridge({
+      socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+      audioContext: () => { throw new Error('must not be reached'); },
+    });
+    const flashed: number[] = [];
+    const errors: string[] = [];
+    api.onFlash?.(() => { flashed.push(1); });
+    api.onError((m) => errors.push(m));
+    for (const bad of [{ kind: 'alarm' }, { kind: 'alarm', visual: 'true' },
+      { kind: 'alarm', visual: 1 }, { kind: 'alarm', visual: null }]) {
+      deliver(socket, bad);
+    }
+    await settle();
+    expect(flashed).toEqual([]);
+    expect(errors).toEqual([]);
+  });
+
   it('REPORTS a message it cannot read, rather than dropping it as an unhandled rejection', async () => {
     /**
      * `onmessage` runs an async chain nothing awaits, so before 2026-11-02 a throw anywhere in it

@@ -252,6 +252,26 @@ export interface BridgeDeps {
    * debounce is testable with no `window`.
    */
   readonly onResize?: (fn: () => void) => void;
+  /**
+   * Build an `AudioContext` for the alarm's tone, or `undefined` if none exists. 2026-11-17.
+   *
+   * OPTIONAL, the same contract every browser capability here has (`viewport`, `onResize`,
+   * `toggleKeypad`, ...): absent means this client plays no tone, ever -- the gateway's own
+   * tests and any caller with no DOM must be able to construct a bridge without one.
+   *
+   * INJECTED RATHER THAN `new AudioContext()` AT THE POINT OF USE, which is what lets a test
+   * supply a FAKE one, one that THROWS, or `undefined` -- and all three are real browser
+   * behavior, not merely test conveniences: a missing `AudioContext` constructor on an old
+   * engine, and a context a browser's autoplay policy starts `suspended` rather than refusing
+   * outright (`tone`, in this file, swallows every one of the three and never throws).
+   *
+   * A CONTEXT BUILT BEFORE A USER GESTURE DOES NOT THROW: it is simply created `suspended`, and
+   * stays that way -- `start()` on an oscillator through it runs and produces no error, just no
+   * audible sound, until something calls `resume()` after a gesture has happened. `tone` calls
+   * `resume()` on every alarm for exactly this reason, and ignores a rejection the same way: the
+   * remedy for a silent first alarm is interacting with the page, same as it always was.
+   */
+  readonly audioContext?: () => AudioContext | undefined;
 }
 
 /** How long a burst of resizes must go quiet before its viewport is sent. */
@@ -329,6 +349,16 @@ export interface BridgeApi {
    * park every report forever in a client that never registers.
    */
   onCopyFailed?(fn: (message: string) => void): void;
+  /**
+   * The host's alarm, flashed instead of toned when the gateway was started with `-visualbell`.
+   * 2026-11-17.
+   *
+   * OPTIONAL, AND THAT IS WHAT KEEPS `renderer.ts` SHARED BETWEEN BOTH CLIENTS, `fetchSelection`'s
+   * reason: Electron exposes the SAME METHOD from `preload.cts` (Task 3 of this plan), so the one
+   * `window.tn3270.onFlash?.(() => flash())` call in `renderer.ts` reaches whichever client is
+   * running, and a bridge built with neither (the gateway's own tests) is still well-formed.
+   */
+  onFlash?(fn: () => void): void;
 }
 
 /**
@@ -438,6 +468,69 @@ export function writeClipboard(
   });
 }
 
+/**
+ * `tone`'s cache of the `AudioContext` it has already built, one per `createBridge` call.
+ *
+ * A PLAIN OBJECT A CALLER OWNS, RATHER THAN STATE INSIDE `tone` ITSELF: a module-level cache
+ * would leak ONE page's (or one test's) context into every other caller, including a second
+ * `createBridge` in the very same test file. `createBridge` below holds exactly one of these for
+ * the lifetime of the bridge, the same scope `flashFns` and `copyFailed` already have.
+ */
+interface ToneCache {
+  attempted: boolean;
+  ac: AudioContext | undefined;
+}
+
+/**
+ * Play a short tone for the host's alarm, or do nothing. 2026-11-17, context reuse 2026-11-18.
+ *
+ * HERE RATHER THAN INLINE IN THE `alarm` BRANCH BELOW, so it is a plain function a test can call
+ * directly with a fake/throwing/absent `make` -- the same split `writeClipboard` and `socketUrl`
+ * exist for, and the same reason: the no-audio route is the COMMON one (most hosts never ring
+ * the bell, and a browser may block sound entirely before a user gesture), so it is the route
+ * most at risk of rotting if it only ever ran inline and untested.
+ *
+ * ONE `AudioContext`, BUILT LAZILY AND REUSED, NEVER CLOSED: `make` used to run on EVERY alarm,
+ * leaking a fresh context (and the browser-side resources behind it, which nothing ever
+ * released) per bell. `cache` is what makes `make` run AT MOST ONCE PER BRIDGE: the first alarm
+ * builds (or fails to build) the context, `cache.attempted` is set either way, and every alarm
+ * after reuses whatever that produced -- including reusing `undefined`, i.e. never retrying a
+ * `make` that returned nothing or threw.
+ *
+ * `resume()` RUNS BEFORE EVERY TONE, not only the first, and its rejection is swallowed: see this
+ * function's own doc comment on `BridgeDeps.audioContext` for why a context can be `suspended`
+ * at any point, including ones this cache is already reusing. A rejected `resume()` just means
+ * the suspend has not been lifted yet, so the oscillator below still starts and still produces no
+ * audible sound -- the same silent outcome `BridgeDeps.audioContext`'s doc comment already
+ * documents, now reached by `resume()` rejecting instead of by never calling it at all.
+ *
+ * STILL NEVER THROWS, by design, not by accident: `make` is `undefined` when no `audioContext`
+ * dep was given, `make()` can return `undefined` (an old engine with no `AudioContext`
+ * constructor), and either `make()` ITSELF or any call inside the `try` can throw (an old or
+ * locked-down engine that refuses to construct one at all). A bell is never worth an error on a
+ * socket message handler whose `catch` would otherwise paint it on the canvas as if the SCREEN
+ * had failed, which it has not.
+ */
+function tone(make: (() => AudioContext | undefined) | undefined, cache: ToneCache): void {
+  try {
+    if (!cache.attempted) {
+      cache.attempted = true;
+      cache.ac = make?.();
+    }
+    const ac = cache.ac;
+    if (ac === undefined) return;
+    // Ignored on purpose -- see the doc comment above and on `BridgeDeps.audioContext`.
+    ac.resume().catch(() => { /* still suspended: play (silently) anyway */ });
+    const osc = ac.createOscillator();
+    const gain = ac.createGain();
+    osc.frequency.value = 880;
+    gain.gain.value = 0.1;
+    osc.connect(gain).connect(ac.destination);
+    osc.start();
+    osc.stop(ac.currentTime + 0.1);
+  } catch { /* no audio here, or not allowed yet: a bell is never worth an error */ }
+}
+
 const ID_KEY = 'tn3270.sessionId';
 
 export function createBridge(deps: BridgeDeps): BridgeApi {
@@ -457,6 +550,16 @@ export function createBridge(deps: BridgeDeps): BridgeApi {
   // THE RENDERER'S `onCopyFailed`, if it registered one. Not in `handlers`, because it is not
   // queued -- see that member's docstring.
   let copyFailed: ((message: string) => void) | undefined;
+  // EVERY `onFlash` THE RENDERER REGISTERED -- in practice exactly one, `renderer.ts`'s own, but
+  // an array rather than a single slot for the same reason `handlers` is a map and not a switch:
+  // nothing here assumes there is only one consumer. NOT IN `handlers`/`dispatch`, for `onFlash`'s
+  // own reason on `BridgeApi`: `renderer.ts`'s module body registers it before any `alarm` could
+  // possibly arrive (the socket has not even said `hello` yet), so there is nothing to queue, and
+  // queuing an unclaimed one would strand it forever in a client that never registers it.
+  const flashFns: Array<() => void> = [];
+  // `tone`'s own `AudioContext`, built lazily on the first alarm and reused by every one after --
+  // see `ToneCache`'s doc comment and `tone`'s. One per bridge, the same scope `flashFns` has.
+  const toneCache: ToneCache = { attempted: false, ac: undefined };
 
   const dispatch = (kind: string, payload: unknown): void => {
     const fn = handlers.get(kind);
@@ -579,6 +682,27 @@ export function createBridge(deps: BridgeDeps): BridgeApi {
       }
       // THE PICKER'S CHOICES, 2026-11-04. Not through `dispatch`; see `onGeometryChoices`.
       if (msg.kind === 'geometryChoices') { deps.onGeometryChoices?.(msg); return; }
+      /*
+        THE HOST'S ALARM, 2026-11-17. NOT THROUGH `dispatch`, for `copyText`'s reason above: this
+        is injected at construction (`renderer.ts`'s `window.tn3270.onFlash?.(() => flash())`
+        runs at module load, before the socket has even said `hello`), so there is nothing for a
+        queue to buy and a dispatched one would risk stranding in a client that registers none.
+
+        SHAPE-CHECKED HERE, THE WAY `selectionText`'s `seq` AND EVERY OTHER INBOUND KIND IS:
+        `visual` must be an actual boolean, and a malformed one -- a missing field, a string, a
+        number -- is DROPPED rather than acted on, never thrown. This is the mirror image of
+        `protocol.ts`'s two-branch rule for CLIENT messages, where a malformed frame can end the
+        whole gateway process: here the sender is the gateway whose own JS this browser is
+        already running, and the blast radius of a malformed one is a bell that does not ring in
+        one tab, not a crashed server -- so dropping it silently is the right answer, matching
+        every other inbound kind above rather than inventing a stricter rule for this one alone.
+      */
+      if (msg.kind === 'alarm') {
+        const visual = msg['visual'];
+        if (typeof visual !== 'boolean') return;
+        if (visual) { for (const fn of flashFns) fn(); } else { tone(deps.audioContext, toneCache); }
+        return;
+      }
       if (msg.kind === 'transferProgress' || msg.kind === 'transferDone'
         || msg.kind === 'transferData') {
         // `atob`, NOT `Buffer.from(s, 'base64')`: this module is SERVED TO THE BROWSER by
@@ -607,6 +731,7 @@ export function createBridge(deps: BridgeDeps): BridgeApi {
     onFrame: (fn) => { register('frame', fn as (p: unknown) => void); },
     onError: (fn) => { register('error', (p) => { fn(String(p)); }); },
     onCopyFailed: (fn) => { copyFailed = fn; },
+    onFlash: (fn) => { flashFns.push(fn); },
     sendAction: (action) => {
       // `quit` never goes to the server: a browser must not be able to stop the gateway. But the
       // renderer binds Ctrl-] and a dead key is worse than either alternative, so it means
