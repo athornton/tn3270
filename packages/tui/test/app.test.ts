@@ -467,9 +467,71 @@ describe('the host alarm', () => {
     // original 100ms timer, which must never fire again (it would write after the TUI has handed
     // the terminal back, landing a stray DECSCNM "off" on the user's shell).
     expect(h.stdout.all).toContain('\x1b[?5l');
+    // The "off" must land BEFORE leaving the alternate screen buffer: `restore()` writes
+    // the flash's own cancel first, so the reverse video is gone before the real
+    // terminal ever sees the alternate-buffer-off sequence, not after.
+    const offIndex = h.stdout.all.indexOf('\x1b[?5l');
+    const altOffIndex = h.stdout.all.indexOf('\x1b[?1049l');
+    expect(offIndex).toBeGreaterThanOrEqual(0);
+    expect(altOffIndex).toBeGreaterThan(offIndex);
+    // And the flash's own 100ms timer was cleared, not merely raced -- quitting leaves
+    // NO timer alive to keep the event loop running after the terminal is handed back.
+    expect(vi.getTimerCount()).toBe(0);
     const before = h.stdout.written.length;
     vi.advanceTimersByTime(1000);
     expect(h.stdout.written.length).toBe(before);
+  });
+
+  it('a second alarm during a flash restarts the 100ms window, rather than racing it', async () => {
+    // Found by inspection: the handler used to overwrite `flashTimer` with the new
+    // setTimeout WITHOUT clearing the old one, so the first alarm's timer still fired
+    // at 100ms and wrote the "off" sequence early -- cutting the second flash short --
+    // and then the second alarm's own timer fired again at 100ms after ITS start (150ms
+    // overall), writing "off" a second time and leaving no timer this test could catch,
+    // because by then it had already fired. Two alarms 50ms apart must leave exactly
+    // ONE flash window open, running from the SECOND alarm: "off" at 150ms, not 100ms.
+    const h = await alarmHarness(true);
+    h.app.start();
+    h.stdout.written = [];
+    h.fireAlarm();
+    vi.advanceTimersByTime(50);
+    h.fireAlarm();                        // 50ms into the first flash: restarts the window
+    vi.advanceTimersByTime(50);            // 100ms overall: the FIRST timer must not fire here
+    expect(h.stdout.all).not.toContain('\x1b[?5l');
+    vi.advanceTimersByTime(50);            // 150ms overall: the SECOND timer fires now
+    expect(h.stdout.all.endsWith('\x1b[?5l')).toBe(true);
+    // Only one "off" was ever written -- not one from each alarm's timer.
+    expect(h.stdout.all.split('\x1b[?5l')).toHaveLength(2);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('still rings (or flashes) while the terminal is too small to show the screen', async () => {
+    // "Suspended" means too small, not SIGTSTP -- see the comment on this listener in
+    // app.ts. BEL and the DECSCNM flash invert the too-small notice in place rather than
+    // overwriting it, so there is nothing for `suspended` to guard here, unlike `draw()`
+    // and `showMessage()`. Pinned so a future guard added "for consistency" with those
+    // two is caught: the host's alarm is worth hearing even when the screen cannot be
+    // shown.
+    const h = await alarmHarness();
+    h.app.start();
+    h.stdout.resize(10, 20);
+    h.host.fire('SIGWINCH');
+    expect(h.stdout.all.toLowerCase()).toContain('too small');
+    h.stdout.written = [];
+    h.fireAlarm();
+    expect(h.stdout.written[0]).toBe('\x07');
+  });
+
+  it('flashes while suspended too, inverting the too-small notice rather than hiding it', async () => {
+    const h = await alarmHarness(true);
+    h.app.start();
+    h.stdout.resize(10, 20);
+    h.host.fire('SIGWINCH');
+    h.stdout.written = [];
+    h.fireAlarm();
+    expect(h.stdout.written[0]).toBe('\x1b[?5h');
+    vi.advanceTimersByTime(100);
+    expect(h.stdout.written.at(-1)).toBe('\x1b[?5l');
   });
 });
 

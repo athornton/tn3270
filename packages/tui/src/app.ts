@@ -423,6 +423,16 @@ export class App {
       if (this.quitting || this.restored) return;
       if (!this.visualBell) { this.stdout.write('\x07'); return; }
       this.stdout.write('\x1b[?5h');
+      // A second alarm arriving mid-flash must not leave the FIRST timer in the field: that
+      // timer's own 100ms is still counting down from the first alarm, so it would turn the
+      // flash off early -- cutting the second flash short -- and then this (second) timer
+      // would fire again later and write a redundant second "off". Clearing the old one first
+      // means one flash restarts the window rather than two races: the terminal stays reverse
+      // video until 100ms after the LATEST alarm, and exactly one "off" is ever written. It
+      // also closes the other half of the bug: a timer this never clears is one `restore()`
+      // cannot clear either once it is overwritten, which is exactly how a stray timer used to
+      // survive quitting and keep the event loop alive.
+      if (this.flashTimer !== undefined) clearTimeout(this.flashTimer);
       this.flashTimer = setTimeout(() => {
         this.flashTimer = undefined;
         if (!this.quitting && !this.restored) this.stdout.write('\x1b[?5l');
