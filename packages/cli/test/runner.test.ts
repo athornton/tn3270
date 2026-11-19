@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
-  Session, type Connection, type GeometrySetting, SnaCmd, Cmd, Order, TelnetCmd as T, TelnetOpt as O, AID, FA, KeyboardState,
+  Session, TYPEAHEAD_DRAIN_MS, type Connection, type GeometrySetting, SnaCmd, Cmd, Order, TelnetCmd as T, TelnetOpt as O, AID, FA, KeyboardState,
   encodeAddress, cp037, checksum, from6, to6, hostToLocal, localToHost,
   EOF_DATA1, EOF_DATA2, FrameType, ResponseFrameType, StatusCode, Color,
   O_CC_FRAME_SEQ, O_CC_MESSAGE, O_CC_STATUS_CODE, O_DR_FRAME_SEQ, O_DR_SF,
@@ -408,6 +408,8 @@ describe('typing and keys', () => {
     expect(session.screen.cellAt(1).ebcdic).toBe(0x00); // not landed yet
 
     conn.host(SnaCmd.W, 0x02, T.IAC, T.EOR); // keyboard-restore
+    // The drain runs TYPEAHEAD_DRAIN_MS after the write (core/src/session.ts, `drainTimer`).
+    await new Promise((r) => setTimeout(r, TYPEAHEAD_DRAIN_MS + 10));
     expect(session.oia.typeahead).toBe(false);
     expect(session.screen.cellAt(1).ebcdic).toBe(0xd8); // Q
   });

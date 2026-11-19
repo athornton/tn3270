@@ -1364,8 +1364,15 @@ host.on("data", (b) => { const delay = Number(process.env.DELAY_MS ?? 0); if (de
     DATA=X'7D40C3114040A7A8A9' ... LOOPING USE PF3/15 TO END`, then `USERID ABC ... REENTER` again.
     **x3270 would do the same**: it drains in `ps_process` at the end of `ctlr_write`
     (`Common/ctlr.c:2188`, `:2652-2655`), before the next record is read, and its `unlockDelay` --
-    which would have covered this -- defaults off (`Common/glue.c:476`). An open question, not
-    fixed.
+    which would have covered this -- defaults off (`Common/glue.c:476`). **FIXED the same day**
+    (the user's choice): the drain now waits `TYPEAHEAD_DRAIN_MS` (50 ms) after the unlocking
+    write; the keyboard itself still unlocks at once. A first attempt, draining once per received
+    chunk, failed this same run (`tk5-typeahead-2`: AID at 7.214, Query Reply at 7.217), because
+    the two records arrive in SEPARATE reads within one millisecond. **Re-run with the delay**
+    (`tk5-typeahead-3`): `abc` at 5.799; our Query Reply FIRST at 7.353, with `xyz` + Enter still
+    queued (the Query's enter-inhibit); TSO's `REENTER` write at 8.860; and 53 ms later
+    `8.913 c1 > 7d c2 e3 11 c1 e5 a7 a8 a9 ff ef` -- `xyz` into the REENTER field -- answered
+    `IKJ56420I USERID XYZ NOT AUTHORIZED TO USE TSO`.
   - **FOUND, pre-existing, not from this branch: Read Modified sends embedded NULs.** The `zcd` AID
     above was `7d c2 61 11 c1 e5`, then 57 `00` bytes, then `a9 83 84`: the cells from the start of
     TSO's input field to the cursor. GA23-0059 says "Only non-null character data ... are
@@ -1373,7 +1380,8 @@ host.on("data", (b) => { const delay = Number(process.env.DELAY_MS ?? 0); if (de
     x3270 sends a cell only `if (send_data && ea_buf[baddr].ec)` (`Common/ctlr.c:831`).
     `core/src/inbound.ts` strips only trailing NULs ("embedded ones are" transmitted), pinned by
     `inbound.test.ts`'s "sends embedded nulls but not trailing ones" -- a rule from the stage-1 plan,
-    never measured. TSO tolerated it here. Not fixed yet.
+    never measured. TSO tolerated it here. **FIXED the same day**: every NUL is suppressed. Re-run
+    (`tk5-insert-erase-2`): the `zcd` AID is `7d c2 61 11 c1 e5 a9 83 84 ff ef`, no NULs.
 - VM failed to free its terminal between sessions three times (only Hercules' banner, a 60-90 s
   timeout); waiting 30-60 s and re-running worked each time, as recorded on 2026-11-17.
 

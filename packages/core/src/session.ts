@@ -31,6 +31,10 @@ import { resolveGeometry, type GeometrySetting, type ResolvedGeometry, type Size
  */
 
 /** The transport, injected so tests and Replay() need no real socket. */
+
+/** How long after a 3270 write the typeahead queue waits to drain; see `Session.drainTimer`. */
+export const TYPEAHEAD_DRAIN_MS = 50;
+
 export interface Connection {
   write(bytes: Uint8Array): void;
   close(): void;
@@ -421,8 +425,30 @@ export class Session {
    */
   private readonly typeahead: KeyAction[] = [];
 
-  /** A 3270 write was processed in the current received chunk; `conn.onData` drains after it. */
-  private drainDue = false;
+  /**
+   * THE TYPEAHEAD DRAIN RUNS `TYPEAHEAD_DRAIN_MS` AFTER A 3270 WRITE, not at the end of the
+   * write as x3270's `ps_process` does (Common/ctlr.c:2188, :2652-2655). TSO's logon sends a
+   * restoring Erase/Write and then a Read Partition Query, as two records that arrive in
+   * separate network reads within the same millisecond; draining at once put a queued AID ahead
+   * of our Query Reply, and TSO read it in the reply's place (`IKTXLOG TGET RC=X'18'`,
+   * docs/live-testing.md, *The keyboard semantics, from the GUI against VM/370 — 2026-11-19*).
+   * The delay lets the Query be answered first; its enter-inhibit then holds the queue until the
+   * host's next write. Only the drain waits: the keyboard itself unlocks at once. This is
+   * x3270's own `unlockDelay` idea (350 ms, off by default, Common/glue.c:476-477) applied to
+   * the queue alone -- a deliberate divergence, the user's decision of 2026-11-19. One timer at
+   * a time: a later write inside the window does not push it back.
+   */
+  private drainTimer: ReturnType<typeof setTimeout> | undefined;
+
+  private scheduleDrain(): void {
+    // Nothing queued, no timer: an idle session arms nothing after every host write.
+    if (this.drainTimer !== undefined || this.typeahead.length === 0) return;
+    const conn = this.conn;
+    this.drainTimer = setTimeout(() => {
+      this.drainTimer = undefined;
+      if (this.conn === conn) this.drainTypeahead();
+    }, TYPEAHEAD_DRAIN_MS);
+  }
   /**
    * Set by a transfer driver (Task 10) for the whole of a DFT or CUT transfer in progress --
    * x3270's `KL_FT`. While true, `run` drops a locked-keyboard action with the alarm instead
@@ -911,18 +937,6 @@ export class Session {
       if (this.conn !== conn) return;
       this.telnet?.receive(bytes);
       this.oia.tn3270Mode = this.is3270Mode();
-      // THE TYPEAHEAD DRAIN RUNS ONCE PER RECEIVED CHUNK, after every record in it, not after
-      // each write as x3270's `ps_process` does (Common/ctlr.c:2188, :2652-2655). TSO's logon
-      // sends a restoring Erase/Write and a Read Partition Query back to back; draining between
-      // them put a queued AID ahead of our Query Reply, and TSO read it in the reply's place
-      // (`IKTXLOG TGET RC=X'18'`, docs/live-testing.md, *The keyboard semantics, from the GUI
-      // against VM/370 — 2026-11-19*). Waiting for the chunk lets the Query be answered first;
-      // its enter-inhibit then holds the queue until the host's next write. A deliberate
-      // divergence, the user's decision of 2026-11-19.
-      if (this.drainDue && this.conn === conn) {
-        this.drainDue = false;
-        this.drainTypeahead();
-      }
     };
     conn.onClose = () => { if (this.conn === conn) this.handleClose(); };
     conn.onError = (err) => {
@@ -1067,7 +1081,7 @@ export class Session {
     // typing keystrokes the operator aimed at a host that is already gone.
     this.typeahead.length = 0;
     this.oia.typeahead = false;
-    this.drainDue = false;
+    if (this.drainTimer !== undefined) { clearTimeout(this.drainTimer); this.drainTimer = undefined; }
     // `transferring` IS ALSO A BACKSTOP HERE, not only the transfer driver's job (Task 10):
     // a dropped connection must never leave future keystrokes dropped-with-alarm forever
     // because nothing else cleared the flag -- the same "one teardown path clears it, another
@@ -1344,9 +1358,7 @@ export class Session {
     // with one call. Never reached if the catch's own re-throw fires (our bug, not the
     // host's) -- a client that has crashed does not go on to drain a queue.
     //
-    // MARKED HERE, RUN BY `conn.onData` once the whole received chunk has been processed (see
-    // the comment there): a Query in the same chunk must be answered before a queued AID.
-    this.drainDue = true;
+    this.scheduleDrain();
   }
 
   /**

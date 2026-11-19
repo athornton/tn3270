@@ -25,6 +25,13 @@ latest START HERE entry names. Each finished feature has its own pair under `doc
   BackSpace_action is plain enq), `Erase()`, `ToggleInsert()`; AID actions never fail on a lock or
   disconnect, as s3270 (so `Enter()` disconnected now answers `ok`).
 - **Mutation pass (Task 11):** 39 mutations, 2 survivors, both now killed (`7421245`).
+- **AFTER THE MERGE, 2026-11-19 (TK5 GUI witnesses):** oerr-lock, insert off after Reset and Erase
+  witnessed on TK5 too. Two fixes, the user's choices: Read Modified now suppresses EVERY NUL
+  (`inbound.ts`; it sent embedded ones, against pages.txt:2174-2177 and x3270 ctlr.c:831), and the
+  typeahead drain waits `TYPEAHEAD_DRAIN_MS` = 50 ms after the unlocking write (`Session.drainTimer`)
+  so TSO's back-to-back restore + Read Partition Query gets its Query Reply before a queued AID.
+  Draining once per received chunk was tried first and FAILED live (separate reads). Both
+  re-witnessed live on TK5 (`docs/live-testing.md`, the 2026-11-19 GUI entry's TK5 part).
 - **GUI witnesses DONE 2026-11-19** (`docs/live-testing.md`, *The keyboard semantics, from the GUI against VM/370 — 2026-11-19*): typeahead + an AID queued behind an AID (relay holds host replies 1.5 s), oerr-lock, insert off after an AID and after Reset, Erase close-up; each run discriminates against `main`. Not live: Delete/EraseEOF unformatted, TK5, Attn on TN3270E. Gate now **107 blocking**. The user (2026-11-19) keeps aid-keys/attn non-blocking until a real TN3270E host is lined up, and accepts Reset-during-transfer not clearing `transferring` as a divergence.
 - **Live (earlier):** typeahead and oerr-lock witnessed from the CLI on VM/370 (`docs/live-testing.md`,
   *Typeahead and the operator-error lock, from the CLI against VM/370 — 2026-11-19*). **Owed (Task

@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from 'vitest';
-import { Session, type Connection, type SessionOptions } from '../src/session.js';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { Session, TYPEAHEAD_DRAIN_MS, type Connection, type SessionOptions } from '../src/session.js';
 import {
   TelnetCmd as T, TelnetOpt as O, TelnetSubopt as S, SnaCmd, Order, AID, FA,
 } from '../src/constants.js';
@@ -109,6 +109,10 @@ async function connectedWithTinyField() {
   return { session, conn };
 }
 
+// FAKE TIMERS FILE-WIDE: the typeahead drain runs on a TYPEAHEAD_DRAIN_MS timer.
+beforeEach(() => { vi.useFakeTimers(); });
+afterEach(() => { vi.useRealTimers(); });
+
 describe('Session.run: the unlocked path (Task 1)', () => {
   it('types into the field and reports done', async () => {
     const { session } = await connectedWithField();
@@ -202,6 +206,7 @@ describe('Session.run: the typeahead queue under a host lock (Task 2)', () => {
     const onScreen = vi.fn();
     session.on('screen', onScreen);
     conn.host(SnaCmd.W, 0x02, T.IAC, T.EOR); // bare Write, WCC keyboard-restore
+    vi.advanceTimersByTime(TYPEAHEAD_DRAIN_MS); // the drain waits; see that describe
 
     expect(session.oia.keyboard).toBe(KeyboardState.Unlocked);
     expect(session.oia.typeahead).toBe(false);
@@ -227,6 +232,7 @@ describe('Session.run: the typeahead queue under a host lock (Task 2)', () => {
     const onScreen = vi.fn();
     session.on('screen', onScreen);
     conn.host(SnaCmd.W, 0x02, T.IAC, T.EOR); // bare Write, WCC keyboard-restore
+    vi.advanceTimersByTime(TYPEAHEAD_DRAIN_MS); // the drain waits; see that describe
 
     expect(onScreen).toHaveBeenCalledTimes(2);
   });
@@ -242,6 +248,7 @@ describe('Session.run: the typeahead queue under a host lock (Task 2)', () => {
 
     conn.sent = [];
     conn.host(SnaCmd.W, 0x02, T.IAC, T.EOR); // first restore
+    vi.advanceTimersByTime(TYPEAHEAD_DRAIN_MS); // the drain waits; see that describe
 
     // X was typed, then the queued Enter sent an AID (locking again), so Y is
     // still queued and the indicator still shows it.
@@ -251,6 +258,7 @@ describe('Session.run: the typeahead queue under a host lock (Task 2)', () => {
     expect(session.oia.typeahead).toBe(true);
 
     conn.host(SnaCmd.W, 0x02, T.IAC, T.EOR); // second restore
+    vi.advanceTimersByTime(TYPEAHEAD_DRAIN_MS); // the drain waits; see that describe
 
     // Y lands at address 2, not 1: typing X auto-advanced the cursor (`advanceAfterType`)
     // before the queued Enter locked the keyboard again, and nothing moved it back.
@@ -275,6 +283,7 @@ describe('Session.run: the typeahead queue under a host lock (Task 2)', () => {
     // the drained type would corrupt the attribute rather than land in a data cell. A
     // live host positions the cursor the same way, with its own IC order.
     conn.host(SnaCmd.EW, 0xc3, Order.SF, 0x00, Order.IC, T.IAC, T.EOR);
+    vi.advanceTimersByTime(TYPEAHEAD_DRAIN_MS); // the drain waits; see that describe
 
     // The write both unlocks (restore bit) and defines the field the queued
     // type lands in, exactly as a live VM/370 banner does.
@@ -292,6 +301,7 @@ describe('Session.run: the typeahead queue under a host lock (Task 2)', () => {
     expect(session.oia.typeahead).toBe(true);
 
     conn.host(SnaCmd.W, 0x02, T.IAC, T.EOR); // restore releases it too
+    vi.advanceTimersByTime(TYPEAHEAD_DRAIN_MS); // the drain waits; see that describe
 
     expect(session.screen.cellAt(1).ebcdic).toBe(0xc1); // A
   });
@@ -305,6 +315,7 @@ describe('Session.run: the typeahead queue under a host lock (Task 2)', () => {
     expect(session.oia.typeahead).toBe(true);
 
     conn.host(SnaCmd.W, 0x02, T.IAC, T.EOR);
+    vi.advanceTimersByTime(TYPEAHEAD_DRAIN_MS); // the drain waits; see that describe
 
     expect(session.screen.cellAt(1).ebcdic).toBe(0xc1); // A
   });
@@ -357,17 +368,20 @@ describe('Session.run: the typeahead queue under a host lock (Task 2)', () => {
   });
 });
 
-describe('the drain waits for the whole received chunk (2026-11-19, TK5)', () => {
+describe('the drain waits TYPEAHEAD_DRAIN_MS after the unlocking write (2026-11-19, TK5)', () => {
   /**
-   * TSO's logon sends its restoring Erase/Write and, in the very next record, a Read Partition
-   * Query. Draining after the first record put a queued AID on the wire BEFORE our Query Reply,
-   * and TSO read it in the reply's place (`IKTXLOG TGET RC=X'18'`; docs/live-testing.md, *The
-   * keyboard semantics, from the GUI against VM/370 — 2026-11-19*). x3270 drains per write and
-   * would do the same; we drain once per received chunk instead, by the user's decision.
+   * TSO's logon sends its restoring Erase/Write and then a Read Partition Query, as two records in
+   * SEPARATE network reads within one millisecond (measured through the relay, twice). Draining
+   * at once put a queued AID ahead of our Query Reply, and TSO read it in the reply's place
+   * (`IKTXLOG TGET RC=X'18'`; docs/live-testing.md, *The keyboard semantics, from the GUI against
+   * VM/370 — 2026-11-19*). x3270 drains per write and would do the same; we wait
+   * TYPEAHEAD_DRAIN_MS first, by the user's decision. A first attempt (drain once per received
+   * chunk) passed a test that put both records in ONE chunk and failed live; these tests use
+   * separate chunks, as TSO does.
    */
   const QUERY = [SnaCmd.WSF, 0x00, 0x05, 0x01, T.IAC, T.IAC, 0x02] as const;
 
-  it('answers a Query in the same chunk before any queued AID, and holds the AID', async () => {
+  it('answers a Query arriving in the next chunk before any queued AID, and holds the AID', async () => {
     const { session, conn } = await connectedWithField();
     session.keyboard.moveCursor(1);
     session.run({ kind: 'enter' });
@@ -375,30 +389,52 @@ describe('the drain waits for the whole received chunk (2026-11-19, TK5)', () =>
     session.run({ kind: 'enter' });
     conn.sent = [];
 
-    // ONE chunk: a restoring Write, then the Query.
-    conn.host(SnaCmd.W, 0x02, T.IAC, T.EOR, ...QUERY, T.IAC, T.EOR);
-
-    expect(conn.sent[0]).toBe(0x88); // the Query Reply, and nothing before it
-    expect(conn.sent).not.toContain(AID.ENTER);
+    conn.host(SnaCmd.W, 0x02, T.IAC, T.EOR); // the restoring write, alone
+    expect(conn.sent).toEqual([]);           // nothing drained yet
+    conn.host(...QUERY, T.IAC, T.EOR);       // the Query, in its own chunk
+    expect(conn.sent[0]).toBe(0x88);         // the Query Reply goes first
+    vi.advanceTimersByTime(TYPEAHEAD_DRAIN_MS);
+    expect(conn.sent).not.toContain(AID.ENTER); // the Query's enter-inhibit holds the queue
     expect(session.oia.keyboard).toBe(KeyboardState.EnterInhibit);
     expect(session.oia.typeahead).toBe(true);
 
-    // The host's next restoring write lets the queue run.
     conn.sent = [];
-    conn.host(SnaCmd.W, 0x02, T.IAC, T.EOR);
+    conn.host(SnaCmd.W, 0x02, T.IAC, T.EOR); // the host's next restoring write
+    vi.advanceTimersByTime(TYPEAHEAD_DRAIN_MS);
     expect(conn.sent[0]).toBe(AID.ENTER);
     expect(session.screen.cellAt(1).ebcdic).toBe(0xe7); // X
     expect(session.oia.typeahead).toBe(false);
   });
 
-  it('still drains when the Query arrives in a later chunk', async () => {
+  it('drains no earlier than TYPEAHEAD_DRAIN_MS after the write, and then at once', async () => {
     const { session, conn } = await connectedWithField();
     session.keyboard.moveCursor(1);
     session.run({ kind: 'enter' });
     session.run({ kind: 'type', text: 'X' });
     conn.host(SnaCmd.W, 0x02, T.IAC, T.EOR);
+    expect(session.oia.keyboard).toBe(KeyboardState.Unlocked); // the keyboard unlocks at once
+    vi.advanceTimersByTime(TYPEAHEAD_DRAIN_MS - 1);
+    expect(session.screen.cellAt(1).ebcdic).toBe(0x00);
+    vi.advanceTimersByTime(1);
     expect(session.screen.cellAt(1).ebcdic).toBe(0xe7);
     expect(session.oia.typeahead).toBe(false);
+  });
+
+  it('arms no timer after a write when nothing is queued', async () => {
+    const { conn } = await connectedWithField();
+    conn.host(SnaCmd.W, 0x02, T.IAC, T.EOR);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('cancels a pending drain on disconnect', async () => {
+    const { session, conn } = await connectedWithField();
+    session.keyboard.moveCursor(1);
+    session.run({ kind: 'enter' });
+    session.run({ kind: 'type', text: 'X' });
+    conn.host(SnaCmd.W, 0x02, T.IAC, T.EOR);
+    expect(vi.getTimerCount()).toBe(1);
+    conn.close();
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 
@@ -618,6 +654,7 @@ describe('Session.run: Reset half/full, and insert mode off on an AID/Reset/rest
 
     // And the flushed queue never ran, even once unlocked and a write arrives to drain.
     conn.host(SnaCmd.W, 0x02, T.IAC, T.EOR);
+    vi.advanceTimersByTime(TYPEAHEAD_DRAIN_MS); // the drain waits; see that describe
     expect(session.screen.cellAt(1).ebcdic).toBe(0x00);
   });
 
@@ -658,6 +695,7 @@ describe('Session.run: Reset half/full, and insert mode off on an AID/Reset/rest
     session.keyboard.setInsertMode(true);
 
     conn.host(SnaCmd.W, 0x02, T.IAC, T.EOR); // WCC keyboard-restore
+    vi.advanceTimersByTime(TYPEAHEAD_DRAIN_MS); // the drain waits; see that describe
 
     expect(session.keyboard.insertMode).toBe(false);
   });
@@ -667,6 +705,7 @@ describe('Session.run: Reset half/full, and insert mode off on an AID/Reset/rest
     session.keyboard.setInsertMode(true);
 
     conn.host(SnaCmd.W, 0x00, T.IAC, T.EOR); // WCC with no restore bit
+    vi.advanceTimersByTime(TYPEAHEAD_DRAIN_MS); // the drain waits; see that describe
 
     expect(session.keyboard.insertMode).toBe(true);
   });
@@ -715,6 +754,7 @@ describe('Session.run: an operator error flushes the typeahead queue (final revi
 
     conn.sent = [];
     conn.host(SnaCmd.W, 0x02, T.IAC, T.EOR); // restore: drains the queue
+    vi.advanceTimersByTime(TYPEAHEAD_DRAIN_MS); // the drain waits; see that describe
 
     // The drained 'type A' hit the protected field and raised X Protected. The
     // queued Enter behind it must be GONE, not merely paused.
@@ -722,6 +762,7 @@ describe('Session.run: an operator error flushes the typeahead queue (final revi
     expect(session.oia.typeahead).toBe(false);
 
     conn.host(SnaCmd.W, 0x02, T.IAC, T.EOR); // a later restore: nothing left to drain
+    vi.advanceTimersByTime(TYPEAHEAD_DRAIN_MS); // the drain waits; see that describe
 
     expect(conn.sent).toEqual([]);
   });
@@ -738,6 +779,7 @@ describe('Session.run: an operator error flushes the typeahead queue (final revi
     session.run({ kind: 'type', text: 'X' }); // queued, will drain cleanly
 
     conn.host(SnaCmd.W, 0x02, T.IAC, T.EOR);
+    vi.advanceTimersByTime(TYPEAHEAD_DRAIN_MS); // the drain waits; see that describe
 
     expect(session.screen.cellAt(1).ebcdic).toBe(0xe7); // X
     expect(session.oia.keyboard).toBe(KeyboardState.Unlocked);
