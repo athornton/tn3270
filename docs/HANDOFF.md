@@ -1,14 +1,14 @@
-# Handoff — state as of 2026-11-19 (README *STAGING* 15a PART 3, KEYBOARD SEMANTICS, BUILT on branch `keyboard-semantics` (unpushed, unmerged): Tasks 1-11 and 13 done, final review's 4 defects fixed (`788c141`), gate FAIL 110 blocking; next: GUI live witnesses (Task 12), final review, merge; README *STAGING* 15a PART 2, BLINK/INTENSIFY/THE BELL, MERGED (`86a9999`): canvas blink and intensify drawn, the host's alarm rings in the GUI, the browser and the TUI, `-visualbell` flashes instead, gate still FAIL 113 blocking; 15a PART 1, ASCII LINE ENDS, MERGED (`13e41b2`); PARITY TRIAGED, gate 113 blocking; ROADMAP = README item 15a-15h; x3270 PARITY CHECKLIST MERGED (`df62e6f`); THE PACKAGED GUI'S DROPPED FIRST ARGUMENT AND SYSTEM-WIDE Ctrl-] FIXED (`gui-argv-and-quit`): 413 x3270 names, 158 checklist rows, `parity.mjs gate` FAIL 157 blocking; 0.1.4 RELEASED: npm by the tag workflow with provenance, and the first GitHub release with the seven installers, SHA256SUMS and scriv notes; macOS CODE SIGNING MERGED (`db5a93d`; released installers up to 0.1.4 are UNSIGNED), Windows CI signing DROPPED for the Microsoft Store; STORE PROBE MERGED (`559ea78`); README AUDIT + FIXES MERGED (`ae8724f`); WEB RECEIVE DOWNLOADS ON COMPLETION (`4a940fe`, live-verified); `Exist` PER DIRECTION (`f533bff`); next: README *Staging* 15a part 3, the keyboard semantics (typeahead and keyboard lock, insert-mode reset, x3270's erase rules, oerr-lock))
+# Handoff — state as of 2026-11-19 (README *STAGING* 15a PART 3, KEYBOARD SEMANTICS, MERGED (`d0d8395`): typeahead, oerrLock, Reset's half reset, insert-mode resets, the erase keys, numericLock off, Attn on TN3270E, GUI-witnessed on VM, gate FAIL 107 blocking; next: 15a's remaining item, x3270's default code page `bracket` (then 15b); README *STAGING* 15a PART 2, BLINK/INTENSIFY/THE BELL, MERGED (`86a9999`): canvas blink and intensify drawn, the host's alarm rings in the GUI, the browser and the TUI, `-visualbell` flashes instead, gate still FAIL 113 blocking; 15a PART 1, ASCII LINE ENDS, MERGED (`13e41b2`); PARITY TRIAGED, gate 113 blocking; ROADMAP = README item 15a-15h; x3270 PARITY CHECKLIST MERGED (`df62e6f`); THE PACKAGED GUI'S DROPPED FIRST ARGUMENT AND SYSTEM-WIDE Ctrl-] FIXED (`gui-argv-and-quit`): 413 x3270 names, 158 checklist rows, `parity.mjs gate` FAIL 157 blocking; 0.1.4 RELEASED: npm by the tag workflow with provenance, and the first GitHub release with the seven installers, SHA256SUMS and scriv notes; macOS CODE SIGNING MERGED (`db5a93d`; released installers up to 0.1.4 are UNSIGNED), Windows CI signing DROPPED for the Microsoft Store; STORE PROBE MERGED (`559ea78`); README AUDIT + FIXES MERGED (`ae8724f`); WEB RECEIVE DOWNLOADS ON COMPLETION (`4a940fe`, live-verified); `Exist` PER DIRECTION (`f533bff`); next: README *Staging* 15a part 3, the keyboard semantics (typeahead and keyboard lock, insert-mode reset, x3270's erase rules, oerr-lock))
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log). For the most recent work, read the spec and plan the
 latest START HERE entry names. Each finished feature has its own pair under `docs/superpowers/`.
 
-## START HERE — LATEST FIRST; NEXT: FINISH 15a PART 3 (GUI WITNESSES, FINAL REVIEW, MERGE)
+## START HERE — LATEST FIRST; NEXT: 15a's LAST ITEM, THE `bracket` DEFAULT CODE PAGE (BRAINSTORM FIRST)
 
-**2026-11-18/19, LATEST: README *STAGING* 15a PART 3, THE KEYBOARD SEMANTICS, BUILT** on branch
-`keyboard-semantics` (from `main` `b4fd071`; NOT pushed, NOT merged). Spec
+**2026-11-18/19, LATEST: README *STAGING* 15a PART 3, THE KEYBOARD SEMANTICS, MERGED** to `main`
+`--no-ff` as `d0d8395` and pushed (branch `keyboard-semantics`, from `b4fd071`; CI 44578218532 green 6/6 on `ddec36a`). Spec
 `docs/superpowers/specs/2026-11-18-keyboard-semantics-design.md`, plan
 `docs/superpowers/plans/2026-11-18-keyboard-semantics.md`. `git log --oneline b4fd071..keyboard-semantics`.
 3946 tests, build and typecheck clean at `7421245`.
@@ -30,7 +30,7 @@ latest START HERE entry names. Each finished feature has its own pair under `doc
   *Typeahead and the operator-error lock, from the CLI against VM/370 — 2026-11-19*). **Owed (Task
   12):** the GUI witnesses in the spec (typeahead, AID behind AID, oerr-lock with the bell, insert
   off after Enter/Reset, Erase close-up, Delete/EraseEOF unformatted).
-- **Parity (`a41e1fc`):** gate FAIL 113 -> **110 blocking**. **CHECK THIS FIRST:** aid-keys,
+- **Parity (`a41e1fc`):** gate FAIL 113 -> 110 blocking (107 after the GUI witnesses below). **The user decided 2026-11-19 (see below); originally flagged:** aid-keys,
   cursor-movement and attn went `ours` and stopped blocking on live witnesses that PREDATE this
   branch (PA1/PA2, Field Mark/Newline 2026-09-24, Attn-on-VM null result). None of them witnesses
   the new behaviour (a queued AID; Attn on TN3270E is tests-only), so the user should decide
