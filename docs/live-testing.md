@@ -1343,8 +1343,37 @@ host.on("data", (b) => { const delay = Number(process.env.DELAY_MS ?? 0); if (de
   Enter -- on `main`, `xabc`), `... a8 82 83` (`ybc`: insert ended with Reset, Ctrl-R -- on `main`,
   `yabc`) and `... a9 83 84` (`zcd`: Backspace on `b` erased `a` and closed up the field -- on
   `main`, which nulled the cell and left the gap, `zbcd`).
-- **Not witnessed live:** Delete and EraseEOF on an unformatted screen (tests only), the TK5 runs,
-  and Attn on TN3270E (no TN3270E host).
+- **Not witnessed live:** Delete and EraseEOF on an unformatted screen (tests only), TK5's
+  insert-off-after-an-AID, and Attn on TN3270E (no TN3270E host).
+- **TK5 (MVS 3.8j, `localhost:3271`), the same day, same harness.** Typing at VTAM's
+  `Logon ===>` goes to TSO as a userid; a made-up one is refused (`IKJ56420I USERID ABC NOT
+  AUTHORIZED TO USE TSO`, `IKJ56429A REENTER -`), so no logon happens and a second AID is available.
+  - **oerr-lock** — `node run2.mjs tk5-oerr 3271 'wait:Logon ===>,Up,a,Enter,Down,c,Enter,wait:USERID C NOT'`:
+    Up into the logo, `a` (X Protected), Enter sent NOTHING, Down cleared the error and came back
+    to the input field, and the only AID was `7d 5b 6c 11 5b 6b 83 40 …`, the `c` (TSO: `USERID C
+    NOT AUTHORIZED`).
+  - **Insert off after Reset, and Erase** — `node run2.mjs tk5-insert-erase 3271 'wait:Logon ===>,Insert,Control+R,a,b,c,Left,Left,Left,y,Enter,wait:REENTER,a,b,c,d,Left,Left,Left,Backspace,z,Enter,wait:ZCD'`:
+    `7d 5b 6c 11 5b 6b a8 82 83 …` (`ybc`), and at the REENTER prompt an AID carrying `a9 83 84`
+    (`zcd`; TSO: `USERID ZCD NOT AUTHORIZED`).
+  - **Typeahead** — `DELAY_MS=1500 node run2.mjs tk5-typeahead 3271 'wait:Logon ===>,a,b,c,Enter,x,y,z,Enter,wait:XYZ NOT'`:
+    the queue worked -- `abc` went at 6.390 s, `x y z` and Enter were held, and `7d 40 c3 11 40 40
+    a7 a8 a9` went out 3 ms after TSO's restoring write (7.902 s). **But TSO did not accept it.**
+    TSO sent its restoring Erase/Write (WCC `c3`) and, in the very next record, a Read Partition
+    Query; our drain ran after the first record, so the queued AID went out BEFORE our Query Reply
+    (7.908 s), and TSO's logon read it in the reply's place: `IKTXLOG TGET RC=X'18',LEN=X'0009',
+    DATA=X'7D40C3114040A7A8A9' ... LOOPING USE PF3/15 TO END`, then `USERID ABC ... REENTER` again.
+    **x3270 would do the same**: it drains in `ps_process` at the end of `ctlr_write`
+    (`Common/ctlr.c:2188`, `:2652-2655`), before the next record is read, and its `unlockDelay` --
+    which would have covered this -- defaults off (`Common/glue.c:476`). An open question, not
+    fixed.
+  - **FOUND, pre-existing, not from this branch: Read Modified sends embedded NULs.** The `zcd` AID
+    above was `7d c2 61 11 c1 e5`, then 57 `00` bytes, then `a9 83 84`: the cells from the start of
+    TSO's input field to the cursor. GA23-0059 says "Only non-null character data ... are
+    transmitted" (`~/3270/ref/pages.txt:2174-2177`, and "nulls suppressed" at :13751-13793), and
+    x3270 sends a cell only `if (send_data && ea_buf[baddr].ec)` (`Common/ctlr.c:831`).
+    `core/src/inbound.ts` strips only trailing NULs ("embedded ones are" transmitted), pinned by
+    `inbound.test.ts`'s "sends embedded nulls but not trailing ones" -- a rule from the stage-1 plan,
+    never measured. TSO tolerated it here. Not fixed yet.
 - VM failed to free its terminal between sessions three times (only Hercules' banner, a 60-90 s
   timeout); waiting 30-60 s and re-running worked each time, as recorded on 2026-11-17.
 
