@@ -209,6 +209,28 @@ describe('Session.run: the typeahead queue under a host lock (Task 2)', () => {
     expect(onScreen).toHaveBeenCalled();
   });
 
+  /**
+   * MUTATION SURVIVOR (Task 11): the test above only asserts `onScreen` was called AT
+   * LEAST once, which the host WRITE's own `emit('screen')` (`handleRecord`, before
+   * `drainTypeahead()` runs) already satisfies on its own -- so deleting
+   * `drainTypeahead`'s trailing `if (ran) this.emit('screen');` left every existing test
+   * green. `drainTypeahead`'s own doc comment says a write that unlocks and drains
+   * something fires 'screen' TWICE -- once for the write, once for the drain -- so this
+   * pins the count, not just "called".
+   */
+  it('fires a SECOND screen event for the drain, beyond the write\'s own', async () => {
+    const { session, conn } = await connectedWithField();
+    session.keyboard.moveCursor(1);
+    session.run({ kind: 'enter' });
+    session.run({ kind: 'type', text: 'X' });
+
+    const onScreen = vi.fn();
+    session.on('screen', onScreen);
+    conn.host(SnaCmd.W, 0x02, T.IAC, T.EOR); // bare Write, WCC keyboard-restore
+
+    expect(onScreen).toHaveBeenCalledTimes(2);
+  });
+
   it('drains an AID-then-type queue one unlock at a time, pausing at the queued AID', async () => {
     const { session, conn } = await connectedWithField();
     session.keyboard.moveCursor(1);

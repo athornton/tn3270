@@ -214,6 +214,33 @@ describe('typing', () => {
     expect(s.cellAt(8).ebcdic).toBe(0xc3); // C, UNCHANGED
   });
 
+  /**
+   * MUTATION SURVIVOR (Task 11): `shiftRight`'s unformatted boundary is `s.size - 1`,
+   * and the scan loop (`for (let a = from; a !== end; ...)`) never examines `end`
+   * itself -- so the LAST cell it actually checks is `s.size - 2`, not `s.size - 1`.
+   * The test above puts its NUL well short of that edge (position 7 of 1920), so an
+   * off-by-one on the boundary (`s.size - 2` instead of `s.size - 1`) left every
+   * existing test green: it only excludes one more cell that was never the one under
+   * test. This pins the boundary itself by putting the ONLY room exactly at `s.size -
+   * 2` -- the cell that distinguishes the two.
+   */
+  it('finds room at s.size - 2, the last cell the unformatted scan actually visits', () => {
+    const s = new Screen();
+    const last = s.size - 1; // 1919 on the default 24x80 screen
+    s.setChar(last - 3, 0xc1); // A
+    s.setChar(last - 2, 0xc2); // B
+    s.setChar(last - 1, 0x00); // NUL at s.size - 2 -- the only room
+    s.setChar(last, 0xc3);     // C, beyond the NUL
+    s.cursor = last - 3;
+    const k = kb(s);
+    k.insertMode = true;
+    expect(k.type('X')).toBe(true);
+    expect(s.cellAt(last - 3).ebcdic).toBe(0xe7); // X
+    expect(s.cellAt(last - 2).ebcdic).toBe(0xc1); // A, pushed right
+    expect(s.cellAt(last - 1).ebcdic).toBe(0xc2); // B, pushed right -- the NUL is consumed
+    expect(s.cellAt(last).ebcdic).toBe(0xc3);     // C, UNCHANGED
+  });
+
   it('types a whole string, respecting protection', () => {
     const s = twoFields();
     const k = kb(s);
