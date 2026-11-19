@@ -1972,6 +1972,11 @@ export class Session {
       case 'toggleInsert': k.setInsertMode(!k.insertMode); return 'done';
       case 'attn': this.sendAttn(); return 'done';
       case 'sysreq': this.sysreq(); return 'done';
+      // ADDED (Task 10): the CLI's `BackSpace()`, s3270's non-destructive cursor-left
+      // (`BackSpace_action`, kybd.c:2285) -- see `KeyAction`'s own comment on this kind for
+      // why it is not simply `{ kind: 'left' }`. The physical motion is identical to Left's
+      // (`k.left()`); only the lock classification in `run` differs, via `OERR_CLEARS`.
+      case 'backSpaceLeft': k.left(); return 'done';
       default: return action satisfies never;
     }
   }
@@ -2098,10 +2103,19 @@ export class Session {
    * That is why the not-connected check is here rather than left to `sendAID`, which throws.
    *
    * REFUSES ON AN INHIBITED KEYBOARD, WHERE x3270 WOULD QUEUE. It refuses outright on
-   * `KL_OIA_MINUS` and calls `enq_ta` on any other lock (`kybd.c:2858-2864`). We have no
-   * action queue and one is not worth inventing for a single key, so both become a refusal:
-   * the press is declined rather than deferred, nothing goes on the wire out of turn, and
-   * the OIA already shows the operator why.
+   * `KL_OIA_MINUS` and calls `enq_ta` on any other lock (`kybd.c:2858-2864`). At the time this
+   * was written there was no action queue and one was not worth inventing for a single key, so
+   * both became a refusal: the press is declined rather than deferred, nothing goes on the wire
+   * out of turn, and the OIA already shows the operator why.
+   *
+   * STALE AS OF Task 10: there IS a queue now (`Session.run`'s typeahead), and the OPERATOR'S
+   * `SysReq()` (CLI) and a keypad/menu SysReq button both reach it through `run`, which queues
+   * a locked `sysreq` kind exactly like every other action (matching `SysReq_action`'s own
+   * `enq_ta` for the non-`KL_OIA_MINUS` case, kybd.c:2858-2864, more closely than this method
+   * ever did alone). The inhibited-keyboard refusal right below is therefore unreachable from
+   * that route -- `run`/`drainTypeahead` only ever call this method once the keyboard is
+   * already unlocked -- and stays live only for a DIRECT caller (a CUT transfer's own AID path,
+   * which `run`'s doc comment says must bypass the queue).
    */
   sysreq(): void {
     if (this.telnet === undefined) {

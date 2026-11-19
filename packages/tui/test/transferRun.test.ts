@@ -386,6 +386,76 @@ describe('startTransfer', () => {
 });
 
 /**
+ * `session.transferring` (keyboard-semantics Task 10, spec section A's `KL_FT`): set where
+ * `startTransfer` registers the DFT engine, cleared inside `finish` -- the one place success,
+ * failure, a timeout and `cancel` all end through (see `finish`'s own comment) -- and, for a
+ * disconnect, by `Session.handleClose`'s backstop instead, since nothing here listens for
+ * `disconnect` and `finish` is therefore never reached on that path.
+ */
+describe('startTransfer: session.transferring', () => {
+  it('is true once registered and false once canceled', () => {
+    const { session } = withSpy(withField(in3270(makeSession(24, 80))));
+    expect(session.transferring).toBe(false);
+    const run = startTransfer({ ...base, session, files: fakeFiles(), request: aReceive(), command: 'x' });
+    expect(run.ok).toBe(true);
+    expect(session.transferring).toBe(true);
+
+    run.cancel!();
+    expect(session.transferring).toBe(false);
+  });
+
+  it('is false again after a timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      const { session } = withSpy(withField(in3270(makeSession(24, 80))));
+      startTransfer({
+        session, files: fakeFiles(), request: aReceive(), command: 'x',
+        onProgress: () => {}, onDone: () => {}, frameMs: 1000, totalMs: 5000,
+      });
+      expect(session.transferring).toBe(true);
+      await vi.advanceTimersByTimeAsync(1200);
+      expect(session.transferring).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('is false again once a DFT transfer completes successfully through transferEnd', async () => {
+    const { session, conn } = await connected();
+    let done: { ok: boolean } | undefined;
+    const run = startTransfer({
+      session, files: fakeFiles(), request: aReceive('/tmp/got.bin'),
+      command: 'IND$FILE GET A.BIN', onProgress: () => {}, onDone: (d) => { done = d; },
+    });
+    expect(run.ok).toBe(true);
+    expect(session.transferring).toBe(true);
+
+    for (const record of wholeDftDownload()) conn.host(...record);
+
+    expect(done?.ok).toBe(true);
+    expect(session.transferring).toBe(false);
+  });
+
+  /**
+   * THE ONE END PATH `finish` NEVER SEES: a disconnect fires `Session.handleClose` directly
+   * (`disconnect()` -> `conn.close()`/`handleClose()`), which clears the flag on its own --
+   * nothing in this module listens for `disconnect`, so without that backstop the flag would
+   * stay stuck on until a deadline this test does not even arm.
+   */
+  it('is cleared by the handleClose backstop on a disconnect mid-transfer', async () => {
+    const { session, conn } = await connected();
+    const run = startTransfer({ ...base, session, files: fakeFiles(), request: aReceive(), command: 'x' });
+    expect(run.ok).toBe(true);
+    expect(session.transferring).toBe(true);
+
+    session.disconnect();
+
+    expect(session.transferring).toBe(false);
+    void conn;
+  });
+});
+
+/**
  * THE ONE DELETION THIS DESIGN MAKES, and the tests that pin what replaced it.
  *
  * Under host-chooses-the-protocol the client cannot know CUT was chosen until the host has

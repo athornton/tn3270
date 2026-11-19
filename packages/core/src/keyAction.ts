@@ -17,9 +17,36 @@ export type KeyAction =
   | { kind: 'backspace' } | { kind: 'delete' } | { kind: 'eraseEOF' } | { kind: 'eraseInput' }
   | { kind: 'dup' } | { kind: 'fieldMark' }
   | { kind: 'insert' } | { kind: 'toggleInsert' }
-  | { kind: 'attn' } | { kind: 'sysreq' };
+  | { kind: 'attn' } | { kind: 'sysreq' }
+  // ADDED (Task 10): the CLI's `BackSpace()`, s3270's non-destructive cursor-left
+  // (`BackSpace_action`, Common/kybd.c:2285), kept as its OWN kind rather than reused as
+  // `{ kind: 'left' }` because the two do NOT behave alike under every lock state, which the
+  // task's own instruction asked to be checked rather than assumed: `Left_action` (kybd.c:2140)
+  // wraps its body in `OERR_CLEAR_OR_ENQ`, which under a PURE operator-error lock clears it
+  // and then moves the cursor; `BackSpace_action` instead does `if (kybdlock) { enq_ta(...);
+  // return true; }` unconditionally, and `enq_ta` -> `enq_xta` (kybd.c:270-291) DROPS an
+  // operator error with the bell rather than clearing it (its "operator error" test runs
+  // before its "queue" one, and there is no clear anywhere in that path). So a `BackSpace()`
+  // against `X Protected` must drop-and-alarm, not clear-and-move, which is exactly the
+  // "every other action" bucket `Session.run` already has -- hence NOT added to `OERR_CLEARS`
+  // below. Under a host lock (no OERR) both land in the same typeahead queue either way
+  // (`enq_xta`'s queueing branch and `OERR_CLEAR_OR_ENQ`'s `enq_ta` call are the same
+  // function), so the only observable difference is the OERR case.
+  | { kind: 'backSpaceLeft' };
 
-/** What `run` did with an action. The CLI turns `dropped`/`refused` into its errors. */
+/**
+ * What `run` did with an action.
+ *
+ * The CLI's `String()`, `Dup()` and `FieldMark()` turn `dropped`/`refused` into their own
+ * errors. `Enter()`, `Clear()`, `PF()`, `PA()`, `Attn()` and `SysReq()` do NOT (Task 10):
+ * s3270's own action functions for all six (`Common/kybd.c`: `Enter_action`, `PF_action:929`,
+ * `PA_action`, `Clear_action`, `Attn_action:982`, `SysReq_action:2849`) call `enq_ta`/`enq_xta`
+ * under ANY lock -- not connected, an operator error, or a host lock alike -- and then `return
+ * true` regardless; the one thing that fails any of them is `check_argc`'s argument-shape
+ * check, which this runner does its own way before ever calling `run`. Every other `KeyAction`
+ * kind reaching `run` from the CLI also discards the result, the same way `applyAction`
+ * (frontend) discards it for a key press.
+ */
 export type RunResult = 'done' | 'queued' | 'dropped' | 'refused';
 
 /**

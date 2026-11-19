@@ -182,10 +182,14 @@ export function applyAction(session: Session, action: Action): void {
       // here (the out-of-range `pf`/`pa` number that once coerced to AID 0x00, Dup/FieldMark
       // being typed characters and not AIDs, Sys Req's two wire forms). `actions.test.ts` still
       // pins the behaviour; it reads `session.ts`'s source for it now, not this switch's.
+      // `backSpaceLeft` ADDED (Task 10): the CLI's `BackSpace()` only -- no key or keypad
+      // button produces it (see `keyAction.ts`'s comment on the kind) -- but `KeyAction` is
+      // shared, so this switch must stay exhaustive over it like every other member.
       case 'type': case 'pf': case 'pa': case 'reset':
       case 'up': case 'down': case 'left': case 'right': case 'home': case 'tab': case 'backTab':
       case 'newline': case 'backspace': case 'delete': case 'eraseEOF': case 'eraseInput':
       case 'dup': case 'fieldMark': case 'insert': case 'toggleInsert': case 'attn': case 'sysreq':
+      case 'backSpaceLeft':
         session.run(action);
         break;
       // EXHAUSTIVENESS, WITH NO RUNTIME FOOTPRINT. `satisfies never` is a type-level assertion

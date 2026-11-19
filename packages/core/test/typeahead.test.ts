@@ -138,6 +138,24 @@ describe('Session.run: the unlocked path (Task 1)', () => {
     expect(conn.sent[0]).toBe(AID.ENTER);
   });
 
+  /**
+   * ADDED (Task 10): `{ kind: 'backSpaceLeft' }`, the CLI's `BackSpace()` -- a plain
+   * cursor-left (`k.left()`), not the destructive `backspace`/Erase kind. See `KeyAction`'s
+   * own comment for why this is a separate kind rather than `{ kind: 'left' }`.
+   */
+  it('moves the cursor left for backSpaceLeft without touching any cell', async () => {
+    const { session } = await connectedWithField();
+    session.screen.setChar(1, 0xc1); // A
+    session.screen.setChar(2, 0xc2); // B
+    session.keyboard.moveCursor(2);
+
+    expect(session.run({ kind: 'backSpaceLeft' })).toBe('done');
+
+    expect(session.screen.cursor).toBe(1);
+    expect(session.screen.cellAt(1).ebcdic).toBe(0xc1); // unchanged
+    expect(session.screen.cellAt(2).ebcdic).toBe(0xc2); // unchanged
+  });
+
   it('drops the action and changes nothing when not connected', () => {
     const { session } = newSession();
     const before = session.screen.cellAt(0).ebcdic;
@@ -338,6 +356,10 @@ describe('Session.run: operator-error lock (Task 3, oerrLock)', () => {
     { kind: 'sysreq' },
     { kind: 'insert' },
     { kind: 'toggleInsert' },
+    // ADDED (Task 10): s3270's BackSpace_action (kybd.c:2285) drops-and-alarms under an
+    // operator error via plain `enq_ta`, unlike Left_action's OERR_CLEAR_OR_ENQ -- see
+    // `KeyAction`'s own comment on this kind.
+    { kind: 'backSpaceLeft' },
   ];
 
   it('drops every non-clearing action with the alarm, leaving X Protected up', async () => {

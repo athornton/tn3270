@@ -236,15 +236,22 @@ describe('Reconnect()', () => {
 
   it('does NOT reconnect on Enter(), which the interactive front ends do', async () => {
     // THE DIVERGENCE, ASSERTED. `applyAction` reconnects on `enter`/`clear` while disconnected, and
-    // the CLI deliberately does not share that: a script that types Enter into a dead session gets
-    // s3270's own error, not a new socket to a mainframe. Without this test the two behaviors could
-    // be unified by accident and nothing would notice.
+    // the CLI deliberately does not share that: a script that types Enter into a dead session does
+    // NOT open a new socket to a mainframe. Without this test the two behaviors could be unified by
+    // accident and nothing would notice. `calls` staying at length 1 is the assertion that matters.
+    //
+    // CHANGED (keyboard-semantics Task 10): the reply itself no longer ends `error`/"not
+    // connected". `Enter()` now goes through `Session.run`, and s3270's own `Enter_action`
+    // (Common/kybd.c) treats "not connected" as just another `kybdlock` bit: it calls `enq_ta` ->
+    // `enq_xta`, whose very first check is "If no connection, forget it" (drop silently), and then
+    // `Enter_action` still `return`s `true`. So a script's `Enter()` against a dead session reports
+    // `ok` in s3270, not an error -- the divergence this test guards is ONLY that no socket opens,
+    // never that the verb complains.
     const { runner, calls } = spyingRunner();
     await runner.run('Connect(vm.example:3270)');
     await runner.run('Disconnect()');
     const reply = await runner.run('Enter()');
-    expect(reply.split('\n').pop()).toBe('error');
-    expect(reply).toContain('not connected');
+    expect(reply.split('\n').pop()).toBe('ok');
     expect(calls, 'Enter() dialled a host from a script').toHaveLength(1);
     expect(reply).toContain(' N N ');                 // still disconnected, field 4 and 5
   });
@@ -260,8 +267,12 @@ describe('reply format', () => {
   });
 
   it('ends a failed command with error', async () => {
+    // CHANGED (keyboard-semantics Task 10): this used to be `Enter` while not connected, but
+    // `Enter()` no longer fails that way (see "does NOT reconnect on Enter()" above) -- an
+    // out-of-range `PF` number is a failure that owes nothing to connection or lock state, so
+    // it keeps this test's actual point: SOME command failing ends the reply with `error`.
     const { runner } = newRunner();
-    const reply = await runner.run('Enter'); // not connected
+    const reply = await runner.run('PF(99)'); // out of range
     expect(reply.split('\n').pop()).toBe('error');
   });
 
@@ -352,6 +363,18 @@ describe('ScreenJson color', () => {
   });
 });
 
+/** A connected, negotiated runner whose keyboard is UNLOCKED: an Erase/Write with WCC 0xc3
+ * (restore) and one unprotected field (attr at 0, data from 1). Shared by every test below
+ * that needs to get past `AwaitingFirstWrite` before asserting on the wire. */
+async function unlockedRunner() {
+  const built = newRunner();
+  await built.runner.run('Connect(localhost:3270)');
+  built.conn.negotiate();
+  built.conn.host(SnaCmd.EW, 0xc3, Order.SF, 0x00, T.IAC, T.EOR);
+  built.conn.sent = [];
+  return built;
+}
+
 describe('typing and keys', () => {
   it('String types into a field', async () => {
     const { runner, session, conn } = newRunner();
@@ -365,11 +388,59 @@ describe('typing and keys', () => {
     expect(session.screen.cellAt(2).ebcdic).toBe(0xc2);
   });
 
-  it('PF(3) sends the right AID', async () => {
-    const { runner, conn } = newRunner();
+  /**
+   * CHANGED (keyboard-semantics Task 10): `String()` now goes through `Session.run`
+   * (spec section A, "one way in"), so a host lock QUEUES it instead of leaving the only
+   * option "refused" -- the text lands once the host restores the keyboard, same as a
+   * GUI/TUI keystroke since Task 9. `PF(3)` locks the keyboard (`SystemWait`) without
+   * writing anything, so the queued `String("Q")` has nowhere to land until the second
+   * write arrives.
+   */
+  it('String queues under a host lock and lands once the host restores', async () => {
+    const { runner, session, conn } = await unlockedRunner();
+    await runner.run('MoveCursor(0,1)');
+    await runner.run('PF(3)'); // locks: SystemWait
+    conn.sent = [];
+
+    const reply = await runner.run('String("Q")');
+    expect(reply.split('\n').pop()).toBe('ok');
+    expect(session.oia.typeahead).toBe(true);
+    expect(session.screen.cellAt(1).ebcdic).toBe(0x00); // not landed yet
+
+    conn.host(SnaCmd.W, 0x02, T.IAC, T.EOR); // keyboard-restore
+    expect(session.oia.typeahead).toBe(false);
+    expect(session.screen.cellAt(1).ebcdic).toBe(0xd8); // Q
+  });
+
+  /**
+   * `String(x)` on an OPERATOR-ERROR-locked session fails with `input inhibited`, the
+   * CLI's unchanged message (Task 10's own instruction: keep it). Covers both ways `run`
+   * can report that: the FIRST character into the protected field is 'refused' (this call
+   * itself raises `X Protected`); the SECOND is 'dropped' (the error is already up, so
+   * `run` alarms and drops rather than clearing it -- `type` is not in `OERR_CLEARS`).
+   */
+  it('String fails with input inhibited under an operator error, both raising it and already under it', async () => {
+    const { runner, session, conn } = newRunner();
     await runner.run('Connect(localhost:3270)');
     conn.negotiate();
-    conn.sent = [];
+    conn.host(SnaCmd.EW, 0xc3, Order.SF, FA.PROTECT, T.IAC, T.EOR);
+    await runner.run('MoveCursor(0,1)');
+
+    const first = await runner.run('String("A")'); // raises X Protected
+    expect(first.split('\n').pop()).toBe('error');
+    expect(first).toContain('data: input inhibited');
+    expect(session.oia.keyboard).toBe(KeyboardState.ProtectedField);
+
+    const onAlarm = vi.fn();
+    session.on('alarm', onAlarm);
+    const second = await runner.run('String("B")'); // already locked: dropped
+    expect(second.split('\n').pop()).toBe('error');
+    expect(second).toContain('data: input inhibited');
+    expect(onAlarm).toHaveBeenCalledTimes(1);
+  });
+
+  it('PF(3) sends the right AID', async () => {
+    const { runner, conn } = await unlockedRunner();
     await runner.run('PF(3)');
     expect(conn.sent[0]).toBe(AID.PF3);
   });
@@ -383,21 +454,100 @@ describe('typing and keys', () => {
   });
 
   it('PA(1) sends a short read: AID alone', async () => {
-    const { runner, conn } = newRunner();
-    await runner.run('Connect(localhost:3270)');
-    conn.negotiate();
-    conn.sent = [];
+    const { runner, conn } = await unlockedRunner();
     await runner.run('PA(1)');
     expect(conn.sent).toEqual([AID.PA1, T.IAC, T.EOR]);
   });
 
   it('Attn sends IAC BREAK', async () => {
+    const { runner, conn } = await unlockedRunner();
+    await runner.run('Attn');
+    expect(conn.sent).toEqual([T.IAC, T.BREAK]);
+  });
+
+  /**
+   * CHANGED (Task 10, decided from s3270's own sources rather than assumed): `PF_action`
+   * (kybd.c:929-945) calls `enq_ta`/`enq_xta` under ANY `kybdlock` -- including the pure
+   * operator-error bit -- and then `return true` regardless, so a script's `PF(1)` against
+   * `X Protected` reports `ok` in s3270, not `error`, even though nothing reached the host
+   * and the bell rang. `Enter`, `Clear`, `PA` and `Attn` are the identical shape
+   * (`Enter_action`, `Clear_action`, `PA_action`, and `Attn_action` for TN3270E,
+   * kybd.c:982-1002) and `SysReq_action` (kybd.c:2849-2870) too.
+   */
+  it('PF(1) under an operator error reports ok, drops with the alarm and puts nothing on the wire', async () => {
     const { runner, conn } = newRunner();
     await runner.run('Connect(localhost:3270)');
     conn.negotiate();
+    conn.host(SnaCmd.EW, 0xc3, Order.SF, FA.PROTECT, T.IAC, T.EOR);
+    await runner.run('MoveCursor(0,1)');
+    await runner.run('String("A")'); // raises X Protected
     conn.sent = [];
-    await runner.run('Attn');
-    expect(conn.sent).toEqual([T.IAC, T.BREAK]);
+
+    const reply = await runner.run('PF(1)');
+    expect(reply.split('\n').pop()).toBe('ok');
+    expect(conn.sent).toEqual([]);
+  });
+
+  /**
+   * `BackSpace()` is now s3270's NON-DESTRUCTIVE cursor-left (`BackSpace_action`,
+   * kybd.c:2285), not the old destructive null-in-place. `Erase()` is the new verb for
+   * destructive, closing-up erase (x3270's `Erase_action` -> `do_erase`, kybd.c:2374).
+   * THIS BREAKS ANY SCRIPT THAT USED `BackSpace()` TO ERASE (spec section C).
+   */
+  it('BackSpace() moves left without changing any cell', async () => {
+    const { runner, session } = await unlockedRunner();
+    session.screen.setChar(1, 0xc1); // A
+    session.screen.setChar(2, 0xc2); // B
+    await runner.run('MoveCursor(0,2)'); // cursor on B (cell 2)
+
+    const reply = await runner.run('BackSpace()');
+    expect(reply.split('\n').pop()).toBe('ok');
+    expect(session.screen.cursor).toBe(1);
+    expect(session.screen.cellAt(1).ebcdic).toBe(0xc1); // unchanged
+    expect(session.screen.cellAt(2).ebcdic).toBe(0xc2); // unchanged
+  });
+
+  /**
+   * `Erase()`: A B C D with the cursor on C becomes A C D NUL, cursor on C's new (B's old)
+   * address -- the same close-up `keyboard.test.ts` pins for `Keyboard.backspace()` (Task
+   * 6), reached here through the CLI's new verb for it.
+   */
+  it('Erase() deletes destructively and closes up the field', async () => {
+    const { runner, session } = await unlockedRunner();
+    session.screen.setFieldAttribute(5, FA.PROTECT); // field data is 1-4
+    session.screen.setChar(1, 0xc1); // A
+    session.screen.setChar(2, 0xc2); // B
+    session.screen.setChar(3, 0xc3); // C
+    session.screen.setChar(4, 0xc4); // D
+    await runner.run('MoveCursor(0,3)'); // cursor on C
+
+    const reply = await runner.run('Erase()');
+    expect(reply.split('\n').pop()).toBe('ok');
+    expect(session.screen.cursor).toBe(2); // B's old address
+    expect(session.screen.cellAt(1).ebcdic).toBe(0xc1); // A, untouched
+    expect(session.screen.cellAt(2).ebcdic).toBe(0xc3); // C, closed up into B's place
+    expect(session.screen.cellAt(3).ebcdic).toBe(0xc4); // D, closed up
+    expect(session.screen.cellAt(4).ebcdic).toBe(0x00); // NUL enters at the field's end
+  });
+
+  /**
+   * `Insert()` SETS insert mode on (x3270's `Insert_action`, kybd.c:3237) -- a second call
+   * leaves it on, unlike the old toggle. `ToggleInsert()` is the new verb for toggling.
+   */
+  it('Insert() sets insert mode on; twice still on', async () => {
+    const { runner, session } = await unlockedRunner();
+    await runner.run('Insert()');
+    expect(session.keyboard.insertMode).toBe(true);
+    await runner.run('Insert()');
+    expect(session.keyboard.insertMode).toBe(true);
+  });
+
+  it('ToggleInsert() toggles insert mode', async () => {
+    const { runner, session } = await unlockedRunner();
+    await runner.run('ToggleInsert()');
+    expect(session.keyboard.insertMode).toBe(true);
+    await runner.run('ToggleInsert()');
+    expect(session.keyboard.insertMode).toBe(false);
   });
 });
 
@@ -1495,6 +1645,80 @@ describe('Transfer(): failure paths', () => {
     expect(reply).toContain('checksum mismatch');
     expect(reply.split('\n').pop()).toBe('ok'); // NOT a failure
     expect(Array.from(files.store.get('/tmp/out.bin')!)).toEqual([0xc1, 0xc2]);
+  });
+});
+
+/**
+ * `session.transferring` (keyboard-semantics Task 10, spec section A's `KL_FT`): set where
+ * `transfer()` registers the DFT engine, cleared in the `finally` that wraps everything from
+ * there -- success, failure and a timeout all pass through it -- and, for a dropped
+ * connection, by `Session.handleClose`'s own backstop rather than this method's `finally`
+ * (which a disconnect need not ever reach).
+ */
+describe('Transfer(): session.transferring', () => {
+  it('is true during a successful transfer and false once it completes', async () => {
+    const { runner, session, conn } = await transferRunner();
+    expect(session.transferring).toBe(false);
+    const pending = runner.run('Transfer(Direction=receive,LocalFile=/tmp/out.bin,HostFile=FOO)');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(session.transferring).toBe(true);
+
+    controlCode(conn, StatusCode.HOST_ACK);
+    await new Promise((r) => setTimeout(r, 20));
+    controlCode(conn, StatusCode.XFER_COMPLETE);
+    const reply = await pending;
+
+    expect(reply.split('\n').pop()).toBe('ok');
+    expect(session.transferring).toBe(false);
+  });
+
+  it('is false again after the host aborts the transfer', async () => {
+    const { runner, session, conn } = await transferRunner();
+    const pending = runner.run('Transfer(Direction=receive,LocalFile=/tmp/out.bin,HostFile=NOPE)');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(session.transferring).toBe(true);
+
+    controlCode(conn, StatusCode.HOST_ACK);
+    await new Promise((r) => setTimeout(r, 20));
+    controlCode(conn, StatusCode.ABORT_FILE, 'DATA SET NOT FOUND');
+    const reply = await pending;
+
+    expect(reply.split('\n').pop()).toBe('error');
+    expect(session.transferring).toBe(false);
+  });
+
+  it('is false again after a timeout', async () => {
+    const { runner, session, conn } = await transferRunner({ transferFrameSeconds: 0.1 });
+    const pending = runner.run('Transfer(Direction=receive,LocalFile=/tmp/out.bin,HostFile=FOO)');
+    await new Promise((r) => setTimeout(r, 20));
+    controlCode(conn, StatusCode.HOST_ACK);
+    expect(session.transferring).toBe(true);
+    // ...and then nothing: the frame deadline fires.
+    const reply = await pending;
+
+    expect(reply.split('\n').pop()).toBe('error');
+    expect(session.transferring).toBe(false);
+  });
+
+  /**
+   * THE ONE END PATH `transfer()`'s OWN `finally` NEVER SEES: a disconnect mid-transfer runs
+   * `Session.handleClose` synchronously (`disconnect()` -> `conn.close()`/`handleClose()`
+   * directly), which clears the flag immediately -- well before `runTransferFrames`' poll loop
+   * ever notices the connection is gone and times out on its own.
+   */
+  it('is cleared immediately by the handleClose backstop on a disconnect mid-transfer', async () => {
+    const { runner, session, conn } = await transferRunner({ transferFrameSeconds: 0.1 });
+    const pending = runner.run('Transfer(Direction=receive,LocalFile=/tmp/out.bin,HostFile=FOO)');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(session.transferring).toBe(true);
+
+    session.disconnect();
+    expect(session.transferring).toBe(false); // the backstop, not transfer()'s own finally
+    void conn;
+
+    const reply = await pending; // drains the still-pending call once its deadline fires
+    expect(reply.split('\n').pop()).toBe('error');
+    expect(session.transferring).toBe(false);
   });
 });
 
