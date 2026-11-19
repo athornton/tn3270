@@ -420,6 +420,9 @@ export class Session {
    * `oia.typeahead` -- x3270's `flush_ta`, called from `kybd_connect` (kybd.c:591).
    */
   private readonly typeahead: KeyAction[] = [];
+
+  /** A 3270 write was processed in the current received chunk; `conn.onData` drains after it. */
+  private drainDue = false;
   /**
    * Set by a transfer driver (Task 10) for the whole of a DFT or CUT transfer in progress --
    * x3270's `KL_FT`. While true, `run` drops a locked-keyboard action with the alarm instead
@@ -908,6 +911,18 @@ export class Session {
       if (this.conn !== conn) return;
       this.telnet?.receive(bytes);
       this.oia.tn3270Mode = this.is3270Mode();
+      // THE TYPEAHEAD DRAIN RUNS ONCE PER RECEIVED CHUNK, after every record in it, not after
+      // each write as x3270's `ps_process` does (Common/ctlr.c:2188, :2652-2655). TSO's logon
+      // sends a restoring Erase/Write and a Read Partition Query back to back; draining between
+      // them put a queued AID ahead of our Query Reply, and TSO read it in the reply's place
+      // (`IKTXLOG TGET RC=X'18'`, docs/live-testing.md, *The keyboard semantics, from the GUI
+      // against VM/370 — 2026-11-19*). Waiting for the chunk lets the Query be answered first;
+      // its enter-inhibit then holds the queue until the host's next write. A deliberate
+      // divergence, the user's decision of 2026-11-19.
+      if (this.drainDue && this.conn === conn) {
+        this.drainDue = false;
+        this.drainTypeahead();
+      }
     };
     conn.onClose = () => { if (this.conn === conn) this.handleClose(); };
     conn.onError = (err) => {
@@ -1052,6 +1067,7 @@ export class Session {
     // typing keystrokes the operator aimed at a host that is already gone.
     this.typeahead.length = 0;
     this.oia.typeahead = false;
+    this.drainDue = false;
     // `transferring` IS ALSO A BACKSTOP HERE, not only the transfer driver's job (Task 10):
     // a dropped connection must never leave future keystrokes dropped-with-alarm forever
     // because nothing else cleared the flag -- the same "one teardown path clears it, another
@@ -1327,7 +1343,10 @@ export class Session {
     // both of `executeRecord`'s `emit('screen')` sites (the one above, and `programCheck`'s)
     // with one call. Never reached if the catch's own re-throw fires (our bug, not the
     // host's) -- a client that has crashed does not go on to drain a queue.
-    this.drainTypeahead();
+    //
+    // MARKED HERE, RUN BY `conn.onData` once the whole received chunk has been processed (see
+    // the comment there): a Query in the same chunk must be answered before a queued AID.
+    this.drainDue = true;
   }
 
   /**
