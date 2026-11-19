@@ -1327,14 +1327,18 @@ gate, in the order agreed 2026-11-17; each milestone gets its own spec, plan and
 
 15. **Store parity with x3270**, in eight milestones:
    - **15a. Correctness first.** Behaviour bugs the checklist found in core, which every front end
-     shares: AID and editing keys act while the keyboard is locked, where x3270 queues them
-     (`typeahead`, `aid-keys`, `cursor-movement`, the erase keys); insert mode survives an AID and
-     Reset (`insert-mode`, `reset-key`); `oerr-lock`, `numeric-lock`; `attn` sends BREAK on TN3270E
-     where x3270 sends IP. Blink and intensify are now drawn in the canvas front ends, and the
-     host's alarm now rings, with `-visualbell` to flash instead of ringing it (`highlight-bold`,
-     `bell`; see *Using the GUI*, *Using the TUI* and *Using the web gateway*). ascii transfers do
-     no local CR/LF conversion (`file-transfer`), and x3270's default code page is `bracket`, not
-     cp037 (`code-page`).
+     shares, fixed in three parts. **Part 3, keyboard semantics, is done on branch
+     `keyboard-semantics`:** a typeahead queue now holds AID and editing keys behind a host lock
+     instead of letting them act at once, and an operator error locks the keyboard until a cursor
+     move or Reset, as x3270 does (`typeahead`, `aid-keys`, `cursor-movement`, the erase keys,
+     `oerr-lock`); insert mode now turns off on an AID, Reset and a host keyboard-restore
+     (`insert-mode`, `reset-key`); `numeric-lock` now matches x3270's off-by-default; and `attn`
+     sends `IAC IP` on a bound TN3270E session and locks with `X -f` when unbound, rather than
+     always sending BREAK. Part 2, blink and intensify, drawn in the canvas front ends, and the
+     host's alarm, which now rings, with `-visualbell` to flash instead of ringing it
+     (`highlight-bold`, `bell`; see *Using the GUI*, *Using the TUI* and *Using the web gateway*).
+     Part 1, ascii transfers doing no local CR/LF conversion (`file-transfer`). **Still open:**
+     x3270's default code page is `bracket`, not cp037 (`code-page`).
    - **15b. The rest of the GUI ("milestone B").** `File` → `Connect…` and Disconnect in a running
      window (`connect-host`, `disconnect`), recent hosts and a host list, a config file and
      preferences (`save-options`), color scheme, model and font menus, light and dark modes, the
@@ -1446,29 +1450,6 @@ worse than one that says which quarter is missing.
 The complete feature-by-feature comparison with x3270 is **[docs/parity.md](docs/parity.md)**,
 generated from `docs/parity/checklist.yaml`; the items below are the ones worth prose.
 
-- **`Attn` SENDS TELNET BREAK EVEN ON A TN3270E SESSION, WHERE x3270 SENDS `IAC IP`.** Found
-  2026-10-06, while reviewing a *comment* about Attn during the keypad work — so it is an
-  unverified divergence rather than an observed failure. `Session.sendAttn()` is unconditional
-  `IAC BREAK` (`core/src/telnet.ts:227`), which is right for a classic TN3270 session
-  (RFC 1576 §8). But x3270's `Attn_action` is documented *"ATTN key, per RFC 2355. **Sends IP,
-  regardless**"* and its first branch is `if (IN_E) { if (net_bound()) net_interrupt(0); }`
-  (`Common/kybd.c:978-1002`) — `IAC IP`, with `net_break` only on the non-E fallthrough. x3270
-  also records that its separate `Interrupt()` action "is now the same as the Attn action"
-  (`:1008`), so the two have *converged* there rather than staying distinct.
-  **A SECOND CLAIM ABOUT THE CLASSIC BRANCH WAS DRAFTED AND WITHDRAWN, AND THE WITHDRAWAL IS
-  WORTH RECORDING.** A newer upstream `Attn_action` sends `ctlr_read_modified(AID_PA1, false)`
-  *before* `net_break(0)` — PA1 then BREAK, commented "This is what PCOMM does in plain TN3270
-  mode" — which would be a divergence in the branch we *do* take, against the hosts we *do* have.
-  **But that line does not exist in suite3270 4.5**, the tree in `~/src/suite3270-4.5` that every
-  other x3270 citation in this project is measured against: there the `IN_3270` arm is a bare
-  `net_break(0)`, and `grep -rn 'ctlr_read_modified(AID_PA1' Common/*.c` finds nothing. So it is
-  a divergence from a *later* x3270 and not from our reference — worth knowing if the pinned
-  version ever moves, and a reminder that a citation without a version is not a measurement.
-  **The asymmetry inside our own code is the strongest hint this is an oversight:**
-  `Session.sysreq()` (`core/src/session.ts:1886`) *does* branch on `inTn3270e()` and check the
-  negotiated function, and `sendAttn()` immediately below it does neither. **Nothing tests Attn in
-  E mode**, and neither Hercules host here offers TN3270E, so there is no witness either way —
-  which is also why it has not been "fixed" on a guess. Whoever takes it needs a TN3270E host.
 - **No client certificates.** TLS works (see *Connecting over TLS*), but only for
   authenticating the host. `-certfile`/`-keyfile`/`-clientcert`, `-accepthostname`,
   `-cadir`, DER files, protocol-version pinning and negotiated `START_TLS` are all
