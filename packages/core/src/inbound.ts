@@ -104,11 +104,16 @@ function modifiedData(screen: Screen, all: boolean): number[] {
     const data: number[] = [];
     let a = field.start;
     for (let n = 0; n < field.length; n++) {
-      data.push(screen.cellAt(a).ebcdic);
+      const ebcdic = screen.cellAt(a).ebcdic;
+      // NO NULL IS TRANSMITTED, embedded or trailing: "A major feature of the read modified
+      // operation is null suppression. Only non-null character data ... [is] transmitted"
+      // (GA23-0059, ~/3270/ref/pages.txt:2174-2177), and x3270 sends a cell only
+      // `if (send_data && ea_buf[baddr].ec)` (Common/ctlr.c:831). Until 2026-11-19 this kept
+      // embedded NULs, a rule from the stage-1 plan that TK5's TSO logon showed on the wire as
+      // 57 `00` bytes between a field's start and the typed text.
+      if (ebcdic !== 0x00) data.push(ebcdic);
       a = screen.inc(a);
     }
-    // Trailing nulls are not transmitted; embedded ones are.
-    while (data.length > 0 && data[data.length - 1] === 0x00) data.pop();
 
     // A modified field ALWAYS gets its SBA, even with no content left after
     // trimming. x3270 writes the SBA the moment it finds a modified field, before

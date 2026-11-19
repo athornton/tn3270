@@ -98,6 +98,12 @@ dropped with the alarm.
 
 ### Draining (x3270's `run_ta`, `kybd.c:351`, called as `while (run_ta())` at `ctlr.c:2654`)
 
+**Amended 2026-11-19 after the TK5 witness (the user's decision): the drain runs once per received
+chunk, after every record in it, not after each write as x3270's `ps_process` does.** TSO's logon
+sends a restoring Erase/Write and a Read Partition Query back to back; draining between them sent
+a queued AID ahead of our Query Reply and TSO read it in the reply's place. A deliberate
+divergence from x3270.
+
 After `Session` has processed each host write, it runs queued actions one at a time, oldest
 first, for as long as the keyboard is unlocked and the queue is non-empty. A queued AID locks the
 keyboard again, so whatever follows it waits for the next unlock. Each drained action goes through

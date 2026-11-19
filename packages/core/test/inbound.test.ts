@@ -73,7 +73,12 @@ describe('ordinary reads', () => {
     expect(Array.from(out.subarray(3))).toEqual([Order.SBA, 0x40, 0xc1, 0xc1]);
   });
 
-  it('sends embedded nulls but not trailing ones', () => {
+  // GA23-0059: "A major feature of the read modified operation is null suppression. Only
+  // non-null character data ... [is] transmitted" (~/3270/ref/pages.txt:2174-2177), and x3270
+  // sends a cell only `if (send_data && ea_buf[baddr].ec)` (Common/ctlr.c:831). This test said
+  // the opposite until 2026-11-19, from the stage-1 plan; TK5's TSO logon caught it on the wire
+  // (docs/live-testing.md, *The keyboard semantics, from the GUI against VM/370 — 2026-11-19*).
+  it('suppresses every null, embedded as well as trailing', () => {
     const s = new Screen();
     s.setFieldAttribute(0, 0x00);
     s.setChar(1, 0xc1);
@@ -82,7 +87,7 @@ describe('ordinary reads', () => {
     s.cursor = 4;
     const out = buildReadModified(s, AID.ENTER, false);
     expect(Array.from(out.subarray(3))).toEqual([
-      Order.SBA, 0x40, 0xc1, 0xc1, 0x00, 0xc2,
+      Order.SBA, 0x40, 0xc1, 0xc1, 0xc2,
     ]);
   });
 

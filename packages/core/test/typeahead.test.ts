@@ -357,6 +357,51 @@ describe('Session.run: the typeahead queue under a host lock (Task 2)', () => {
   });
 });
 
+describe('the drain waits for the whole received chunk (2026-11-19, TK5)', () => {
+  /**
+   * TSO's logon sends its restoring Erase/Write and, in the very next record, a Read Partition
+   * Query. Draining after the first record put a queued AID on the wire BEFORE our Query Reply,
+   * and TSO read it in the reply's place (`IKTXLOG TGET RC=X'18'`; docs/live-testing.md, *The
+   * keyboard semantics, from the GUI against VM/370 — 2026-11-19*). x3270 drains per write and
+   * would do the same; we drain once per received chunk instead, by the user's decision.
+   */
+  const QUERY = [SnaCmd.WSF, 0x00, 0x05, 0x01, T.IAC, T.IAC, 0x02] as const;
+
+  it('answers a Query in the same chunk before any queued AID, and holds the AID', async () => {
+    const { session, conn } = await connectedWithField();
+    session.keyboard.moveCursor(1);
+    session.run({ kind: 'enter' });
+    session.run({ kind: 'type', text: 'X' });
+    session.run({ kind: 'enter' });
+    conn.sent = [];
+
+    // ONE chunk: a restoring Write, then the Query.
+    conn.host(SnaCmd.W, 0x02, T.IAC, T.EOR, ...QUERY, T.IAC, T.EOR);
+
+    expect(conn.sent[0]).toBe(0x88); // the Query Reply, and nothing before it
+    expect(conn.sent).not.toContain(AID.ENTER);
+    expect(session.oia.keyboard).toBe(KeyboardState.EnterInhibit);
+    expect(session.oia.typeahead).toBe(true);
+
+    // The host's next restoring write lets the queue run.
+    conn.sent = [];
+    conn.host(SnaCmd.W, 0x02, T.IAC, T.EOR);
+    expect(conn.sent[0]).toBe(AID.ENTER);
+    expect(session.screen.cellAt(1).ebcdic).toBe(0xe7); // X
+    expect(session.oia.typeahead).toBe(false);
+  });
+
+  it('still drains when the Query arrives in a later chunk', async () => {
+    const { session, conn } = await connectedWithField();
+    session.keyboard.moveCursor(1);
+    session.run({ kind: 'enter' });
+    session.run({ kind: 'type', text: 'X' });
+    conn.host(SnaCmd.W, 0x02, T.IAC, T.EOR);
+    expect(session.screen.cellAt(1).ebcdic).toBe(0xe7);
+    expect(session.oia.typeahead).toBe(false);
+  });
+});
+
 describe('Session.run: operator-error lock (Task 3, oerrLock)', () => {
   /**
    * Everything OERR_CLEARS does NOT name: typed characters, the AIDs, SysReq and
