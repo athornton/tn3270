@@ -76,6 +76,16 @@ export class Oia {
   tn3270Mode = false;
   waitingForHost = false;
   insertMode = false;
+  /**
+   * The typeahead queue (`Session.run`'s `typeahead` array) holds at least one action.
+   *
+   * x3270's status line shows this in its own fixed column (`x3270/status.c`'s
+   * `TYPEAHD`, `(maxCOLS-33)`, `do_typeahead`), independent of the lock message and the
+   * insert caret. We render parts as a plain sequence rather than a column layout, so
+   * there is no positional rule to match -- only that a standalone `'T'` part appears
+   * while true and is absent while false. See `toText`.
+   */
+  typeahead = false;
   keyboard: KeyboardState = KeyboardState.Unlocked;
   /** Set alongside KeyboardState.ProgramCheck. */
   programCheckCode: number | undefined;
@@ -248,6 +258,13 @@ export class Oia {
         break;
     }
 
+    // After the keyboard-state part, as the plan asks: this is a FACT ABOUT THE
+    // QUEUE, not about the current lock, so a locked keyboard with a non-empty queue
+    // shows both (e.g. "X SYSTEM  T"). Never appears while disconnected -- `Session.run`
+    // drops rather than queues when `!isConnected()`, and `handleClose` empties the
+    // queue and clears this flag -- so it does not enter the width budget measured
+    // below the disconnected branch above.
+    if (this.typeahead) parts.push('T');
     if (this.waitingForHost) parts.push('X Wait');
     if (this.insertMode) parts.push('^');
     return parts.join('  ');

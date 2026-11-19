@@ -1307,6 +1307,70 @@ like a blink that never flipped. `decodePng` in `scripts/smoke-lib.mjs` reads th
   flash handlers, the tone through an injected AudioContext, one context reused, a malformed alarm
   dropped).
 
+## The keyboard semantics, from the GUI against VM/370 — 2026-11-19
+
+Branch `keyboard-semantics` at `ddec36a`, the Electron GUI under Xvfb, through the recording relay
+of *The four keys and reconnect, from the GUI against VM/370 and TK5 — 2026-11-17* (its `run.mjs`,
+saved as `run2.mjs` with ONE change: a `DELAY_MS` environment variable that holds every
+host-to-client chunk back by that many milliseconds, in order -- the host is still the real host,
+it just answers as slowly as a busy one would). Keys go through `TN3270_GUI_KEYS`, 150 ms apart.
+Each run below was designed so that `main` (`b4fd071`) would put different bytes on the wire. No
+logon was attempted.
+
+```js
+// run2.mjs: the only change from run.mjs -- the host-to-client handler.
+host.on("data", (b) => { const delay = Number(process.env.DELAY_MS ?? 0); if (delay > 0) { setTimeout(() => { rec(c, "<", b); if (!client.destroyed) client.write(b); }, delay); } else { rec(c, "<", b); client.write(b); } });
+```
+
+- **Typeahead, and an AID queued behind an AID** —
+  `DELAY_MS=1500 node run2.mjs vm-typeahead-delay 3270 'wait:VM/370|CP READ,Enter,l,o,g,o,n,Enter,wait:DMKLOG020E'`.
+  The first Enter went out at 6.886 s (`7d 5b 60 11 5b 60 ff ef`); `l o g o n` and the second Enter
+  were pressed between 7.04 and 7.64 s, with the keyboard locked and nothing on the wire. VM's
+  restoring write was delivered at 8.388 s and the queued keys ran 3 ms later:
+  `8.391 c1 > 7d 5b e5 11 5b 60 93 96 87 96 95 ff ef` -- `logon` in EBCDIC, then VM's
+  `DMKLOG020E USERID MISSING OR INVALID`. `main` refused typing under a host lock and sent the
+  second Enter at once, bare. **Without the delay** (`vm-typeahead`) VM answered the first Enter in
+  ~100 ms, before the first letter went out, so that run proves nothing about the queue; that is
+  why the delay exists.
+- **oerr-lock** — `node run2.mjs vm-oerr 3270 'wait:VM/370,Enter,wait:CP READ,Up,a,Enter,Tab,c,Enter'`.
+  Up puts the cursor in CP's protected output area and `a` raises X Protected. The Enter after it
+  sent NOTHING. Tab cleared the error and moved to the input line, and the only AID after the
+  logo's was `4.564 c1 > 7d 5b 61 11 5b 60 83 ff ef`, the `c` alone (VM: `DMKCFC001E ?CP: C`). On
+  `main` that Enter would have sent an AID. The bell itself is not observable under Xvfb (no audio).
+- **Insert off after an AID, insert off after Reset, Erase closing up** —
+  `node run2.mjs vm-insert-erase 3270 'wait:VM/370,Enter,wait:CP READ,Insert,Enter,a,b,c,Left,Left,Left,x,Enter,Insert,Control+R,a,b,c,Left,Left,Left,y,Enter,a,b,c,d,Left,Left,Left,Backspace,z,Enter'`.
+  The three AIDs carrying data were `7d 5b 61 11 5b 60 a7 82 83` (`xbc`: insert ended with the
+  Enter -- on `main`, `xabc`), `... a8 82 83` (`ybc`: insert ended with Reset, Ctrl-R -- on `main`,
+  `yabc`) and `... a9 83 84` (`zcd`: Backspace on `b` erased `a` and closed up the field -- on
+  `main`, which nulled the cell and left the gap, `zbcd`).
+- **Not witnessed live:** Delete and EraseEOF on an unformatted screen (tests only), the TK5 runs,
+  and Attn on TN3270E (no TN3270E host).
+- VM failed to free its terminal between sessions three times (only Hercules' banner, a 60-90 s
+  timeout); waiting 30-60 s and re-running worked each time, as recorded on 2026-11-17.
+
+## Typeahead and the operator-error lock, from the CLI against VM/370 — 2026-11-19
+
+Branch `keyboard-semantics` at `7421245`, the CLI (`packages/cli/dist/main.js -insecure`),
+against VM/370 CE on `localhost:3270`, not logged on. The CLI reaches the keyboard through the
+same `Session.run` as the GUI, the browser and the TUI; the GUI witnesses in the spec are still
+owed.
+
+```bash
+printf 'Connect(127.0.0.1:3270)\nWait(3270Mode,20)\nWait(Settle,10)\nScreenText\nEnter\nString("logon cmsuser")\nWait(Settle,10)\nScreenText\nMoveCursor(0,0)\nString("a")\nString("b")\nTab\nString("c")\nScreenText\nQuit\n' \
+  | node packages/cli/dist/main.js -insecure
+```
+
+- **Typeahead:** on the logo screen, `Enter` locked the keyboard (status field 1 `L`), and the
+  `String("logon cmsuser")` sent straight after it answered `ok` with the keyboard still `L`:
+  queued, not refused (before this branch it failed with `input inhibited`). After
+  `Wait(Settle)` the CP READ screen showed `logon cmsuser` on row 22 with the cursor at column
+  13: the queued text ran when VM unlocked the keyboard.
+- **oerr-lock:** `MoveCursor(0,0)` (a protected cell) then `String("a")`: `error`,
+  `input inhibited`, keyboard `L`, field 3 `P` (X Protected). `String("b")`: `error` again,
+  dropped. `Tab`: `ok`, keyboard `U`, cursor 22,0. `String("c")`: `ok`, and the input line read
+  `cogon cmsuser` (overtyping, insert off). Before this branch `b` would have gone in under the
+  still-displayed X Protected.
+
 ## Step 1 — Confirm the host is reachable
 
 Substitute the real host and port (do not guess; get these from whoever

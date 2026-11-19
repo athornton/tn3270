@@ -6,6 +6,7 @@ import {
 } from '../src/constants.js';
 import { NO_BIND_TIMEOUT_MS, BIND_OFF, BIND_RU as BIND_RU_BYTE } from '../src/bind.js';
 import { MODEL_4 } from '../src/constants.js';
+import { KeyboardState } from '../src/oia.js';
 
 const ascii = (s: string): number[] => Array.from(s, (c) => c.charCodeAt(0) & 0xff);
 
@@ -1042,5 +1043,124 @@ describe('TN3270E SYSREQ', () => {
     conn.clear();
     session.sendAID(AID.ENTER);
     expect(conn.writes.at(-1)!.slice(0, 5)).toEqual([0, 0, 0, 0, 0]);
+  });
+});
+
+/**
+ * Task 8: `Attn_action` (kybd.c:982-1002). `IN_E` branches on `net_bound()`
+ * (`Session.inTn3270e() && Session.bound`, the latter set by `handleBind`, Task 8's
+ * section of session.ts): bound sends `net_interrupt` (`IAC IP`); unbound sends
+ * nothing and raises `KL_OIA_MINUS` instead (`vstatus_minus()` +
+ * `kybdlock_set(KL_OIA_MINUS, AnAttn)`). `IN_3270` (classic) is unchanged and is
+ * already pinned by session.test.ts's "sends Attn as IAC BREAK rather than an AID".
+ *
+ * No TN3270E host is reachable here (the spec says so explicitly), so every case
+ * below is driven through `FakeConnection`, exactly as the BIND-gate tests above.
+ */
+describe('TN3270E Attn', () => {
+  const GRANT_BIND_IMAGE = [Tn3270eFunc.BIND_IMAGE, Tn3270eFunc.RESPONSES];
+  const BIND_RU = 0x31;
+  const bind = (): number[] =>
+    [Tn3270eDataType.BIND_IMAGE, 0x00, 0x00, 0x00, 0x00, BIND_RU, T.IAC, T.EOR];
+
+  it('sends IAC IP, not IAC BREAK, once bound', async () => {
+    const { session, conn } = newSession();
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE(GRANT_BIND_IMAGE);
+    conn.host(...bind());
+    conn.clear();
+
+    session.sendAttn();
+
+    expect(conn.writes).toEqual([[T.IAC, T.IP]]);
+  });
+
+  it('sends nothing and raises the OIA minus-function lock while unbound', async () => {
+    // Ordinary TN3270E negotiation (the default grant, as every other describe block
+    // in this file but "the BIND gate" uses) never sets `bound` at all, so this session
+    // is E but unbound for its whole life -- exactly the case Attn_action's `else` arm
+    // covers.
+    const { session, conn } = newSession();
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE();
+    conn.clear();
+
+    session.sendAttn();
+
+    expect(conn.writes).toEqual([]);
+    expect(session.oia.keyboard).toBe(KeyboardState.MinusFunction);
+    expect(session.oia.toText()).toContain('X -f');
+  });
+
+  it('clears the minus-function lock on Reset', async () => {
+    const { session, conn } = newSession();
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE();
+    session.sendAttn();
+    expect(session.oia.keyboard).toBe(KeyboardState.MinusFunction);
+
+    session.run({ kind: 'reset' });
+
+    expect(session.oia.keyboard).toBe(KeyboardState.Unlocked);
+  });
+});
+
+/**
+ * Final review #2: `SysReq_action`'s `IN_E` arm (kybd.c:2849-2870) calls `net_abort()`
+ * with no `kybdlock` test at all -- only the classic (non-E) arm goes through `key_AID`
+ * and the ordinary queueing rules. `Session.run` must perform a TN3270E `sysreq`
+ * immediately, bypassing the typeahead queue, the same way `attn` does (see
+ * `core/test/typeahead.test.ts`'s "Attn and TN3270E SysReq bypass kybdlock entirely").
+ */
+describe('Session.run: TN3270E SysReq bypasses kybdlock entirely (final review #2)', () => {
+  it('sends IAC AO at once under a host lock (SystemWait)', async () => {
+    const { session, conn } = newSession();
+    await session.connect('127.0.0.1', 992);
+    conn.negotiateE(); // grants SYSREQ (the default grant)
+    conn.host(...hdr(), ...WRITE_FIELD, T.IAC, T.EOR);
+    conn.clear();
+
+    session.run({ kind: 'enter' }); // AID -> locks SystemWait
+    expect(session.oia.keyboard).toBe(KeyboardState.SystemWait);
+    conn.clear();
+
+    const r = session.run({ kind: 'sysreq' });
+
+    expect(r).toBe('done');
+    expect(conn.writes).toEqual([[T.IAC, T.AO]]);
+    expect(session.oia.typeahead).toBe(false);
+    expect(session.oia.keyboard).toBe(KeyboardState.SystemWait); // untouched
+  });
+});
+
+/**
+ * Final review #4: x3270's `enq_xta` drops unless `IN_3270 || IN_NVT || IN_SSCP`
+ * (kybd.c:276-279). `CONNECTED_UNBOUND` -- TN3270E negotiated, BIND-IMAGE agreed, but
+ * no BIND seen yet -- is none of those (include/globals.h:284-291,
+ * `cIN_3270`/`cIN_NVT`/`cIN_SSCP`). Before this fix, `Session.run`'s gate was
+ * `isConnected()` plus the OIA's own lock state, which says nothing about `bound`, so a
+ * key pressed on a negotiated-but-unbound E session got queued rather than dropped.
+ *
+ * BIND-IMAGE MUST BE GRANTED FOR "UNBOUND" TO BE REACHABLE AT ALL: a host that never
+ * agrees the function makes x3270 jump straight to `CONNECTED_TN3270E` the moment
+ * negotiation completes ("If the host does not support BIND_IMAGE, then we must go
+ * straight to 3270 mode", Common/telnet.c:2334-2339) -- `negotiateE()`'s default grant
+ * (RESPONSES, SYSREQ, no BIND_IMAGE) is exactly that case, so it must NOT be used here,
+ * or this test would pin the wrong state.
+ */
+describe('Session.run: unbound TN3270E drops a key rather than queuing it (final review #4)', () => {
+  it('drops Enter while negotiated but unbound', async () => {
+    const { session, conn } = newSession();
+    await session.connect('127.0.0.1', 992);
+    // DEVICE-TYPE+FUNCTIONS complete, BIND-IMAGE agreed, but no BIND record sent --
+    // x3270's CONNECTED_UNBOUND, not CONNECTED_TN3270E.
+    conn.negotiateE([Tn3270eFunc.BIND_IMAGE, Tn3270eFunc.RESPONSES]);
+    conn.clear();
+
+    const r = session.run({ kind: 'enter' });
+
+    expect(r).toBe('dropped');
+    expect(session.oia.typeahead).toBe(false);
+    expect(conn.writes).toEqual([]);
   });
 });

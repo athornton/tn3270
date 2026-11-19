@@ -1,5 +1,5 @@
 import {
-  Session, AID, PF_AIDS, PA_AIDS, pfAID, paAID, KeyboardState,
+  Session, AID, PF_AIDS, PA_AIDS, KeyboardState,
   CutTransfer, DftTransfer, looksLikeCutFrame, type TransferResult, resolve,
   parseOversize, type GeometrySetting,
 } from '@tn3270/core';
@@ -312,12 +312,35 @@ export class Runner {
         return;
       }
 
-      case 'String':
-        if (!k.typeString(args[0] ?? '')) throw new Error('input inhibited');
+      // CHANGED (keyboard-semantics Task 10): routed through `Session.run`, the one way in
+      // (spec section A), rather than calling `Keyboard.typeString` directly. A host lock now
+      // QUEUES it -- the text lands once the host restores the keyboard, same as a GUI/TUI
+      // keystroke since Task 9 -- so this throws its unchanged message only on 'dropped' (not
+      // connected, an operator error already up, or a transfer in progress) or 'refused'
+      // (this very call raised the operator error, e.g. a protected field). 'queued' and
+      // 'done' are both success from the script's point of view.
+      case 'String': {
+        const result = s.run({ kind: 'type', text: args[0] ?? '' });
+        if (result === 'dropped' || result === 'refused') throw new Error('input inhibited');
         return;
+      }
 
-      case 'Enter': s.sendAID(AID.ENTER); return;
-      case 'Clear': s.sendAID(AID.CLEAR); return;
+      // ENTER, CLEAR, PF, PA, ATTN, SYSREQ: NONE OF THEM THROW ON A LOCKED OR QUEUED RESULT.
+      //
+      // Checked against s3270's own sources rather than assumed, per the task's instruction:
+      // `Enter_action`, `PF_action` (kybd.c:929-945), `PA_action`, `Clear_action` and
+      // `SysReq_action` (kybd.c:2849-2870) each test `kybdlock` -- NOT CONNECTED, an operator
+      // error, and a host lock are all just bits of it -- call `enq_ta`/`enq_xta` (which drops
+      // with the bell or queues, depending which bit), and then `return true` UNCONDITIONALLY.
+      // `Attn_action` (kybd.c:982-1002) does not even test `kybdlock` for a classic 3270
+      // session. The ONE way any of the six fails in s3270 is `check_argc`'s argument-shape
+      // check, which this runner already does its own way (the PF()/PA() range checks below,
+      // and the N-argument checks on Dup/FieldMark/SysReq further down) -- never by way of the
+      // KEY having been locked out. So `Session.run`'s result here is exactly as uninteresting
+      // to the script as the GUI/TUI/browser already find it (`frontend/src/actions.ts`
+      // discards it the same way), and is deliberately not even bound to a variable.
+      case 'Enter': s.run({ kind: 'enter' }); return;
+      case 'Clear': s.run({ kind: 'clear' }); return;
 
       // THE BOUNDS COME FROM CORE'S TABLES, not from the literals 24 and 3 that used to be here:
       // `pfAID`/`paAID` refuse an out-of-range number themselves. The explicit check remains only to
@@ -328,7 +351,7 @@ export class Runner {
         if (!Number.isInteger(n) || n < 1 || n > PF_AIDS.length) {
           throw new Error(`PF number out of range: ${args[0]}`);
         }
-        s.sendAID(pfAID(n));
+        s.run({ kind: 'pf', n });
         return;
       }
       case 'PA': {
@@ -336,10 +359,10 @@ export class Runner {
         if (!Number.isInteger(n) || n < 1 || n > PA_AIDS.length) {
           throw new Error(`PA number out of range: ${args[0]}`);
         }
-        s.sendAID(paAID(n));
+        s.run({ kind: 'pa', n });
         return;
       }
-      case 'Attn': s.sendAttn(); return;
+      case 'Attn': s.run({ kind: 'attn' }); return;
 
       // ALL THREE ARE CONFORMANCE, NOT SYMMETRY with the other front ends: s3270 has them
       // under exactly these names -- `{ AnDup, Dup_action, ACTION_KE }` (Common/kybd.c:223),
@@ -353,6 +376,11 @@ export class Runner {
       // "X Numeric" send a script author to different fixes, and Dup and Field Mark differ on
       // the second (a numeric field takes Dup and refuses Field Mark; see core's dup()).
       //
+      // CHANGED (Task 10): routed through `Session.run` -- `{ kind: 'dup' }`/`{ kind:
+      // 'fieldMark' }` -- rather than calling `Keyboard.dup()`/`fieldMark()` directly, so a
+      // host lock queues them too. `String()`'s reasoning above applies identically: throw the
+      // unchanged message on 'dropped' or 'refused', say nothing on 'queued' or 'done'.
+      //
       // THE ARGUMENT RULE DIVERGES FROM s3270, deliberately and only in the safe direction.
       // SysReq really takes none (`check_argc(AnSysReq, argc, 0, 0)`, kybd.c:2852), but Dup
       // and FieldMark take `0, 1` (:2769, :2807) where the one optional argument is the
@@ -365,39 +393,61 @@ export class Runner {
       // still failing would answer `error` where s3270 answers `ok` -- silently wrong, where
       // refusing the word is loudly wrong. The wording is check_argc's own
       // ("%s%s requires %d argument%s", Common/actions.c:159-161), as `Connect` above uses.
-      case 'Dup':
+      case 'Dup': {
         if (args.length !== 0) throw new Error('Dup() requires 0 arguments');
-        if (!k.dup()) throw new Error(`Dup(): input inhibited (${s.oia.toText()})`);
+        const result = s.run({ kind: 'dup' });
+        if (result === 'dropped' || result === 'refused') {
+          throw new Error(`Dup(): input inhibited (${s.oia.toText()})`);
+        }
         return;
-      case 'FieldMark':
+      }
+      case 'FieldMark': {
         if (args.length !== 0) throw new Error('FieldMark() requires 0 arguments');
-        if (!k.fieldMark()) throw new Error(`FieldMark(): input inhibited (${s.oia.toText()})`);
+        const result = s.run({ kind: 'fieldMark' });
+        if (result === 'dropped' || result === 'refused') {
+          throw new Error(`FieldMark(): input inhibited (${s.oia.toText()})`);
+        }
         return;
-      // No refusal to report, UNLIKE `Dup`/`FieldMark` above: `Session.sysreq()` returns void
-      // and is deliberately silent on every refusal -- not connected, TN3270E negotiated
-      // without the SYSREQ function, or an inhibited keyboard on a classic session (see that
-      // method). The key exists on the keyboard whatever the host granted, so there is no
-      // boolean to test and nothing to report. What it DOES send depends on the session: IAC
+      }
+      // UNLIKE `Dup`/`FieldMark` ABOVE, NO REFUSAL IS EVER REPORTED, same as before Task 10:
+      // `SysReq_action` (kybd.c:2849-2870) itself returns `true` under any lock, matching the
+      // "ENTER, CLEAR, PF, PA, ATTN, SYSREQ" comment above -- `Session.run`'s result is
+      // discarded here for the identical reason. `Session.sysreq()` ALSO returns void and is
+      // silent on its own refusals (not connected, TN3270E negotiated without the SYSREQ
+      // function) for callers that reach it directly; through `run` those are now subsumed by
+      // 'dropped'/'queued', equally unreported. What it DOES send depends on the session: IAC
       // AO under TN3270E, a test request read (SOH `%` `/` STX) on a classic one.
       case 'SysReq':
         if (args.length !== 0) throw new Error('SysReq() requires 0 arguments');
-        s.sysreq();
+        s.run({ kind: 'sysreq' });
         return;
 
-      case 'Tab': k.tab(); return;
-      case 'BackTab': k.backTab(); return;
-      case 'Home': k.home(); return;
-      case 'Newline': k.newline(); return;
-      case 'Left': k.left(); return;
-      case 'Right': k.right(); return;
-      case 'Up': k.up(); return;
-      case 'Down': k.down(); return;
-      case 'BackSpace': k.backspace(); return;
-      case 'Delete': k.deleteChar(); return;
-      case 'EraseEOF': k.eraseEOF(); return;
-      case 'EraseInput': k.eraseInput(); return;
-      case 'Reset': k.reset(); return;
-      case 'Insert': k.setInsertMode(!k.insertMode); return;
+      case 'Tab': s.run({ kind: 'tab' }); return;
+      case 'BackTab': s.run({ kind: 'backTab' }); return;
+      case 'Home': s.run({ kind: 'home' }); return;
+      case 'Newline': s.run({ kind: 'newline' }); return;
+      case 'Left': s.run({ kind: 'left' }); return;
+      case 'Right': s.run({ kind: 'right' }); return;
+      case 'Up': s.run({ kind: 'up' }); return;
+      case 'Down': s.run({ kind: 'down' }); return;
+      // CHANGED (Task 10, spec section C): `BackSpace()` is now s3270's NON-DESTRUCTIVE
+      // cursor-left (`BackSpace_action`, kybd.c:2285) -- `{ kind: 'backSpaceLeft' }`, NOT the
+      // 'backspace' kind (which is the destructive Erase; see `keyAction.ts`'s comment on why
+      // this needed its own kind rather than reusing `{ kind: 'left' }`). THIS BREAKS ANY
+      // SCRIPT THAT USED `BackSpace()` TO ERASE -- the changelog fragment says so. `Erase()` is
+      // the new destructive action, `{ kind: 'backspace' }` -- the kind's name did not change,
+      // only what the CLI's OWN verb `BackSpace` maps to.
+      case 'BackSpace': s.run({ kind: 'backSpaceLeft' }); return;
+      case 'Erase': s.run({ kind: 'backspace' }); return;
+      case 'Delete': s.run({ kind: 'delete' }); return;
+      case 'EraseEOF': s.run({ kind: 'eraseEOF' }); return;
+      case 'EraseInput': s.run({ kind: 'eraseInput' }); return;
+      case 'Reset': s.run({ kind: 'reset' }); return;
+      // CHANGED (Task 10, spec section B): `Insert()` now SETS insert mode on, as x3270's
+      // `Insert_action` (kybd.c:3237) does, rather than toggling it -- `ToggleInsert()` is the
+      // new verb for that (the Insert KEY keeps toggling; this is `Insert()` the SCRIPT ACTION).
+      case 'Insert': s.run({ kind: 'insert' }); return;
+      case 'ToggleInsert': s.run({ kind: 'toggleInsert' }); return;
 
       case 'MoveCursor': {
         // s3270 addresses are 0-based row/col.
@@ -619,46 +669,59 @@ export class Runner {
     // fast transfer to a race. Putting NOTHING on the wire is what makes this safe
     // to do before the CUT path has been ruled out.
     this.session.startDftTransfer(dft);
+    // SET HERE, where the transfer is REGISTERED -- the same point `transferRun.ts`'s
+    // `startTransfer` sets it (Task 10, spec section A's `KL_FT`): a keystroke made from here
+    // on must be dropped-with-alarm by `Session.run`, not queued to land on the host's
+    // post-transfer READY screen. CLEARED IN THE `finally` BELOW, the ONE place every exit
+    // from this method passes through -- success, a thrown failure (including the timeout
+    // `runTransferFrames` reports as `!result.ok`, turned into a throw just below), and any
+    // local error this function itself might throw after this line. `Session.handleClose` is
+    // the separate backstop for a connection dropping mid-transfer, exactly as `transferRun.ts`
+    // relies on it rather than clearing the flag itself on that path.
+    this.session.transferring = true;
+    try {
+      // NOW the host is involved. Everything from here can leave it in transfer
+      // mode, which is why nothing above could.
+      this.primeAndType(command);
+      // The screen just before Enter, after typing: a deadline that finds the transfer NEVER
+      // STARTED quotes the rows the host changed since. See `frontend/src/transferStart.ts`.
+      const before = screenRows(this.session.screen);
+      this.session.sendAID(AID.ENTER);
 
-    // NOW the host is involved. Everything from here can leave it in transfer
-    // mode, which is why nothing above could.
-    this.primeAndType(command);
-    // The screen just before Enter, after typing: a deadline that finds the transfer NEVER
-    // STARTED quotes the rows the host changed since. See `frontend/src/transferStart.ts`.
-    const before = screenRows(this.session.screen);
-    this.session.sendAID(AID.ENTER);
+      const result = await this.runTransferFrames(transfer, dft, before);
 
-    const result = await this.runTransferFrames(transfer, dft, before);
+      for (const warning of transfer.warnings) data.push(`Transfer(): ${warning}`);
 
-    for (const warning of transfer.warnings) data.push(`Transfer(): ${warning}`);
+      if (!result.ok) {
+        // The host's own text, which `CutTransfer` has already substituted
+        // `ftHostCancel` into if the host sent none. Thrown rather than pushed, so
+        // the reply's last line is `error`.
+        throw new Error(`Transfer(): ${result.error}`);
+      }
 
-    if (!result.ok) {
-      // The host's own text, which `CutTransfer` has already substituted
-      // `ftHostCancel` into if the host sent none. Thrown rather than pushed, so
-      // the reply's last line is `error`.
-      throw new Error(`Transfer(): ${result.error}`);
+      if (request.direction === 'receive') {
+        // `result.data` is always present for a successful receive (`CutTransfer.
+        // success()`), but the type allows its absence, and an empty file is a
+        // legitimate transfer.
+        const bytes = result.data ?? new Uint8Array(0);
+        if (request.exist === 'append') files.append(request.localFile, bytes);
+        else files.write(request.localFile, bytes);
+      }
+
+      // `ftComplete: Transfer complete, %i bytes transferred` (fb-common:31).
+      //
+      // FROM WHICHEVER ENGINE RAN. The counters are per-engine and not
+      // interchangeable — `bytesTransferred` on CUT, `transferred` on DFT — so
+      // reporting CUT's unconditionally would tell a script that a successful DFT
+      // transfer moved 0 bytes. That is the one number a caller checks against the
+      // host's own listing, and a success line contradicting itself is worse than no
+      // line. `dft.complete` is the discriminator: it is set only by the engine that
+      // actually finished.
+      const moved = dft.complete ? dft.transferred : transfer.bytesTransferred;
+      data.push(`Transfer complete, ${moved} bytes transferred`);
+    } finally {
+      this.session.transferring = false;
     }
-
-    if (request.direction === 'receive') {
-      // `result.data` is always present for a successful receive (`CutTransfer.
-      // success()`), but the type allows its absence, and an empty file is a
-      // legitimate transfer.
-      const bytes = result.data ?? new Uint8Array(0);
-      if (request.exist === 'append') files.append(request.localFile, bytes);
-      else files.write(request.localFile, bytes);
-    }
-
-    // `ftComplete: Transfer complete, %i bytes transferred` (fb-common:31).
-    //
-    // FROM WHICHEVER ENGINE RAN. The counters are per-engine and not
-    // interchangeable — `bytesTransferred` on CUT, `transferred` on DFT — so
-    // reporting CUT's unconditionally would tell a script that a successful DFT
-    // transfer moved 0 bytes. That is the one number a caller checks against the
-    // host's own listing, and a success line contradicting itself is worse than no
-    // line. `dft.complete` is the discriminator: it is set only by the engine that
-    // actually finished.
-    const moved = dft.complete ? dft.transferred : transfer.bytesTransferred;
-    data.push(`Transfer complete, ${moved} bytes transferred`);
   }
 
   private requireFiles(): TransferFiles {

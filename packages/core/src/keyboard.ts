@@ -13,6 +13,19 @@ import type { Screen, Field } from './screen.js';
  */
 export class Keyboard {
   insertMode = false;
+  /**
+   * x3270's `numericLock` resource (`ResNumericLock`, x3270/resources.c:336-337),
+   * default `ResFalse`. OFF means `type()`'s digit/+/-/./, test never runs
+   * (`key_Character`'s own test is `FA_IS_NUMERIC(fa) && appres.numeric_lock &&
+   * !(...)`, kybd.c:1232-1238 -- `numeric_lock` false makes the whole
+   * expression false), so a letter in a numeric field goes in exactly as it
+   * does in stock x3270. ON restores the refusal this class enforced
+   * unconditionally before this property existed. 15b will expose this as a
+   * setting; until then it is this property, read by `type()` alone --
+   * `writeControl()`'s Dup/Field Mark policy is a DIFFERENT, manual-derived
+   * rule (see `dup()`'s own comment) that this property does not gate.
+   */
+  numericLock = false;
 
   constructor(
     private readonly screen: Screen,
@@ -44,17 +57,20 @@ export class Keyboard {
     // and return false, which is this class's documented contract for a
     // refusal.
     //
-    // OPERATOR ERRORS ARE EXCLUDED, and must be, or the exclusion breaks two
-    // shipped behaviors: "refuses a letter in a numeric field" types '5'
-    // successfully straight after the refused 'A', and the auto-skip test types
-    // on after a full field. x3270 draws the same line, clearing KL_OERR_MASK
-    // and continuing where a host lock would have deferred — see
-    // OERR_CLEAR_OR_ENQ (kybd.c:147-158), whose two arms are exactly
-    // `kybdlock_clr(KL_OERR_MASK, action)` versus `enq_ta(action, ...)`.
-    // Semantically: an operator error is the operator's own to correct with the
-    // next keystroke, whereas AwaitingFirstWrite, EnterInhibit, SystemWait and
-    // ProgramCheck are the host's to release.
-    if (this.oia.isInhibited() && !this.oia.isOperatorError()) return false;
+    // NO OPERATOR-ERROR EXCLUSION HERE ANY MORE (removed for oerrLock, spec
+    // section A step 4): key_Character is UNCONDITIONAL on `kybdlock`, which
+    // includes KL_OERR_MASK — unlike Tab, Home, the arrows and the two Erase
+    // keys, it is NOT wrapped in OERR_CLEAR_OR_ENQ (kybd.c:146-157 names only
+    // those five; key_Character at kybd.c:1200 has no such wrapper at all). A
+    // typed character under an operator error is therefore dropped (with the
+    // alarm) exactly like any other non-clearing action, and clearing the
+    // error is `Session.run`'s job now: it is the one caller with the lock
+    // rules, and this method carries none of its own beyond the host-imposed
+    // refusal above. (The two tests this broke — a numeric-field refusal
+    // followed immediately by a good digit, and typing on into a field that
+    // just auto-skipped past a full one — are `keyboard.test.ts`'s own
+    // problem to restate, not this method's to special-case.)
+    if (this.oia.isInhibited()) return false;
 
     const field = s.fieldAt(s.cursor);
 
@@ -63,7 +79,12 @@ export class Keyboard {
         this.oia.inhibit(KeyboardState.ProtectedField);
         return false;
       }
-      if (field.numeric && !/[0-9.\-+,]/.test(char)) {
+      // Task 7 (spec section D): gated on `numericLock`, default false -- see
+      // the property's own comment. x3270 refuses NOTHING ELSE here when the
+      // resource is off; `key_Character`'s numeric test is wholly skipped,
+      // not narrowed, so there is no separate "what, if anything, is still
+      // refused" rule to encode.
+      if (field.numeric && this.numericLock && !/[0-9.\-+,]/.test(char)) {
         this.oia.inhibit(KeyboardState.Numeric);
         return false;
       }
@@ -71,7 +92,12 @@ export class Keyboard {
 
     const ebcdic = this.codePage.fromUnicode(char);
 
-    if (this.insertMode && field !== null) {
+    // NOT gated on `field !== null` any more (Task 5): x3270's `ins_prep` runs
+    // on an unformatted screen too, using the end of the SCREEN as its
+    // boundary instead of a field attribute (kybd.c:1079-1081, the `faddr ==
+    // -1` arm). Skipping it there made every unformatted insert a silent
+    // overwrite.
+    if (this.insertMode) {
       if (!this.shiftRight(field, s.cursor)) {
         this.oia.inhibit(KeyboardState.Overflow);
         return false;
@@ -179,9 +205,12 @@ export class Keyboard {
    * untouched, and states the equivalent EBCDIC rule here instead.
    *
    * Everything up to the write is `type()`'s sequence, for the reasons documented
-   * there: a host-imposed lock refuses outright while an operator error does not,
-   * a protected field is an operator error, and insert mode shifts the field
-   * right first.
+   * there: ANY lock, operator error included, refuses outright now (removed for
+   * oerrLock, spec section A step 4 — Dup and Field Mark are `key_Character(EBC_dup/
+   * EBC_fm, ...)` in x3270, kybd.c:2788 and :2825, so they share `type()`'s
+   * unconditional `kybdlock` test and are not in OERR_CLEAR_OR_ENQ either); a
+   * protected field is an operator error, and insert mode shifts the field right
+   * first.
    *
    * BOTH PER-KEY POLICIES ARE THE CALLER'S, and neither is optional. An earlier
    * version took the cursor rule as a parameter but decided the numeric rule in
@@ -203,7 +232,7 @@ export class Keyboard {
     },
   ): boolean {
     const s = this.screen;
-    if (this.oia.isInhibited() && !this.oia.isOperatorError()) return false;
+    if (this.oia.isInhibited()) return false;
 
     const field = s.fieldAt(s.cursor);
     if (field !== null) {
@@ -220,7 +249,8 @@ export class Keyboard {
       }
     }
 
-    if (this.insertMode && field !== null) {
+    // See the identical comment in `type()`: not gated on `field !== null`.
+    if (this.insertMode) {
       if (!this.shiftRight(field, s.cursor)) {
         this.oia.inhibit(KeyboardState.Overflow);
         return false;
@@ -263,12 +293,40 @@ export class Keyboard {
     }
   }
 
-  /** Push field contents right from `from`; false if the field would overflow. */
-  private shiftRight(field: Field, from: number): boolean {
+  /**
+   * Room to insert at `from`: ANY NUL from `from` up to (not including) the
+   * field's end, not only the field's own last cell. Mirrors x3270's
+   * `ins_prep` (kybd.c:1030-1134): it scans forward from `baddr` to
+   * `next_faddr` for the first NUL, then shifts only the cells between
+   * `baddr` and that NUL right by one -- cells beyond it do not move. A NUL
+   * BEFORE `from` is never considered, because the scan starts at `from`.
+   *
+   * `field === null` is the unformatted case: `ins_prep`'s `faddr == -1` arm
+   * uses the end of the SCREEN, `(ROWS*COLS)-1`, as the boundary instead of a
+   * field attribute (kybd.c:1079-1081) -- a FIXED address, not derived by
+   * wrapping from `from`, which is why `end` below is `s.size - 1` rather
+   * than something reached via `s.dec`. Trailing BLANKS counting as room is
+   * x3270's `blankFill` (`toggled(BLANK_FILL)`, ins_prep), off by default and
+   * a separate row -- not modelled here.
+   *
+   * No DBCS/charset-SA checks here: `ins_prep`'s `ctlr_mutable_cs()` guard,
+   * which refuses an insert that would move a charset SA, has no equivalent
+   * in this codebase (we carry no DBCS or charset-SA state).
+   */
+  private shiftRight(field: Field | null, from: number): boolean {
     const s = this.screen;
-    const last = this.lastCellOf(field);
-    if (s.cellAt(last).ebcdic !== 0x00) return false; // no room
-    let a = last;
+    // x3270's `next_faddr`: the NEXT field attribute after this one, found by
+    // walking forward from the field's start -- NOT `field.attrAddr`, which
+    // is the attribute at the field's OWN START, behind `from`. A single
+    // field that wraps the whole buffer lands back on its own `attrAddr`,
+    // matching `ins_prep`'s `next_faddr != faddr` loop test.
+    const end = field !== null ? this.fieldEnd(field) : s.size - 1;
+    let firstNull = -1;
+    for (let a = from; a !== end; a = s.inc(a)) {
+      if (s.cellAt(a).ebcdic === 0x00) { firstNull = a; break; }
+    }
+    if (firstNull === -1) return false; // no room
+    let a = firstNull;
     while (a !== from) {
       const prev = s.dec(a);
       s.setChar(a, s.cellAt(prev).ebcdic);
@@ -277,9 +335,10 @@ export class Keyboard {
     return true;
   }
 
-  private lastCellOf(field: Field): number {
+  /** The address just past `field`'s last data cell -- the next field attribute. */
+  private fieldEnd(field: Field): number {
     let a = field.start;
-    for (let n = 1; n < field.length; n++) a = this.screen.inc(a);
+    for (let n = 0; n < field.length; n++) a = this.screen.inc(a);
     return a;
   }
 
@@ -365,11 +424,26 @@ export class Keyboard {
 
   // ---- erasing ----
 
-  /** Null from the cursor to the end of the field. */
+  /**
+   * Null from the cursor to the end of the field -- or, on an unformatted
+   * screen, to the end of the SCREEN (`EraseEOF_action`'s `else` arm,
+   * kybd.c:3026-3039: `do { ...null...; INC_BA(baddr); } while (baddr !=
+   * 0)`). That loop does NOT wrap past address 0 -- it nulls from the
+   * cursor up to the last cell of the buffer and stops, touching address 0
+   * only when the cursor started there. No field on an unformatted screen,
+   * so no protection check and no MDT to set.
+   */
   eraseEOF(): void {
     const s = this.screen;
     const f = s.fieldAt(s.cursor);
-    if (f === null) return;
+    if (f === null) {
+      let a = s.cursor;
+      do {
+        s.setChar(a, 0x00);
+        a = s.inc(a);
+      } while (a !== 0);
+      return;
+    }
     if (f.protected) {
       this.oia.inhibit(KeyboardState.ProtectedField);
       return;
@@ -395,25 +469,73 @@ export class Keyboard {
     this.home();
   }
 
+  /**
+   * CHANGED (Task 6, spec section C): `backspace` is x3270's `Erase`
+   * (`Erase_action` -> `do_erase`, kybd.c:2317-2346), not a null-in-place --
+   * it moves the cursor left one and DELETES there, closing up the rest of
+   * the field (or the screen, unformatted) rather than leaving a gap.
+   *
+   * `do_erase`'s OWN "protected" check is `if (faddr == baddr ||
+   * FA_IS_PROTECTED(ea_buf[baddr].fa)) { operator_error(...); }` -- WITHOUT
+   * a `return`, so x3270 falls through regardless. Read closely (per the
+   * task's own instruction to check what x3270 does next, since this is not
+   * simply a no-op): `ea_buf[baddr].fa` is the CURSOR'S OWN cell, which
+   * `find_field_attribute` (ctlr.c:435-446) makes nonzero ONLY when `baddr`
+   * itself IS an attribute byte -- and `faddr == baddr` is exactly that same
+   * condition. So for an ORDINARY data cell, including one inside a
+   * protected field, this test is FALSE and `operator_error` does not fire
+   * here at all; every OTHER erase key (`do_delete`, `EraseEOF_action`, ...)
+   * tests `FA_IS_PROTECTED(get_field_attribute(baddr))` -- the GOVERNING
+   * field -- not the cursor's own cell, so `do_erase` alone has this
+   * asymmetry. No Keyboard method here ever parks the cursor on an attribute
+   * byte, so the branch cannot arise in our model and is not reproduced.
+   * (No DBCS here either: `do_erase`'s SO/SI handling is skipped, we carry
+   * no such state.)
+   *
+   * The NEXT line, `if (baddr && faddr == baddr - 1) return;`, is what
+   * actually governs: at a field's OWN FIRST data cell -- protected or not
+   * -- Erase is a complete no-op (no move, no delete, no alarm). Everywhere
+   * else, `do_left()` runs unconditionally and `do_delete()` then runs AT
+   * THE NEW position -- which is where a protected field actually raises
+   * X Protected, via `do_delete`'s correct (governing-field) check. So Erase
+   * in a protected field, away from its first cell, DOES move the cursor
+   * left by one before it errors, leaving no cell changed.
+   *
+   * Composing this from a plain cursor-left plus `deleteChar` reproduces
+   * exactly that sequence -- INCLUDING the unformatted case, where there is
+   * no field and so no first-cell guard: `do_left` is unconditional there.
+   */
   backspace(): void {
     const s = this.screen;
-    const f = s.fieldAt(s.cursor);
-    if (f !== null && f.protected) {
-      this.oia.inhibit(KeyboardState.ProtectedField);
-      return;
-    }
-    const prev = s.dec(s.cursor);
-    if (s.isFieldAttribute(prev)) return; // at the start of the field
-    s.cursor = prev;
-    s.setChar(prev, 0x00);
-    if (f !== null) s.setMDT(f.attrAddr);
+    const baddr = s.cursor;
+    const f = s.fieldAt(baddr);
+    if (f !== null && baddr === f.start && baddr !== 0) return; // field's own first cell: no-op
+    s.cursor = s.dec(baddr);
+    this.deleteChar();
   }
 
-  /** Delete under the cursor, shifting the remainder of the field left. */
+  /**
+   * Delete under the cursor, shifting the remainder of the field left -- or,
+   * on an unformatted screen, the remainder of the SCREEN (`do_delete`'s
+   * `!formatted` arm, kybd.c:2168-2200: `end_baddr = (ROWS*COLS)-1`, a FIXED
+   * address, not one derived by wrapping from the cursor). No field there,
+   * so no protection check and no MDT to set (`mdt_set` would resolve a
+   * governing attribute that does not exist).
+   */
   deleteChar(): void {
     const s = this.screen;
     const f = s.fieldAt(s.cursor);
-    if (f === null) return;
+    if (f === null) {
+      const end = s.size - 1;
+      let a = s.cursor;
+      while (a !== end) {
+        const next = s.inc(a);
+        s.setChar(a, s.cellAt(next).ebcdic);
+        a = next;
+      }
+      s.setChar(end, 0x00);
+      return;
+    }
     if (f.protected) {
       this.oia.inhibit(KeyboardState.ProtectedField);
       return;

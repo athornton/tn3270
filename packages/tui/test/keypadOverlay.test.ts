@@ -206,6 +206,12 @@ describe('the chord column against the TUI keymap', () => {
   it('shows a chord for every key whose action the TUI decoder produces', () => {
     // "Bound" is asked of the DECODER: each row's bytes go through `lookup`, and the action that
     // comes back -- not the row's own `action` field -- is what counts as reachable.
+    //
+    // 45, NOT 46, SINCE keyboard-semantics Task 9: the keypad's `Ins` is now `{ kind: 'insert' }`
+    // (x3270's keypad Ins is `Insert_action`, which sets insert mode ON), and no terminal sequence
+    // decodes to that kind -- the Insert KEY (`\x1b[2~`) still decodes to `toggleInsert`, which
+    // `Ins` no longer carries. So `Ins` drops out of `reachable` along with Sys Req and Newline,
+    // which is the one-key move from 46 to 45 the test below's renamed blank set spells out.
     const reachable = TERMINAL_BINDINGS.map((b) =>
       lookup(Uint8Array.from([...b.sequence].map((c) => c.charCodeAt(0)))))
       .filter((a): a is Action => a !== null && a !== PARTIAL);
@@ -215,13 +221,18 @@ describe('the chord column against the TUI keymap', () => {
       bound += 1;
       expect(shown()[i], `${k.name} is bound and shows no chord`).not.toBe('');
     });
-    expect(bound).toBe(46);
+    expect(bound).toBe(45);
   });
 
-  it('leaves EXACTLY Sys Req and Newline blank', () => {
-    // Named, not counted: a count of 2 would pass with the wrong two keys blank.
+  it('leaves EXACTLY Sys Req, Newline and Insert mode blank', () => {
+    // Named, not counted: a count of 3 would pass with the wrong three keys blank.
+    //
+    // `Insert mode` JOINED THE SET IN keyboard-semantics Task 9, for the reason the test above
+    // gives: the keypad's `Ins` button carries `{ kind: 'insert' }`, which no terminal sequence
+    // produces -- unlike the Insert KEY, which still toggles and still has its own chord. Before
+    // this task `Ins` shared `toggleInsert` with the Insert key and showed that chord.
     const blank = KEYPAD_KEYS.filter((_, i) => shown()[i] === '').map((k) => k.name);
-    expect(blank.sort()).toEqual(['Newline', 'System Request']);
+    expect(blank.sort()).toEqual(['Insert mode', 'Newline', 'System Request']);
   });
 });
 

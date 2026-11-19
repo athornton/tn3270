@@ -222,10 +222,27 @@ export class TelnetLayer {
     this.write(bytes);
   }
 
-  /** The 3270 Attn key is Telnet BREAK (RFC 1576 §8), not an AID. */
+  /**
+   * The 3270 Attn key on a CLASSIC (non-TN3270E) session is Telnet BREAK (RFC 1576 §8),
+   * not an AID. `Session.sendAttn` picks this or `sendInterrupt` depending on whether
+   * the session negotiated TN3270E and, if so, whether it is bound; this layer has no
+   * opinion, it only knows the two wire forms.
+   */
   sendAttn(): void {
     const bytes = Uint8Array.of(T.IAC, T.BREAK);
     this.trace?.send(bytes, 'Attn (IAC BREAK)');
+    this.write(bytes);
+  }
+
+  /**
+   * Attn on a BOUND TN3270E session is Telnet IP (RFC 854), not BREAK: x3270's
+   * `net_interrupt` (Common/telnet.c:3608-3622), reached from `Attn_action`'s `IN_E` +
+   * `net_bound()` arm (kybd.c:982-1002). `T.IP` is 244 (0xf4, RFC 854); see
+   * `constants.ts`'s `TelnetCmd`.
+   */
+  sendInterrupt(): void {
+    const bytes = Uint8Array.of(T.IAC, T.IP);
+    this.trace?.send(bytes, 'Attn (IAC IP)');
     this.write(bytes);
   }
 

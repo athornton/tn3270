@@ -68,4 +68,9 @@ describe('parseCommand', () => {
     expect(parseCommand('Set(model,3278-4-E)'))
       .toEqual({ name: 'Set', args: ['model', '3278-4-E'] });
   });
+
+  it('knows Erase and ToggleInsert (keyboard-semantics Task 10)', () => {
+    expect(parseCommand('Erase')!.name).toBe('Erase');
+    expect(parseCommand('ToggleInsert()')).toEqual({ name: 'ToggleInsert', args: [] });
+  });
 });

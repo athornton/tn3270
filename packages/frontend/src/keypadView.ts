@@ -113,59 +113,27 @@ export const KEYPAD_BLOCKS: readonly KeypadBlock[] = Object.freeze([
     // The INTERRUPT keys: each one reaches the host OUTSIDE the ordinary read-modified exchange.
     // PA1-3 and Clear go as short-read AIDs; `SysRq` is Telnet IAC AO on a TN3270E session that
     // agreed the SYSREQ function and a TEST REQUEST READ on a classic one (`actions.ts:109-120`
-    // records both forms); and `Attn` is TELNET BREAK.
+    // records both forms); and `Attn` is three things, not one -- `Session.sendAttn`
+    // (`core/src/session.ts`, by name: the line moves):
     //
-    // `Attn` IS `IAC BREAK` AND NOT `IAC IP`. Stated this loudly because the first version of
-    // this comment said IP, and because the two are a real pair of Telnet commands that a reader
-    // can plausibly swap. MEASURED: `Telnet.sendAttn()` is `Uint8Array.of(T.IAC, T.BREAK)` with
-    // the trace label `'Attn (IAC BREAK)'` (`core/src/telnet.ts:225-230`), both it and
-    // `Session.sendAttn()` (`core/src/session.ts:1616`) carry the docstring "The 3270 Attn key is
-    // Telnet BREAK (RFC 1576 §8), not an AID", three tests assert the exact two bytes
-    // (`core/test/telnet.test.ts:448`, `core/test/session.test.ts:493`,
-    // `cli/test/runner.test.ts:373`) and a fourth pins that it never reaches `sendAID`
-    // (`frontend/test/actions.test.ts:120`, with the `sendAID` assertion at `:128`), and `T.IP` is
-    // referenced NOWHERE in this repository (`grep -rn 'T\.IP\b' packages/*/src` -> no hits). IP
-    // is not a loose synonym for BREAK: they are two distinct Telnet commands, and a reader who
-    // swaps them has the wrong byte on the wire.
+    //  - TN3270E, BOUND: Telnet IAC IP (`net_interrupt`), as x3270's `Attn_action` sends
+    //    unconditionally per RFC 2355 (`Common/kybd.c:982-1002`).
+    //  - TN3270E, UNBOUND: nothing goes on the wire. The OIA shows the minus-function indicator,
+    //    `X -f` (`KeyboardState.MinusFunction`), and the keyboard stays locked until Reset.
+    //  - CLASSIC 3270: Telnet BREAK, as the paragraph below still correctly says was once the
+    //    WHOLE of this key's behaviour.
     //
-    // BUT THAT IS OURS, NOT x3270's, AND WE DIVERGE FROM IT. An earlier draft of this comment
-    // claimed x3270 "draws the same distinction", with `net_break` for Attn and `IAC IP` behind a
-    // separate `Interrupt()` action. x3270 does close to the OPPOSITE, read from
-    // `Common/kybd.c:978-1002`: `Attn_action`'s docstring is "ATTN key, per RFC 2355. Sends IP,
-    // regardless." and its FIRST branch is `if (IN_E) { if (net_bound()) net_interrupt(0); ... }`.
-    // `net_break` is only the `IN_3270` fallthrough for a CLASSIC session. And `Interrupt_action`
-    // is not a separate key at all any more: its docstring ends "This is now the same as the Attn
-    // action" (`:1008`), so x3270 says the two have CONVERGED.
-    //
-    // A PA1-BEFORE-BREAK CLAIM WAS ALSO DRAFTED HERE AND IS REMOVED, BECAUSE IT IS NOT TRUE OF
-    // THE VERSION THIS PROJECT CITES. A newer upstream `Attn_action` does send
-    // `ctlr_read_modified(AID_PA1, false)` before `net_break(0)`, commented "This is what PCOMM
-    // does in plain TN3270 mode" -- but that line does not exist in SUITE3270 4.5, which is the
-    // tree in `~/src/suite3270-4.5` that every other citation in this repo is measured against
-    // (`grep -rn 'ctlr_read_modified(AID_PA1' Common/*.c` -> zero hits there; the `IN_3270` arm is
-    // a bare `net_break(0)`). Mixing versions is how a wrong wire constant gets in: cite the tree
-    // we build and test against, and if a newer one diverges say WHICH version did what.
-    //
-    // ## FINDING: OUR ATTN DIVERGES FROM x3270 IN TN3270E MODE, AND IS UNTESTED THERE
-    //
-    // `Session.sendAttn()` (`core/src/session.ts:1617-1620`) is three lines with NO branch on
-    // `inTn3270e()`: it calls `Telnet.sendAttn()`, which sends `{IAC, BREAK}` unconditionally. So
-    // on a TN3270E session x3270 sends IP and we send BREAK. No test covers Attn in E mode --
-    // the only three are classic (cited above) -- and nothing else in the repo records this.
-    //
-    // THE ASYMMETRY WITH `sysreq()` IS THE REASON TO THINK THIS IS AN OVERSIGHT RATHER THAN A
-    // DECISION: `sysreq()` sits IMMEDIATELY ABOVE `sendAttn()` in the same file (`:1596`), it
-    // branches on `inTn3270e()` as its first act, and its docstring opens "TWO COMPLETELY
-    // DIFFERENT THINGS ON THE WIRE, chosen by whether the session is TN3270E" and cites x3270's
-    // `IN_E` split for exactly that. The neighbouring key got the branch; this one did not, and
-    // no comment anywhere says it was considered.
-    //
-    // DELIBERATELY NOT FIXED HERE. Changing what `Attn` puts on the wire is protocol work, it is
-    // outside a keypad-presentation feature, and it wants a live TN3270E witness this project
-    // does not have -- both of its live hosts answer `IAC WILL TN3270E` with DONT, measured three
-    // times (`session.ts`, on `sysreq`). Recorded rather than silently repaired or silently
-    // ignored. `actions.ts:108` is a bare `case 'attn': session.sendAttn(); break;` with no wire
-    // note, which is why the citation for this half points at core and not at the dispatch.
+    // THIS COMMENT USED TO SAY, AT LENGTH, THAT `Attn` IS `IAC BREAK` AND NOT `IAC IP`, FULL
+    // STOP, AND RECORDED A "FINDING" THAT THIS PROJECT DIVERGED FROM x3270 IN TN3270E MODE WITH
+    // NO TEST COVERING IT THERE. Both were true when written and are false now: Task 8 of the
+    // keyboard-semantics feature (2026-11-18) added the `inTn3270e()`/`bound` branch
+    // `sendAttn()` was missing, matching the asymmetry with `sysreq()` that comment itself
+    // pointed at as the reason to think the gap was an oversight. `IAC BREAK` is still exactly
+    // right for a CLASSIC session -- that half of the old comment is not retracted, only no
+    // longer the whole story -- and `packages/core/test/tn3270e-session.test.ts`'s "TN3270E
+    // Attn" tests now cover all three cases, IAC IP (0xff 0xf4) included. Kept as a correction
+    // rather than deleted outright: a reader who remembers the old claim deserves to see it
+    // named and retracted, not silently vanish.
     //
     // None of the six is the ordinary "submit this screen" that `Enter` is, which is why `Enter`
     // is not in this block despite also being an AID. `Reset` is the odd one, and it is here
@@ -175,10 +143,11 @@ export const KEYPAD_BLOCKS: readonly KeypadBlock[] = Object.freeze([
     // THAT IS AN AFFINITY, NOT A RULE, and the stronger version of it is false: `Enter` and all
     // 24 PF keys raise `SystemWait` through the same `sendAID` path from OTHER blocks
     // (`session.ts:1553`), the three operator-error inhibits come from typing into a protected or
-    // numeric field rather than from any key here, and `Attn` -- which IS in this block -- does
-    // not touch the OIA at all (`session.ts:1617-1620` goes straight to the Telnet layer). Reset
-    // is grouped with the keys whose kind of trouble it answers; it is not claimed that this
-    // block is the only way to need it.
+    // numeric field rather than from any key here, and `Attn` touches the OIA only in its
+    // UNBOUND-TN3270E case (`X -f`, above) -- on a bound TN3270E session or a classic one it goes
+    // straight to the Telnet layer, as the old comment said of every case. Reset is grouped with
+    // the keys whose kind of trouble it answers; it is not claimed that this block is the only
+    // way to need it.
     id: 'attention',
     title: 'Attention',
     keys: ['PA1', 'PA2', 'PA3', 'Attn', 'SysRq', 'Clear', 'Reset'].map(byLabel),
@@ -203,13 +172,14 @@ export const KEYPAD_BLOCKS: readonly KeypadBlock[] = Object.freeze([
     // `Action` union in `keymap.ts` -- so a user hunting them under "Attention" beside PA1 would
     // be looking in the wrong place.
     //
-    // `Ins` toggles a mode rather than editing, and it is the mode that decides what `Dup` and
-    // `FldMk` write into -- the only two keys here that go through `writeControl`
-    // (`core/src/keyboard.ts:127` and `:165`). NOT "what every other key in this block does",
-    // which an earlier draft of this comment claimed: `insertMode` is read in exactly two places,
-    // `type()` (`keyboard.ts:74`) and `writeControl()` (`:223`), and `Del` (`:413`), `BkSp`
-    // (`:398`), `ErEOF` (`:369`) and `ErInp` (`:393`) never read it. Four of the six are
-    // unaffected by the toggle, so `Ins` earns its place here by editing the buffer like the
+    // `Ins` SETS a mode rather than editing -- `{ kind: 'insert' }` (keyboard-semantics Task 9;
+    // it used to be `toggleInsert`, like the Insert KEY still is) -- and it is the mode that
+    // decides what `Dup` and `FldMk` write into -- the only two keys here that go through
+    // `writeControl` (`core/src/keyboard.ts:127` and `:165`). NOT "what every other key in this
+    // block does", which an earlier draft of this comment claimed: `insertMode` is read in
+    // exactly two places, `type()` (`keyboard.ts:74`) and `writeControl()` (`:223`), and `Del`
+    // (`:413`), `BkSp` (`:398`), `ErEOF` (`:369`) and `ErInp` (`:393`) never read it. Four of the
+    // six are unaffected by it, so `Ins` earns its place here by editing the buffer like the
     // rest and not by governing them.
     id: 'editing',
     title: 'Editing',

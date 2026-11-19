@@ -161,6 +161,16 @@ export function startTransfer(opts: StartTransferOptions): TransferRun {
   // again, and `handleTransferData` needs a registered transfer at that moment. Doing
   // this after sendAID(ENTER) would lose the first frame of a fast transfer to a race.
   session.startDftTransfer(dft);
+  // SET HERE, where the transfer is REGISTERED (Task 10, spec section A's `KL_FT`): a
+  // keystroke made from here on must be dropped-with-alarm by `Session.run`, not queued to
+  // land on the host's post-transfer READY screen. CLEARED in `finish`, the one place every
+  // end of this run passes through -- success, failure, a timeout, and `cancel` (every one of
+  // which calls `finish`, see its own comment). `Session.handleClose` is the separate
+  // backstop for a connection dropping mid-transfer: this run's own listeners go silent on
+  // disconnect (nothing here listens for it), so `finish` never runs on that path, and
+  // `handleClose` clearing the flag directly is what stops a dropped connection leaving
+  // future keystrokes dropped-with-alarm forever.
+  session.transferring = true;
 
   let ended = false;
   let frameTimer: ReturnType<typeof setTimeout> | undefined;
@@ -228,6 +238,10 @@ export function startTransfer(opts: StartTransferOptions): TransferRun {
   const finish = (result: TransferResult): void => {
     if (ended) return;
     ended = true;
+    // CLEARED HERE, the one place every end of this run passes through (Task 10): success,
+    // failure, a timeout and `cancel` all call `finish`, and `ended`'s own guard above is what
+    // keeps this a single clear rather than a race with a second ending.
+    session.transferring = false;
     // A LEAKED LISTENER PER TRANSFER is invisible except as wasted CPU, which is why
     // `Session.listenerCount` exists at all. Removed here because this is the one place a
     // run ends -- the same discipline as `Session.handleClose` owning TN3270E teardown.

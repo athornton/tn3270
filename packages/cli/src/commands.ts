@@ -26,7 +26,11 @@ export const COMMAND_NAMES = [
   'BackTab', 'Home', 'Newline', 'EraseEOF', 'EraseInput', 'Reset',
   'MoveCursor', 'Ascii', 'Snap', 'Wait', 'Quit', 'Trace', 'Attn',
   'ScreenText', 'ScreenJson', 'TraceText', 'Replay', 'Left', 'Right', 'Up', 'Down',
-  'BackSpace', 'Delete', 'Insert', 'Transfer', 'Dup', 'FieldMark', 'SysReq', 'Set',
+  // CHANGED (keyboard-semantics Task 10, spec section C): `BackSpace` is now s3270's
+  // non-destructive cursor-left and `Erase` is the new destructive action -- see
+  // `runner.ts`'s `dispatch`. `ToggleInsert` is new alongside it (spec section B).
+  'BackSpace', 'Erase', 'Delete', 'Insert', 'ToggleInsert', 'Transfer', 'Dup', 'FieldMark',
+  'SysReq', 'Set',
 ] as const;
 
 const CANONICAL = new Map(COMMAND_NAMES.map((n) => [n.toLowerCase(), n]));

@@ -1,11 +1,53 @@
-# Handoff — state as of 2026-11-18 (README *STAGING* 15a PART 2, BLINK/INTENSIFY/THE BELL, MERGED (`86a9999`): canvas blink and intensify drawn, the host's alarm rings in the GUI, the browser and the TUI, `-visualbell` flashes instead, gate still FAIL 113 blocking; 15a PART 1, ASCII LINE ENDS, MERGED (`13e41b2`); PARITY TRIAGED, gate 113 blocking; ROADMAP = README item 15a-15h; x3270 PARITY CHECKLIST MERGED (`df62e6f`); THE PACKAGED GUI'S DROPPED FIRST ARGUMENT AND SYSTEM-WIDE Ctrl-] FIXED (`gui-argv-and-quit`): 413 x3270 names, 158 checklist rows, `parity.mjs gate` FAIL 157 blocking; 0.1.4 RELEASED: npm by the tag workflow with provenance, and the first GitHub release with the seven installers, SHA256SUMS and scriv notes; macOS CODE SIGNING MERGED (`db5a93d`; released installers up to 0.1.4 are UNSIGNED), Windows CI signing DROPPED for the Microsoft Store; STORE PROBE MERGED (`559ea78`); README AUDIT + FIXES MERGED (`ae8724f`); WEB RECEIVE DOWNLOADS ON COMPLETION (`4a940fe`, live-verified); `Exist` PER DIRECTION (`f533bff`); next: README *Staging* 15a part 3, the keyboard semantics (typeahead and keyboard lock, insert-mode reset, x3270's erase rules, oerr-lock))
+# Handoff — state as of 2026-11-19 (README *STAGING* 15a PART 3, KEYBOARD SEMANTICS, BUILT on branch `keyboard-semantics` (unpushed, unmerged): Tasks 1-11 and 13 done, final review's 4 defects fixed (`788c141`), gate FAIL 110 blocking; next: GUI live witnesses (Task 12), final review, merge; README *STAGING* 15a PART 2, BLINK/INTENSIFY/THE BELL, MERGED (`86a9999`): canvas blink and intensify drawn, the host's alarm rings in the GUI, the browser and the TUI, `-visualbell` flashes instead, gate still FAIL 113 blocking; 15a PART 1, ASCII LINE ENDS, MERGED (`13e41b2`); PARITY TRIAGED, gate 113 blocking; ROADMAP = README item 15a-15h; x3270 PARITY CHECKLIST MERGED (`df62e6f`); THE PACKAGED GUI'S DROPPED FIRST ARGUMENT AND SYSTEM-WIDE Ctrl-] FIXED (`gui-argv-and-quit`): 413 x3270 names, 158 checklist rows, `parity.mjs gate` FAIL 157 blocking; 0.1.4 RELEASED: npm by the tag workflow with provenance, and the first GitHub release with the seven installers, SHA256SUMS and scriv notes; macOS CODE SIGNING MERGED (`db5a93d`; released installers up to 0.1.4 are UNSIGNED), Windows CI signing DROPPED for the Microsoft Store; STORE PROBE MERGED (`559ea78`); README AUDIT + FIXES MERGED (`ae8724f`); WEB RECEIVE DOWNLOADS ON COMPLETION (`4a940fe`, live-verified); `Exist` PER DIRECTION (`f533bff`); next: README *Staging* 15a part 3, the keyboard semantics (typeahead and keyboard lock, insert-mode reset, x3270's erase rules, oerr-lock))
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log). For the most recent work, read the spec and plan the
 latest START HERE entry names. Each finished feature has its own pair under `docs/superpowers/`.
 
-## START HERE — LATEST FIRST; NEXT: README *Staging* item 15a PART 3 (THE KEYBOARD SEMANTICS)
+## START HERE — LATEST FIRST; NEXT: FINISH 15a PART 3 (GUI WITNESSES, FINAL REVIEW, MERGE)
+
+**2026-11-18/19, LATEST: README *STAGING* 15a PART 3, THE KEYBOARD SEMANTICS, BUILT** on branch
+`keyboard-semantics` (from `main` `b4fd071`; NOT pushed, NOT merged). Spec
+`docs/superpowers/specs/2026-11-18-keyboard-semantics-design.md`, plan
+`docs/superpowers/plans/2026-11-18-keyboard-semantics.md`. `git log --oneline b4fd071..keyboard-semantics`.
+3946 tests, build and typecheck clean at `7421245`.
+- **What changed:** `Session.run(KeyAction)` in core is the one route for operator actions (GUI,
+  browser, TUI via `applyAction`; CLI via `runner.ts`). Host lock -> queued (OIA `T`), drained after
+  each 3270 write (`executeRecord`'s end); operator error -> dropped with the alarm except
+  `OERR_CLEARS` (Tab, BackTab, Home, arrows, EraseEOF, EraseInput), which clear and act; dropped
+  during a transfer (`Session.transferring`, set by both transfer drivers, cleared in their single
+  end path and in `handleClose`); Reset with a queue only flushes it. Insert mode off on every AID,
+  Reset and keyboard restore; keypad Ins and CLI `Insert()` set it on; insert uses any NUL after the
+  cursor. Backspace is x3270's Erase (close-up); Delete/EraseEOF work unformatted. `numericLock`
+  property, default off. Attn: IAC IP on a bound TN3270E session, `X -f` unbound, BREAK classic.
+  CLI: `BackSpace()` is cursor-left (new kind `backSpaceLeft`, NOT in `OERR_CLEARS` -- x3270's
+  BackSpace_action is plain enq), `Erase()`, `ToggleInsert()`; AID actions never fail on a lock or
+  disconnect, as s3270 (so `Enter()` disconnected now answers `ok`).
+- **Mutation pass (Task 11):** 39 mutations, 2 survivors, both now killed (`7421245`).
+- **GUI witnesses DONE 2026-11-19** (`docs/live-testing.md`, *The keyboard semantics, from the GUI against VM/370 — 2026-11-19*): typeahead + an AID queued behind an AID (relay holds host replies 1.5 s), oerr-lock, insert off after an AID and after Reset, Erase close-up; each run discriminates against `main`. Not live: Delete/EraseEOF unformatted, TK5, Attn on TN3270E. Gate now **107 blocking**. The user (2026-11-19) keeps aid-keys/attn non-blocking until a real TN3270E host is lined up, and accepts Reset-during-transfer not clearing `transferring` as a divergence.
+- **Live (earlier):** typeahead and oerr-lock witnessed from the CLI on VM/370 (`docs/live-testing.md`,
+  *Typeahead and the operator-error lock, from the CLI against VM/370 — 2026-11-19*). **Owed (Task
+  12):** the GUI witnesses in the spec (typeahead, AID behind AID, oerr-lock with the bell, insert
+  off after Enter/Reset, Erase close-up, Delete/EraseEOF unformatted).
+- **Parity (`a41e1fc`):** gate FAIL 113 -> **110 blocking**. **CHECK THIS FIRST:** aid-keys,
+  cursor-movement and attn went `ours` and stopped blocking on live witnesses that PREDATE this
+  branch (PA1/PA2, Field Mark/Newline 2026-09-24, Attn-on-VM null result). None of them witnesses
+  the new behaviour (a queued AID; Attn on TN3270E is tests-only), so the user should decide
+  whether those rows stay non-blocking or need new witnesses. insert-mode, reset-key, erase-*,
+  delete-key are `ours` but unwitnessed; typeahead, oerr-lock, numeric-lock stay `partial`
+  ("no setting (15b)").
+- **Final review (2026-11-19) found four real defects, all FIXED in `788c141`** (3955 tests): an
+  operator error raised while draining now flushes the queue (x3270 `operator_error` ->
+  `flush_ta`, kybd.c:750-755); Attn, and SysReq on TN3270E, bypass every lock as x3270's do;
+  `transferring` drops operator keys even while the keyboard is unlocked between CUT frames
+  (KL_FT is a lock bit in x3270 -- a spec defect, spec amended); keys are dropped until 3270 mode
+  (and BIND, when BIND-IMAGE was agreed). Reset deliberately does NOT clear `transferring`
+  (x3270's explicit Reset clears KL_FT; ours is owned by the transfer driver -- see `run`'s
+  comment). The CLI witness on VM was re-run after the fixes, same results.
+- **Not done:** HANDOFF item 11 (CLI `Wait` order, `aidWait`) is
+  untouched.
+
 
 **2026-11-17/18, LATEST: README *STAGING* 15a PART 2, BLINK, INTENSIFY AND THE BELL** (branch
 `blink-intensify-bell`, merged to `main` `--no-ff` as `86a9999` and pushed). The gate is still

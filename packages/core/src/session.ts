@@ -1,9 +1,10 @@
 import {
   AID, MODEL_2, TERMINAL_TYPE, Tn3270eDataType, Tn3270eFunc, Tn3270eResponseFlag,
-  Tn3270eSense, VALID_AIDS,
+  Tn3270eSense, VALID_AIDS, pfAID, paAID,
 } from './constants.js';
 import { Screen } from './screen.js';
 import { Keyboard } from './keyboard.js';
+import { OERR_CLEARS, type KeyAction, type RunResult } from './keyAction.js';
 import { Oia, KeyboardState } from './oia.js';
 import { Trace, parseTrace } from './trace.js';
 import { TelnetLayer, type TelnetLayerOptions } from './telnet.js';
@@ -408,6 +409,25 @@ export class Session {
    * another does not is a bug shape this project has paid for with both `e` and `dft`.
    */
   private pendingAid: number = AID.NONE;
+
+  /**
+   * x3270's `ta_head`/`ta_tail` (Common/kybd.c:270): operator actions parked while the
+   * keyboard is host-locked (`Session.run`), run oldest-first by `drainTypeahead` once the
+   * lock lifts.
+   *
+   * A property of the CONNECTION, not the session: a reconnect must not replay a queue
+   * built for the host that just went away. Emptied in `handleClose`, alongside
+   * `oia.typeahead` -- x3270's `flush_ta`, called from `kybd_connect` (kybd.c:591).
+   */
+  private readonly typeahead: KeyAction[] = [];
+  /**
+   * Set by a transfer driver (Task 10) for the whole of a DFT or CUT transfer in progress --
+   * x3270's `KL_FT`. While true, `run` drops a locked-keyboard action with the alarm instead
+   * of queuing it, so an operator keystroke made during a transfer does not land, unannounced,
+   * on the host's post-transfer READY screen. Cleared by the transfer driver and, as a
+   * backstop, by `handleClose`, so a dropped connection can never leave it stuck on.
+   */
+  transferring = false;
 
   constructor(opts: SessionOptions) {
     this.opts = opts;
@@ -1026,6 +1046,18 @@ export class Session {
     // to one host must never be reported to the next one. See `pendingAid`, and note this
     // is the same one-teardown-path-clears-it shape already fixed here for `e` and `dft`.
     this.pendingAid = AID.NONE;
+    // THE TYPEAHEAD QUEUE BELONGS TO THE CONNECTION, same reasoning as `pendingAid`
+    // immediately above: x3270's `kybd_connect` -> `flush_ta` (kybd.c:591) empties it on
+    // disconnect, and a queue left standing would run on the NEXT connection's first unlock,
+    // typing keystrokes the operator aimed at a host that is already gone.
+    this.typeahead.length = 0;
+    this.oia.typeahead = false;
+    // `transferring` IS ALSO A BACKSTOP HERE, not only the transfer driver's job (Task 10):
+    // a dropped connection must never leave future keystrokes dropped-with-alarm forever
+    // because nothing else cleared the flag -- the same "one teardown path clears it, another
+    // doesn't" shape this file keeps finding (see `pendingAid`'s own comment, three
+    // paragraphs up).
+    this.transferring = false;
     // A DFT TRANSFER BELONGS TO THE CONNECTION CARRYING IT. Without this, a transfer
     // registered on one connection stays registered on the next, and `answerRead`'s
     // retained-frame replay would answer a host that knows nothing about it.
@@ -1201,6 +1233,13 @@ export class Session {
         this.pendingAid = AID.NONE;
         this.oia.waitingForHost = false;
         this.oia.reset();
+        // INSERT MODE OFF TOO: this IS x3270's `do_reset(false)` (ctlr.c:2168-2170's
+        // `if (wcc_keyboard_restore) { aid = AID_NO; do_reset(false); }`), and `do_reset`
+        // sets insert mode to the `alwaysInsert` default -- off -- whenever CONNECTED,
+        // explicit or not (kybd.c ~2037). A write that does not restore the keyboard (the
+        // `else if` below) must leave insert mode alone: the operator has not been given
+        // the screen back either.
+        this.keyboard.setInsertMode(false);
       } else if (this.oia.keyboard === KeyboardState.AwaitingFirstWrite
         && parsed.command !== 'WriteStructuredField') {
         // "Wait for any output OR a WCC(restore)" (x3270 kybd.c:583): the
@@ -1277,6 +1316,18 @@ export class Session {
         throw err;
       }
     }
+    // x3270 calls `ps_process()` -- and so `run_ta()` -- unconditionally near the end of
+    // `ctlr_write` (ctlr.c:2188-2189), AFTER a bad order or address has already set
+    // `rv = PDS_BAD_ADDR` (:2184): that is a local variable checked only by the function's
+    // own `return rv` at the very end, not an early return, so a mid-stream error there
+    // still reaches `ps_process()`. (ctlr_write's actual early `return` for a too-short
+    // record, :1411, is this codebase's `decodeHeader() === null` check in `handleRecord`,
+    // which never reaches `executeRecord` at all -- so there is no case here that should
+    // skip the drain but does reach this line.) Placed after the whole try/catch, covering
+    // both of `executeRecord`'s `emit('screen')` sites (the one above, and `programCheck`'s)
+    // with one call. Never reached if the catch's own re-throw fires (our bug, not the
+    // host's) -- a client that has crashed does not go on to drain a queue.
+    this.drainTypeahead();
   }
 
   /**
@@ -1807,6 +1858,279 @@ export class Session {
   }
 
   /**
+   * The one route by which an OPERATOR action -- a key, a keypad button, or a CLI keyboard
+   * action -- reaches the keyboard or the host. Everything else (`sendAID`, `sendAttn`,
+   * `sysreq`, `Keyboard`'s own methods) stays directly callable for INTERNAL callers, chiefly
+   * a CUT transfer driver's AIDs, which x3270 tests separately for the keyboard lock and which
+   * must never sit behind an operator's typeahead queue.
+   *
+   * x3270's `enq_xta` (Common/kybd.c:270-330) in order, AMENDED 2026-11-19 after the final
+   * review (steps 2a and 4a are new; everything else is unchanged):
+   *
+   *  1. Explicit Reset is handled FIRST, before every lock test and even before the
+   *     not-connected check -- x3270's `Reset_action` calls `do_reset(true)`
+   *     unconditionally, with no `kybdlock` test anywhere in it: Reset is how an operator
+   *     ESCAPES a lock, not an action a lock can defer or drop. `do_reset` (kybd.c
+   *     ~2010-2060), in order: a non-empty typeahead queue is flushed and nothing else
+   *     happens -- the "half reset"; a SECOND Reset, with the queue now empty, does the
+   *     rest. Otherwise, not connected: insert mode off, nothing else (there is no lock to
+   *     clear). Otherwise: insert mode off (the `alwaysInsert` default) and the lock
+   *     cleared, as `Keyboard.reset()` already did before this task.
+   *
+   *     NOT EXTENDED TO CLEAR `transferring` (final review #3), even though an explicit
+   *     Reset with the queue already empty mirrors `do_reset`'s `kybdlock_clr(~KL_BID)`,
+   *     which clears KL_FT along with every other bit (kybd.c ~2053-2055). `transferring`
+   *     here is not a kybdlock bit at all -- it is a flag a CUT transfer DRIVER owns
+   *     (`cli/src/runner.ts`, `frontend/src/transferRun.ts`), set and cleared on ITS OWN
+   *     schedule, independent of `oia.keyboard`. Clearing it from here would desynchronize
+   *     Session from that driver: the driver would still be mid-transfer, expecting more
+   *     CUT frames, while `run` now let operator keys straight through again -- reopening
+   *     exactly the corruption final review #3 exists to close, this time via Reset instead
+   *     of an ordinary keystroke between frames. An operator who wants out of a stuck
+   *     transfer cancels it (which clears `transferring` through the driver's own path);
+   *     Reset here only ever flushes the queue and clears `oia.keyboard`, as before.
+   *  2. Not connected (every other action): drop. (The reconnect-on-Enter divergence
+   *     lives in `applyAction`, above this.)
+   *  2a. (final review #2) `attn`, and `sysreq` on a session that completed TN3270E
+   *      negotiation, perform IMMEDIATELY from here on, bypassing every rule below --
+   *      the typeahead queue, the operator-error drop, the transfer drop and the
+   *      connection-mode gate alike. `Attn_action` (kybd.c:978-1002) never tests
+   *      `kybdlock` at all ("Sends IP, regardless"), and `SysReq_action`'s `IN_E` arm
+   *      (kybd.c:2849-2870) calls `net_abort()` with no lock test either -- only the
+   *      classic (non-E) arm goes through `key_AID` and is subject to every rule below,
+   *      which is why the bypass only names `sysreq` when `inTn3270e()`. `perform`
+   *      itself is unconditional for `sysreq` too (it never consults `isInhibited()`),
+   *      and `sendAttn`/`sysreq` already carry their OWN E/bound and function-negotiated
+   *      checks -- this is only about which keys skip `run`'s OWN lock bookkeeping, not
+   *      about what ends up on the wire.
+   *  2b. (final review #4) Mirrors x3270's `!IN_3270 && !IN_NVT && !IN_SSCP` test
+   *      (kybd.c:276-279): drop rather than queue unless the session is far enough into
+   *      negotiation to be a session at all. `isConnected()` alone is not that test --
+   *      it is true from the moment the socket opens, which is x3270's `TELNET_PENDING`,
+   *      a HALF-connected state neither `IN_3270` nor `IN_NVT` nor `IN_SSCP` covers
+   *      (`cPCONNECTED`/`cIN_3270`/etc., include/globals.h:279-296) -- and stays true
+   *      through a TN3270E session that completed DEVICE-TYPE/FUNCTIONS but never saw a
+   *      BIND, x3270's `CONNECTED_UNBOUND`, which `cIN_3270` also excludes (it names only
+   *      `CONNECTED_3270`, `CONNECTED_TN3270E` and `CONNECTED_SSCP`). `isTypingAllowed()`
+   *      (below) encodes the surviving half of that OR for this codebase: it implements
+   *      no NVT mode (`telnet.ts`'s `is3270Mode` comment, "Stage 1 implements no NVT-mode
+   *      local echo") and no SSCP-LU mode (`handleRecord` traces SSCP-LU-DATA as "not
+   *      implemented, dropped" -- there is no SSCP state to be IN), so only the 3270 half
+   *      is real: `is3270Mode()` once BINARY+EOR are agreed (classic) or negotiation
+   *      completes (TN3270E), AND -- the part `is3270Mode()` alone does not cover --
+   *      `bound` once the session is TN3270E AND negotiated the BIND-IMAGE function,
+   *      since `is3270Mode()` returns true the moment negotiation finishes, which is
+   *      `CONNECTED_UNBOUND` rather than `CONNECTED_TN3270E` only on THAT combination
+   *      (`check_in3270`, Common/telnet.c:3038-3055; see `isTypingAllowed`'s own
+   *      comment for the other half, where BIND-IMAGE was never agreed at all).
+   *  3. No lock: perform now.
+   *  4. Operator-error lock (`oia.isOperatorError()`): `KYBDLOCK_IS_OERR` is checked
+   *     before the host-lock branch below -- an OERR bit present alongside a host lock
+   *     drops rather than queues (`enq_xta`'s own first test). `OERR_CLEARS` members
+   *     (`tab`, the arrows, `home`, `eraseEOF`, `eraseInput`) clear the error and run as
+   *     `perform` would on an unlocked keyboard (`OERR_CLEAR_OR_ENQ`, kybd.c:146-157);
+   *     everything else -- typed characters, `backspace`, `delete`, `newline`, `dup`,
+   *     `fieldMark`, the AIDs, `sysreq` (classic), `insert` -- is dropped with the alarm,
+   *     because x3270's `key_Character` tests `kybdlock` unconditionally and is not
+   *     wrapped in `OERR_CLEAR_OR_ENQ` (kybd.c:1200-1208 vs :146-157): an operator error
+   *     is the operator's to clear with a cursor move or Reset, not with another
+   *     keystroke of the same kind that caused it. (`attn` and an E `sysreq` never reach
+   *     this branch at all any more -- see 2a.)
+   *
+   *     OUR OIA HOLDS ONE KEYBOARD STATE, so x3270's "operator error raised while a host
+   *     lock is also up" (two bits at once) cannot arise here -- `isOperatorError()` is
+   *     only ever true when `isInhibited()` is true for THAT reason, never alongside a
+   *     host lock. `oia.reset()` below is therefore safe to call unconditionally in this
+   *     branch: it cannot un-lock a host lock that coexists with the OERR state, because
+   *     none ever does. Modelled as a comment rather than a second bit, which is why.
+   *
+   *     A QUEUED ACTION RAISING A NEW OPERATOR ERROR IS `drainTypeahead`'s OWN CONCERN,
+   *     not this branch's: see that method's doc comment (final review #1).
+   *  5. Host lock: during a transfer, drop with the alarm (`KL_FT`); otherwise queue.
+   *     MOVED AHEAD OF STEP 3 (final review #3): in x3270, `KL_FT` is a kybdlock bit like
+   *     any other, so a transfer locks the keyboard for EVERY operator key reaching
+   *     `enq_xta`, including one pressed while `oia.keyboard` itself reads Unlocked
+   *     between two CUT frames (the frames restore the keyboard with their own WCC, same
+   *     as any other write) -- testing `!isInhibited()` first let such a key take the
+   *     fast path at step 3 and run immediately, corrupting the transfer. Checking
+   *     `transferring` before step 3 closes that: every operator key drops with the
+   *     alarm for the whole transfer, locked or not, except the two that bypassed
+   *     everything already at 2a.
+   */
+  run(action: KeyAction): RunResult {
+    if (action.kind === 'reset') {
+      // THE HALF RESET, checked whether or not we are connected: a disconnect already
+      // empties the queue (`handleClose`), so the two can never both be true, but the
+      // ORDER mirrors `do_reset`'s own (flush first, unconditionally) rather than
+      // asserting that they are mutually exclusive.
+      if (this.typeahead.length > 0) {
+        this.typeahead.length = 0;
+        this.oia.typeahead = false;
+        return 'done';
+      }
+      this.keyboard.setInsertMode(false);
+      if (this.isConnected()) this.keyboard.reset();
+      return 'done';
+    }
+    if (!this.isConnected()) return 'dropped';
+    if (action.kind === 'attn' || (action.kind === 'sysreq' && this.inTn3270e())) {
+      return this.perform(action);
+    }
+    if (!this.isTypingAllowed()) return 'dropped';
+    if (this.transferring) {
+      this.emit('alarm');
+      return 'dropped';
+    }
+    if (!this.oia.isInhibited()) return this.perform(action);
+    if (this.oia.isOperatorError()) {
+      if (!OERR_CLEARS.has(action.kind)) {
+        this.emit('alarm');
+        return 'dropped';
+      }
+      this.oia.reset();
+      return this.perform(action);
+    }
+    this.typeahead.push(action);
+    this.oia.typeahead = true;
+    return 'queued';
+  }
+
+  /**
+   * Mirrors x3270's `!IN_3270 && !IN_NVT && !IN_SSCP` test in `enq_xta` (kybd.c:276-279):
+   * drop rather than queue unless the session is far enough into negotiation to be a
+   * session at all. See `run`'s doc comment, step 2b, for why `isConnected()` alone is
+   * not this test and why NVT/SSCP do not need their own branch here.
+   */
+  private isTypingAllowed(): boolean {
+    if (!this.is3270Mode()) return false;
+    // `is3270Mode()` is true the moment TN3270E negotiation completes, which is x3270's
+    // `CONNECTED_UNBOUND` ONLY when the host also agreed the BIND-IMAGE function
+    // (`bindImageGranted()`) -- `check_in3270` (Common/telnet.c:3038-3055): a host that
+    // never agreed BIND-IMAGE makes `tn3270e_submode` jump straight to `E_3270` the
+    // moment negotiation completes ("If the host does not support BIND_IMAGE, then we
+    // must go straight to 3270 mode", telnet.c:2334-2339), landing on `CONNECTED_TN3270E`
+    // -- `IN_3270` -- with no BIND wait at all, exactly as `handleRecord`'s own
+    // `bindImageGranted() && !this.bound` gate already treats it (a session that never
+    // negotiated the function skips the pending-BIND branch entirely). Only when the
+    // function WAS agreed does `CONNECTED_UNBOUND` -- not yet `IN_3270` -- persist until
+    // an actual BIND arrives.
+    if (this.inTn3270e() && this.bindImageGranted() && !this.bound) return false;
+    return true;
+  }
+
+  /**
+   * The immediate operation: `Keyboard`'s methods and the AID senders, with NO lock logic of
+   * its own. `run` calls this once a lock has already been found absent (or, for a drained
+   * action, just lifted); `drainTypeahead` calls it directly for the same reason.
+   *
+   * Every kind maps to the method `applyAction` uses today, so this task changes no front-end
+   * behaviour -- only where the call comes from.
+   */
+  private perform(action: KeyAction): RunResult {
+    const k = this.keyboard;
+    switch (action.kind) {
+      case 'type': return k.typeString(action.text) ? 'done' : 'refused';
+      case 'enter': this.sendAID(AID.ENTER); return 'done';
+      case 'clear': this.sendAID(AID.CLEAR); return 'done';
+      case 'pf': this.sendAID(pfAID(action.n)); return 'done';
+      case 'pa': this.sendAID(paAID(action.n)); return 'done';
+      // UNREACHABLE THROUGH `run`/`drainTypeahead`: Reset is handled at the very top of
+      // `run`, before anything that could call `perform` with it, and is therefore never
+      // queued either. Kept so the switch stays exhaustive over every `KeyAction['kind']`
+      // and so a DIRECT `perform` caller (there are none today) still gets Reset's plain
+      // effect rather than a silent no-op.
+      case 'reset': k.reset(); return 'done';
+      case 'up': k.up(); return 'done';
+      case 'down': k.down(); return 'done';
+      case 'left': k.left(); return 'done';
+      case 'right': k.right(); return 'done';
+      case 'home': k.home(); return 'done';
+      case 'tab': k.tab(); return 'done';
+      case 'backTab': k.backTab(); return 'done';
+      case 'newline': k.newline(); return 'done';
+      case 'backspace': k.backspace(); return 'done';
+      case 'delete': k.deleteChar(); return 'done';
+      case 'eraseEOF': k.eraseEOF(); return 'done';
+      case 'eraseInput': k.eraseInput(); return 'done';
+      case 'dup': return k.dup() ? 'done' : 'refused';
+      case 'fieldMark': return k.fieldMark() ? 'done' : 'refused';
+      case 'insert': k.setInsertMode(true); return 'done';
+      case 'toggleInsert': k.setInsertMode(!k.insertMode); return 'done';
+      case 'attn': this.sendAttn(); return 'done';
+      case 'sysreq': this.sysreq(); return 'done';
+      // ADDED (Task 10): the CLI's `BackSpace()`, s3270's non-destructive cursor-left
+      // (`BackSpace_action`, kybd.c:2285) -- see `KeyAction`'s own comment on this kind for
+      // why it is not simply `{ kind: 'left' }`. The physical motion is identical to Left's
+      // (`k.left()`); only the lock classification in `run` differs, via `OERR_CLEARS`.
+      case 'backSpaceLeft': k.left(); return 'done';
+      default: return action satisfies never;
+    }
+  }
+
+  /**
+   * x3270's `while (run_ta())`, called from `ps_process()` at the end of `ctlr_write`
+   * (Common/ctlr.c:2189, the loop itself at :2654) -- i.e. after a 3270 DATA WRITE ONLY.
+   * Called from `executeRecord`, the one place in `handleRecord` that parses and applies a
+   * write; the SSCP-LU-DATA, NVT-DATA, RESPONSE and PRINT-EOJ paths return before reaching
+   * it, and BIND/UNBIND (which are not writes either) do not call it directly -- a BIND that
+   * released a retained pre-BIND record reaches it THROUGH that record's own `executeRecord`
+   * call, exactly as a live write would.
+   *
+   * Runs queued actions oldest-first through `perform` -- the same immediate path an unlocked
+   * `run` takes -- for as long as the keyboard stays unlocked and the queue is non-empty. A
+   * drained AID locks the keyboard again (`sendAID`'s `SystemWait`), so the loop stops there
+   * and whatever follows waits for the next unlock, exactly as `run`'s own queueing would have
+   * left it.
+   *
+   * ONE trailing `'screen'` event for however many actions ran, not one per action: a front
+   * end repaints on 'screen' and a burst of drained keystrokes is one user-visible update, not
+   * several. `executeRecord` emits its OWN 'screen' for the write itself regardless of whether
+   * anything drains, so a write that unlocks and drains something fires 'screen' twice --
+   * once for the host's write, once for the drain -- which is the same two-events-for-two-
+   * causes shape as `sendAID(AID.CLEAR)`'s separate screen clear.
+   *
+   * AN OPERATOR ERROR RAISED BY A DRAINED ACTION FLUSHES WHATEVER IS STILL QUEUED BEHIND IT
+   * (final review #1): x3270's `operator_error` calls `flush_ta()` UNCONDITIONALLY, the same
+   * call it uses to set the OERR lock itself (`kybdlock_set`, `flush_ta`, Common/kybd.c:
+   * 750-755) -- an operator error is not merely a reason to stop THIS iteration, it is a
+   * reason to abandon the rest of the queue, because whatever is behind it was typed against
+   * a screen state the operator has not seen corrected yet. Without this, a queued Enter
+   * behind a queued `type` that lands on a protected field would sit in the queue past the
+   * error, and fire as a stale AID the next time something unlocks the keyboard -- which
+   * could be an unrelated later write, long after the operator moved on.
+   *
+   * THIS IS THE ONE PLACE THAT NEEDS IT, not `run`'s own OERR branch too: that branch only
+   * ever runs with the queue already empty, because the OERR state cannot arise while
+   * something sits queued except by passing through here first -- `run`'s fast and queueing
+   * paths never raise an OERR while leaving items behind (the fast path requires the queue
+   * already empty to be unlocked at all; the OERR_CLEARS members it can re-raise through, like
+   * EraseEOF, only ever run with an empty queue for the same reason). So checking once, right
+   * after the action that could have raised it, covers every path -- not an Oia-level hook,
+   * because the queue (`this.typeahead`) lives on Session, not Oia; `Oia.isOperatorError()` is
+   * read here, not duplicated.
+   */
+  private drainTypeahead(): void {
+    let ran = false;
+    while (this.typeahead.length > 0 && !this.oia.isInhibited()) {
+      const next = this.typeahead.shift()!;
+      this.oia.typeahead = this.typeahead.length > 0;
+      try {
+        this.perform(next);
+      } catch {
+        // As applyAction's own catch-all: a throwing key (an out-of-range `pf`/`pa`, the
+        // only `perform` case that can throw) does nothing rather than crashing the drain
+        // and stranding the rest of the queue undrained.
+      }
+      ran = true;
+      if (this.oia.isOperatorError() && this.typeahead.length > 0) {
+        this.typeahead.length = 0;
+        this.oia.typeahead = false;
+      }
+    }
+    if (ran) this.emit('screen');
+  }
+
+  /**
    * Operator pressed a key that generates an AID.
    *
    * THE BYTE IS CHECKED, and that check is the backstop for a defect that reached a live host: an
@@ -1823,6 +2147,14 @@ export class Session {
       throw new RangeError(`${aid} is not an AID byte; use AID, pfAID(n) or paAID(n)`);
     }
     if (this.telnet === undefined) throw new Error('not connected');
+
+    // EVERY AID TURNS INSERT MODE OFF (the `alwaysInsert` default, off), not only Enter
+    // and not only an operator one: `key_AID` -- the function this method IS -- calls
+    // `insert_mode(toggled(ALWAYS_INSERT))` before anything else it does (kybd.c:920,
+    // ahead of the `aid = aid_code` two lines below). That includes a CUT transfer
+    // driver's own AIDs (`sendAID` stays directly callable for them; see `run`'s doc
+    // comment), because x3270 draws no such exception either -- `key_AID` has none.
+    this.keyboard.setInsertMode(false);
 
     // RECORDED BEFORE IT IS SENT, and it OUTLIVES this record. x3270 does both in two
     // adjacent lines -- `aid = aid_code; ctlr_read_modified(aid, false);` (kybd.c:922-923)
@@ -1881,10 +2213,19 @@ export class Session {
    * That is why the not-connected check is here rather than left to `sendAID`, which throws.
    *
    * REFUSES ON AN INHIBITED KEYBOARD, WHERE x3270 WOULD QUEUE. It refuses outright on
-   * `KL_OIA_MINUS` and calls `enq_ta` on any other lock (`kybd.c:2858-2864`). We have no
-   * action queue and one is not worth inventing for a single key, so both become a refusal:
-   * the press is declined rather than deferred, nothing goes on the wire out of turn, and
-   * the OIA already shows the operator why.
+   * `KL_OIA_MINUS` and calls `enq_ta` on any other lock (`kybd.c:2858-2864`). At the time this
+   * was written there was no action queue and one was not worth inventing for a single key, so
+   * both became a refusal: the press is declined rather than deferred, nothing goes on the wire
+   * out of turn, and the OIA already shows the operator why.
+   *
+   * STALE AS OF Task 10: there IS a queue now (`Session.run`'s typeahead), and the OPERATOR'S
+   * `SysReq()` (CLI) and a keypad/menu SysReq button both reach it through `run`, which queues
+   * a locked `sysreq` kind exactly like every other action (matching `SysReq_action`'s own
+   * `enq_ta` for the non-`KL_OIA_MINUS` case, kybd.c:2858-2864, more closely than this method
+   * ever did alone). The inhibited-keyboard refusal right below is therefore unreachable from
+   * that route -- `run`/`drainTypeahead` only ever call this method once the keyboard is
+   * already unlocked -- and stays live only for a DIRECT caller (a CUT transfer's own AID path,
+   * which `run`'s doc comment says must bypass the queue).
    */
   sysreq(): void {
     if (this.telnet === undefined) {
@@ -1906,9 +2247,32 @@ export class Session {
     this.sendAID(AID.SYSREQ);
   }
 
-  /** Attn is Telnet BREAK (RFC 1576 §8), not an AID. */
+  /**
+   * `Attn_action` (kybd.c:982-1002), not an AID:
+   *
+   *  - TN3270E, bound (`net_bound()`, i.e. `inTn3270e() && this.bound`): Telnet IP
+   *    (`net_interrupt`, telnet.c:3608-3622).
+   *  - TN3270E, unbound: nothing goes on the wire. x3270 shows the OIA minus-function
+   *    indicator and locks the keyboard (`vstatus_minus()` +
+   *    `kybdlock_set(KL_OIA_MINUS, AnAttn)`); `KeyboardState.MinusFunction` is the
+   *    mirror (it renders `X -f`, `Oia.toText`). KL_OIA_MINUS sits outside
+   *    `KL_OERR_MASK` (include/kybd.h:35-49), so it is a HOST lock, not an operator
+   *    error -- `Oia.isOperatorError()` already excludes it, and `run`'s typeahead
+   *    queue (not the alarm-and-drop path) is what a key typed under it would hit.
+   *    Cleared by Reset like any other lock bit: `do_reset`'s `kybdlock_clr` mask
+   *    includes it (kybd.c:2062), matching `Keyboard.reset()`/`Oia.reset()` here.
+   *  - Classic 3270: Telnet BREAK, as before this task (`net_break`, telnet.c:3589-3603).
+   */
   sendAttn(): void {
     if (this.telnet === undefined) throw new Error('not connected');
+    if (this.inTn3270e()) {
+      if (this.bound) {
+        this.telnet.sendInterrupt();
+      } else {
+        this.oia.inhibit(KeyboardState.MinusFunction);
+      }
+      return;
+    }
     this.telnet.sendAttn();
   }
 

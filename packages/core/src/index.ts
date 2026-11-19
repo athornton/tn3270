@@ -20,6 +20,7 @@ export * from './termtype.js';
 export * from './geometry.js';
 export * from './inbound.js';
 export * from './keyboard.js';
+export * from './keyAction.js';
 export * from './oia.js';
 export * from './session.js';
 export * from './ft/cut.js';
