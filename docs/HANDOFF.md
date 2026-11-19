@@ -25,7 +25,8 @@ latest START HERE entry names. Each finished feature has its own pair under `doc
   BackSpace_action is plain enq), `Erase()`, `ToggleInsert()`; AID actions never fail on a lock or
   disconnect, as s3270 (so `Enter()` disconnected now answers `ok`).
 - **Mutation pass (Task 11):** 39 mutations, 2 survivors, both now killed (`7421245`).
-- **Live:** typeahead and oerr-lock witnessed from the CLI on VM/370 (`docs/live-testing.md`,
+- **GUI witnesses DONE 2026-11-19** (`docs/live-testing.md`, *The keyboard semantics, from the GUI against VM/370 — 2026-11-19*): typeahead + an AID queued behind an AID (relay holds host replies 1.5 s), oerr-lock, insert off after an AID and after Reset, Erase close-up; each run discriminates against `main`. Not live: Delete/EraseEOF unformatted, TK5, Attn on TN3270E. Gate now **107 blocking**. The user (2026-11-19) keeps aid-keys/attn non-blocking until a real TN3270E host is lined up, and accepts Reset-during-transfer not clearing `transferring` as a divergence.
+- **Live (earlier):** typeahead and oerr-lock witnessed from the CLI on VM/370 (`docs/live-testing.md`,
   *Typeahead and the operator-error lock, from the CLI against VM/370 — 2026-11-19*). **Owed (Task
   12):** the GUI witnesses in the spec (typeahead, AID behind AID, oerr-lock with the bell, insert
   off after Enter/Reset, Erase close-up, Delete/EraseEOF unformatted).

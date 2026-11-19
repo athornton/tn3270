@@ -381,7 +381,7 @@
   evidence:
     code: [packages/canvas/src/keys.ts:124, packages/frontend/src/keypad.ts:104, packages/cli/src/runner.ts:445, packages/core/src/session.ts:1901, packages/core/src/session.ts:1912, packages/core/src/oia.ts:173]
     tests: [packages/core/test/keyboard.test.ts, packages/canvas/test/keys.test.ts, packages/core/test/typeahead.test.ts]
-    live: unwitnessed
+    live: "The keyboard semantics, from the GUI against VM/370 — 2026-11-19"
   browser: "the same Ctrl-R and keypad button"
   others: {tui: "Ctrl-R", cli: "Reset()"}
 - id: cursor-movement
@@ -407,7 +407,7 @@
   evidence:
     code: [packages/canvas/src/keys.ts:98, packages/core/src/keyboard.ts:508, packages/core/src/keyboard.ts:525, packages/core/src/keyAction.ts:21, packages/cli/src/runner.ts:440, packages/cli/src/runner.ts:441]
     tests: [packages/core/test/keyboard.test.ts, packages/core/test/typeahead.test.ts, packages/cli/test/runner.test.ts]
-    live: unwitnessed
+    live: "The keyboard semantics, from the GUI against VM/370 — 2026-11-19"
   browser: "the same Backspace and keypad button"
   others: {tui: "Backspace erases, same as every front end", cli: "BackSpace() moves the cursor left, as s3270's own (non-destructive); Erase() is a new verb for the destructive close-up"}
 - id: delete-key
@@ -459,7 +459,7 @@
   evidence:
     code: [packages/canvas/src/keys.ts:103, packages/frontend/src/keypad.ts:102, packages/cli/src/runner.ts:449, packages/core/src/session.ts:1242, packages/core/src/session.ts:1912, packages/core/src/session.ts:2047, packages/core/src/keyboard.ts:316]
     tests: [packages/core/test/keyboard.test.ts, packages/core/test/typeahead.test.ts, packages/frontend/test/actions.test.ts, packages/canvas/test/keys.test.ts]
-    live: unwitnessed
+    live: "The keyboard semantics, from the GUI against VM/370 — 2026-11-19"
   browser: "the same Insert key and keypad button"
   others: {tui: "Insert key toggles", cli: "Insert() sets insert mode on, as x3270's Insert_action; ToggleInsert() toggles"}
 - id: always-insert
@@ -485,11 +485,11 @@
   x3270: "Options → Toggles → Typeahead; typeahead toggle, ON by default (x3270/resources.c:399-400): keys pressed while the host holds the keyboard are queued and run at unlock (enq_xta, Common/kybd.c:270)"
   gui: "no toggle: the queue is on unconditionally, same as every front end -- Session.run queues behind a host lock and drainTypeahead runs the queue oldest-first on the next write, pausing at a queued AID; the OIA shows x3270's T indicator while it is non-empty"
   status: partial
-  gap: "no setting (15b): no Options → Toggles → Typeahead item and no resource, so the queue cannot be turned off; the queue, drain, half reset and T indicator otherwise match x3270 (enq_xta/run_ta, Common/kybd.c:270/:351). Witnessed from the CLI against VM/370; no GUI witness yet"
+  gap: "no setting (15b): no Options → Toggles → Typeahead item and no resource, so the queue cannot be turned off; the queue, drain, half reset and T indicator otherwise match x3270 (enq_xta/run_ta, Common/kybd.c:270/:351). Witnessed from the CLI and the GUI against VM/370"
   evidence:
     code: [packages/core/src/session.ts:1901, packages/core/src/session.ts:2006, packages/core/src/oia.ts:88]
     tests: [packages/core/test/typeahead.test.ts]
-    live: "Typeahead and the operator-error lock, from the CLI against VM/370 — 2026-11-19"
+    live: "The keyboard semantics, from the GUI against VM/370 — 2026-11-19"
   browser: "the same queue, through the shared applyAction"
   others: {cli: "the same queue; a script's keys typed right after an AID now queue and run at unlock, as s3270's would"}
 - id: oerr-lock
@@ -499,11 +499,11 @@
   x3270: "oerrLock resource, ON by default (x3270/resources.c:340-341): an operator error locks the keyboard and drops further keys until Reset or a cursor move (operator_error, Common/kybd.c:743-756)"
   gui: "no flag: the lock is on unconditionally, same as every front end, through the shared Session.run"
   status: partial
-  gap: "no setting (15b): oerrLock is on unconditionally, with no resource to turn it off. Otherwise matches x3270 -- under an operator error, OERR_CLEARS (tab, backTab, home, the arrows, eraseEOF, eraseInput) clear it and act; everything else (typed characters, backspace, delete, newline, dup, fieldMark, the AIDs, attn, sysreq, insert) drops with the alarm until Reset or one of those clearing keys (OERR_CLEAR_OR_ENQ, Common/kybd.c:146-157; Session.run). Witnessed from the CLI against VM/370; no GUI witness yet"
+  gap: "no setting (15b): oerrLock is on unconditionally, with no resource to turn it off. Otherwise matches x3270 -- under an operator error, OERR_CLEARS (tab, backTab, home, the arrows, eraseEOF, eraseInput) clear it and act; everything else (typed characters, backspace, delete, newline, dup, fieldMark, the AIDs, attn, sysreq, insert) drops with the alarm until Reset or one of those clearing keys (OERR_CLEAR_OR_ENQ, Common/kybd.c:146-157; Session.run). Witnessed from the CLI and the GUI against VM/370"
   evidence:
     code: [packages/core/src/keyAction.ts:61, packages/core/src/session.ts:1901, packages/core/src/session.ts:1918, packages/core/src/oia.ts:161]
     tests: [packages/core/test/typeahead.test.ts, packages/core/test/keyboard.test.ts]
-    live: "Typeahead and the operator-error lock, from the CLI against VM/370 — 2026-11-19"
+    live: "The keyboard semantics, from the GUI against VM/370 — 2026-11-19"
   browser: "the same core behaviour"
 - id: numeric-lock
   area: keyboard
