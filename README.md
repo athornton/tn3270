@@ -992,7 +992,7 @@ on the invocation and cannot be written into the script.
 
 **Commands.** `Connect` `Disconnect` `Reconnect` `Quit` · `String` `Enter` `Clear` `PF` `PA`
 `Attn` `Reset` `SysReq` · `Up` `Down` `Left` `Right` `Home` `Tab` `BackTab` `Newline`
-`MoveCursor` · `BackSpace` `Delete` `Insert` `EraseEOF` `EraseInput` `Dup` `FieldMark` ·
+`MoveCursor` · `BackSpace` `Erase` `Delete` `Insert` `ToggleInsert` `EraseEOF` `EraseInput` `Dup` `FieldMark` ·
 `ScreenText` `ScreenJson` `Ascii` `Snap` · `Trace` `TraceText` `Replay` · `Transfer`
 · `Wait` · `Set`
 

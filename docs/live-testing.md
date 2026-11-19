@@ -1307,6 +1307,29 @@ like a blink that never flipped. `decodePng` in `scripts/smoke-lib.mjs` reads th
   flash handlers, the tone through an injected AudioContext, one context reused, a malformed alarm
   dropped).
 
+## Typeahead and the operator-error lock, from the CLI against VM/370 — 2026-11-19
+
+Branch `keyboard-semantics` at `7421245`, the CLI (`packages/cli/dist/main.js -insecure`),
+against VM/370 CE on `localhost:3270`, not logged on. The CLI reaches the keyboard through the
+same `Session.run` as the GUI, the browser and the TUI; the GUI witnesses in the spec are still
+owed.
+
+```bash
+printf 'Connect(127.0.0.1:3270)\nWait(3270Mode,20)\nWait(Settle,10)\nScreenText\nEnter\nString("logon cmsuser")\nWait(Settle,10)\nScreenText\nMoveCursor(0,0)\nString("a")\nString("b")\nTab\nString("c")\nScreenText\nQuit\n' \
+  | node packages/cli/dist/main.js -insecure
+```
+
+- **Typeahead:** on the logo screen, `Enter` locked the keyboard (status field 1 `L`), and the
+  `String("logon cmsuser")` sent straight after it answered `ok` with the keyboard still `L`:
+  queued, not refused (before this branch it failed with `input inhibited`). After
+  `Wait(Settle)` the CP READ screen showed `logon cmsuser` on row 22 with the cursor at column
+  13: the queued text ran when VM unlocked the keyboard.
+- **oerr-lock:** `MoveCursor(0,0)` (a protected cell) then `String("a")`: `error`,
+  `input inhibited`, keyboard `L`, field 3 `P` (X Protected). `String("b")`: `error` again,
+  dropped. `Tab`: `ok`, keyboard `U`, cursor 22,0. `String("c")`: `ok`, and the input line read
+  `cogon cmsuser` (overtyping, insert off). Before this branch `b` would have gone in under the
+  still-displayed X Protected.
+
 ## Step 1 — Confirm the host is reachable
 
 Substitute the real host and port (do not guess; get these from whoever
