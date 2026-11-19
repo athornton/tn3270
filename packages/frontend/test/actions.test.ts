@@ -166,9 +166,12 @@ describe('applyAction: the newly-bound actions', () => {
     // negotiated TN3270E -- `unlockedSession`'s `negotiate()` does not. Attn is NOT an AID, so
     // this must not go anywhere near sendAID.
     //
-    // UNLOCKED, NOT MERELY CONNECTED (Task 9): `applyAction` now calls `session.run`, which
-    // queues `attn` rather than reaching `sendAttn` at all while the session is still
-    // `AwaitingFirstWrite`. A bare `newSession()` here would leave the spy uncalled.
+    // `unlockedSession()` IS STILL NEEDED HERE, BUT NOT FOR LOCK STATE ANY MORE (final review
+    // #2 superseded the Task 9 reasoning this comment used to give): `Session.run` now performs
+    // `attn` immediately regardless of the lock, so a bare `newSession()` would reach
+    // `sendAttn` too. What `unlockedSession()` still buys is a CLASSIC (non-TN3270E)
+    // negotiation -- this test's assertion (`IAC BREAK`, not `IAC IP`) depends on `inTn3270e()`
+    // being false, which `newSession()` alone (never negotiated at all) would not pin either.
     const { session } = await unlockedSession();
     const attn = vi.spyOn(session, 'sendAttn');
     const aid = vi.spyOn(session, 'sendAID');

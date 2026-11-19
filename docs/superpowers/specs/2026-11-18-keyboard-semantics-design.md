@@ -52,9 +52,30 @@ front-end-only kinds.
 
 ### What `run` does, in this order (x3270's `enq_xta`, `kybd.c:270-330`, and `OERR_CLEAR_OR_ENQ`, `kybd.c:146-157`)
 
+> **Amended 2026-11-19 after the final review**, in three places marked below (and see
+> *Draining* for a fourth): `attn`/TN3270E `sysreq` now bypass every step here (new step 2a); the
+> connection-state test in step 1 is enforced precisely, not just as `isConnected()` (step 1
+> itself, detail added); and the file-transfer drop moves ahead of step 3, because `KL_FT` is a
+> lock bit like any other and must block the UNLOCKED fast path too, not only act as a
+> tie-breaker once something else has already locked the keyboard (was step 5, now 2b — the
+> wording below used to leave it looking like a host-lock-only concern, which was the defect).
+
 1. **Not connected** (no 3270, NVT or SSCP mode): drop the action. (The reconnect-on-Enter
-   divergence is above this, in `applyAction`, and is unchanged.)
+   divergence is above this, in `applyAction`, and is unchanged.) **Precisely**: this is not
+   `isConnected()` — the socket can be open with nothing negotiated yet (x3270's
+   `TELNET_PENDING`), or TN3270E negotiated with no BIND seen yet (`CONNECTED_UNBOUND`, only
+   reachable when the host also agreed the BIND-IMAGE function); both drop here too, where they
+   used to be queued.
 2. **Explicit Reset** is handled before the lock tests: see *Reset* below.
+2a. **`attn`, and `sysreq` on a session that completed TN3270E negotiation, bypass every rule
+   below** and perform at once: `Attn_action` (`kybd.c:978-1002`) never tests `kybdlock` at
+   all ("Sends IP, regardless"), and `SysReq_action`'s `IN_E` arm (`kybd.c:2849-2870`) calls
+   `net_abort()` with no lock test either — only the classic (non-E) `sysreq` arm is subject to
+   everything below. `KL_FT` does not matter to either, for the same reason.
+2b. **File transfer in progress** (`KL_FT`): drop with the alarm, whatever the lock state —
+   including Unlocked, between two CUT frames. In x3270 `KL_FT` is a `kybdlock` bit
+   (`kybd_ft`, `kybd.c:544-556`), so it governs step 3 below exactly as any other lock bit does;
+   it is not merely a reason the queueing branch (step 5) picks drop over queue.
 3. **No lock:** perform the action now.
 4. **Operator-error lock only** (`ProtectedField`, `Numeric`, `Overflow` and any other OERR state;
    x3270's `KYBDLOCK_IS_OERR`):
@@ -63,14 +84,13 @@ front-end-only kinds.
      DeleteField, DeleteWord, FieldEnd and PreviousWord are the same but we have no such
      actions) — clear the error and then act;
    - **every other action** — typed characters, `backspace`, `delete`, `newline`, `dup`,
-     `fieldMark`, the AIDs, `attn`, `sysreq`, insert — is dropped and the alarm is rung (the same
-     `'alarm'` event the host's WCC alarm uses, so `-visualbell` applies).
+     `fieldMark`, the AIDs, `sysreq` (classic), insert — is dropped and the alarm is rung (the
+     same `'alarm'` event the host's WCC alarm uses, so `-visualbell` applies). (`attn` and a
+     TN3270E `sysreq` never reach this step — see 2a.)
 5. **Host lock** (any non-OERR state: `SystemWait`, `AwaitingFirstWrite`, `EnterInhibit`,
-   `ProgramCheck`, ...):
-   - during a file transfer (a DFT or CUT transfer in progress), drop it and ring the alarm
-     (`KL_FT`);
-   - otherwise append it to the typeahead queue. The OIA shows x3270's typeahead indicator, a `T`
-     (`x3270/status.c` `do_typeahead`), while the queue is non-empty.
+   `ProgramCheck`, ...): append it to the typeahead queue. The OIA shows x3270's typeahead
+   indicator, a `T` (`x3270/status.c` `do_typeahead`), while the queue is non-empty. (The
+   file-transfer drop that used to be listed here moved to 2b, ahead of step 3.)
 
 With an operator error and a host lock together, the host lock wins (x3270: `KYBDLOCK_IS_OERR` is
 false), and queueing then drops on the OERR bit (`enq_xta`'s first test) — that is, the action is
@@ -83,6 +103,13 @@ first, for as long as the keyboard is unlocked and the queue is non-empty. A que
 keyboard again, so whatever follows it waits for the next unlock. Each drained action goes through
 the same immediate path as an unlocked `run` (step 3), so an operator error raised by a drained
 key behaves exactly as one raised live.
+
+**Amended 2026-11-19 after the final review**: an operator error raised by a drained action also
+**flushes whatever is still queued behind it**, same as x3270's `operator_error` calling
+`flush_ta()` unconditionally when it sets the OERR lock (`kybd.c:750-755`). Before this, a drained
+action that itself raised `X Protected`/`Numeric`/`Overflow` left the rest of the queue sitting
+there past the error — a queued Enter behind it would later fire as a stale AID whenever something
+next unlocked the keyboard, which the operator never asked for once the error showed up.
 
 Disconnecting empties the queue (`kybd_connect` -> `flush_ta`, `kybd.c:591`).
 

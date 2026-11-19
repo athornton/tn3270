@@ -359,11 +359,15 @@ describe('Session.run: the typeahead queue under a host lock (Task 2)', () => {
 
 describe('Session.run: operator-error lock (Task 3, oerrLock)', () => {
   /**
-   * Everything OERR_CLEARS does NOT name: typed characters, the AIDs, Attn,
-   * SysReq and insert all get DROPPED under an operator error rather than
-   * cleared-and-acted (spec section A step 4; x3270's key_Character checks
-   * `kybdlock` unconditionally and is not wrapped in OERR_CLEAR_OR_ENQ,
-   * kybd.c:146-157 vs :1200-1208).
+   * Everything OERR_CLEARS does NOT name: typed characters, the AIDs, SysReq and
+   * insert all get DROPPED under an operator error rather than cleared-and-acted
+   * (spec section A step 4; x3270's key_Character checks `kybdlock`
+   * unconditionally and is not wrapped in OERR_CLEAR_OR_ENQ, kybd.c:146-157 vs
+   * :1200-1208).
+   *
+   * NOT `attn` ANY MORE (final review #2): `Attn_action` (kybd.c:978-1002) never
+   * tests `kybdlock` at all -- "Sends IP, regardless" -- so `run` now performs it
+   * immediately whatever the lock state. See the dedicated describe block below.
    */
   const dropKinds: KeyAction[] = [
     { kind: 'type', text: 'B' },
@@ -374,7 +378,6 @@ describe('Session.run: operator-error lock (Task 3, oerrLock)', () => {
     { kind: 'fieldMark' },
     { kind: 'enter' },
     { kind: 'pf', n: 1 },
-    { kind: 'attn' },
     { kind: 'sysreq' },
     { kind: 'insert' },
     { kind: 'toggleInsert' },
@@ -639,5 +642,170 @@ describe('Session.run: Reset half/full, and insert mode off on an AID/Reset/rest
     expect(session.keyboard.insertMode).toBe(true);
     expect(session.run({ kind: 'toggleInsert' })).toBe('done');
     expect(session.keyboard.insertMode).toBe(false);
+  });
+});
+
+/**
+ * Final review #1: x3270's `operator_error` calls `flush_ta()` unconditionally when it
+ * sets the OERR lock (Common/kybd.c:750-755) -- not only the half-reset `Reset` key does
+ * deliberately (Task 4 above), but EVERY time an operator error is raised, including one
+ * raised from inside a drained action. Before this fix, `drainTypeahead` only checked
+ * `oia.isInhibited()` between actions, so a drained action that itself raised an operator
+ * error left whatever ran behind it still queued -- a queued Enter would later fire as a
+ * stale AID the operator never asked for once the error cleared.
+ */
+describe('Session.run: an operator error flushes the typeahead queue (final review #1)', () => {
+  it('flushes a queued Enter when a drained type raises X Protected, and a later restore sends no AID', async () => {
+    const { session, conn } = await connectedWithProtectedField();
+    session.keyboard.moveCursor(1); // the protected field's own data cell
+
+    // Lock the keyboard first (SystemWait), cursor still parked on the protected
+    // field, so the next two actions queue instead of running.
+    expect(session.run({ kind: 'enter' })).toBe('done');
+    expect(session.oia.keyboard).toBe(KeyboardState.SystemWait);
+
+    expect(session.run({ kind: 'type', text: 'A' })).toBe('queued');
+    expect(session.run({ kind: 'enter' })).toBe('queued');
+    expect(session.oia.typeahead).toBe(true);
+
+    conn.sent = [];
+    conn.host(SnaCmd.W, 0x02, T.IAC, T.EOR); // restore: drains the queue
+
+    // The drained 'type A' hit the protected field and raised X Protected. The
+    // queued Enter behind it must be GONE, not merely paused.
+    expect(session.oia.keyboard).toBe(KeyboardState.ProtectedField);
+    expect(session.oia.typeahead).toBe(false);
+
+    conn.host(SnaCmd.W, 0x02, T.IAC, T.EOR); // a later restore: nothing left to drain
+
+    expect(conn.sent).toEqual([]);
+  });
+
+  it('leaves the queue alone when the drained action does not raise an operator error', async () => {
+    // A control, pinned alongside the fix above: a drain that unlocks cleanly (no OERR)
+    // must still run everything behind it, exactly as the existing "drains an AID-then-type
+    // queue" test already covers -- this just makes the non-OERR case explicit in the same
+    // describe block, so a future change to the new flush cannot silently start flushing a
+    // queue that never raised an error at all.
+    const { session, conn } = await connectedWithField();
+    session.keyboard.moveCursor(1);
+    session.run({ kind: 'enter' }); // SystemWait
+    session.run({ kind: 'type', text: 'X' }); // queued, will drain cleanly
+
+    conn.host(SnaCmd.W, 0x02, T.IAC, T.EOR);
+
+    expect(session.screen.cellAt(1).ebcdic).toBe(0xe7); // X
+    expect(session.oia.keyboard).toBe(KeyboardState.Unlocked);
+  });
+});
+
+/**
+ * Final review #2: `Attn_action` (kybd.c:978-1002) never tests `kybdlock` -- "Sends IP,
+ * regardless" -- and `SysReq_action`'s `IN_E` arm (kybd.c:2849-2870) calls `net_abort()`
+ * with no lock test either; only the classic (non-E) arm goes through `key_AID` and the
+ * normal queueing rules. `run` must perform both immediately, bypassing the typeahead
+ * queue, the operator-error drop and the transfer drop alike.
+ */
+describe('Session.run: Attn and TN3270E SysReq bypass kybdlock entirely (final review #2)', () => {
+  it('sends IAC BREAK at once under a host lock (SystemWait)', async () => {
+    const { session, conn } = await connectedWithField();
+    session.keyboard.moveCursor(1);
+    session.run({ kind: 'enter' }); // SystemWait
+    expect(session.oia.keyboard).toBe(KeyboardState.SystemWait);
+    conn.sent = [];
+
+    const r = session.run({ kind: 'attn' });
+
+    expect(r).toBe('done');
+    expect(conn.sent).toEqual([T.IAC, T.BREAK]);
+    // Nothing queued behind it: the action never touched the queue at all.
+    expect(session.oia.typeahead).toBe(false);
+    // The host lock itself is untouched -- Attn does not clear kybdlock, it just
+    // ignores it on the way out.
+    expect(session.oia.keyboard).toBe(KeyboardState.SystemWait);
+  });
+
+  it('sends IAC BREAK at once under an operator error too', async () => {
+    const { session, conn } = await connectedWithProtectedField();
+    session.keyboard.moveCursor(1);
+    session.run({ kind: 'type', text: 'A' }); // raises X Protected
+    expect(session.oia.keyboard).toBe(KeyboardState.ProtectedField);
+    conn.sent = [];
+
+    const onAlarm = vi.fn();
+    session.on('alarm', onAlarm);
+    const r = session.run({ kind: 'attn' });
+
+    expect(r).toBe('done');
+    expect(conn.sent).toEqual([T.IAC, T.BREAK]);
+    expect(onAlarm).not.toHaveBeenCalled();
+    // The operator error itself is untouched: Attn is not one of OERR_CLEARS and
+    // does not clear it, it simply ignores it.
+    expect(session.oia.keyboard).toBe(KeyboardState.ProtectedField);
+  });
+});
+
+/**
+ * Final review #3: in x3270, `KL_FT` is itself a kybdlock bit (`kybd_ft`, kybd.c:544-556),
+ * so EVERY operator key reaches `enq_xta` while a transfer is up and is dropped there
+ * (kybd.c:~295) -- including one pressed between CUT frames, while the keyboard happens to
+ * be Unlocked because the last frame's WCC restored it. Before this fix, `run` tested
+ * `!isInhibited()` before `transferring`, so such a key took the unlocked fast path and ran
+ * immediately, corrupting the transfer.
+ */
+describe('Session.run: transferring blocks the unlocked fast path too (final review #3)', () => {
+  it('drops Enter with the alarm, sending nothing, even though the keyboard is Unlocked', async () => {
+    const { session, conn } = await connectedWithField();
+    session.keyboard.moveCursor(1);
+    expect(session.oia.keyboard).toBe(KeyboardState.Unlocked);
+    session.transferring = true;
+
+    const onAlarm = vi.fn();
+    session.on('alarm', onAlarm);
+    const r = session.run({ kind: 'enter' });
+
+    expect(r).toBe('dropped');
+    expect(onAlarm).toHaveBeenCalledTimes(1);
+    expect(conn.sent).toEqual([]);
+    expect(session.oia.typeahead).toBe(false);
+  });
+
+  it('drops a typed character the same way, Unlocked, mid-transfer', async () => {
+    const { session } = await connectedWithField();
+    session.keyboard.moveCursor(1);
+    session.transferring = true;
+
+    const onAlarm = vi.fn();
+    session.on('alarm', onAlarm);
+    const r = session.run({ kind: 'type', text: 'X' });
+
+    expect(r).toBe('dropped');
+    expect(onAlarm).toHaveBeenCalledTimes(1);
+    expect(session.screen.cellAt(1).ebcdic).toBe(0x00);
+  });
+});
+
+/**
+ * Final review #4: x3270's `enq_xta` drops unless `IN_3270 || IN_NVT || IN_SSCP`
+ * (kybd.c:276-279); `TELNET_PENDING` and `CONNECTED_UNBOUND` are neither
+ * (include/globals.h:284-291). Before this fix, `run`'s gate was just `isConnected()` --
+ * `conn !== undefined` -- which is already true the instant the socket opens, before any
+ * negotiation at all, so a key typed during negotiation got QUEUED rather than dropped and
+ * replayed onto the first screen the host painted.
+ */
+describe('Session.run: the connection-state gate, not just isConnected() (final review #4)', () => {
+  it('drops a key before any telnet negotiation has happened, rather than queuing it', async () => {
+    const { session, conn } = newSession();
+    await session.connect('localhost', 3270);
+    // No conn.negotiate() -- mirrors x3270's TELNET_PENDING, which IN_3270/IN_NVT/IN_SSCP
+    // all exclude.
+    expect(session.isConnected()).toBe(true);
+    expect(session.is3270Mode()).toBe(false);
+
+    const r = session.run({ kind: 'enter' });
+
+    expect(r).toBe('dropped');
+    expect(session.oia.typeahead).toBe(false);
+    expect(conn.sent).toEqual([]);
   });
 });

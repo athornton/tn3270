@@ -39,13 +39,17 @@ export type KeyAction =
  *
  * The CLI's `String()`, `Dup()` and `FieldMark()` turn `dropped`/`refused` into their own
  * errors. `Enter()`, `Clear()`, `PF()`, `PA()`, `Attn()` and `SysReq()` do NOT (Task 10):
- * s3270's own action functions for all six (`Common/kybd.c`: `Enter_action`, `PF_action:929`,
- * `PA_action`, `Clear_action`, `Attn_action:982`, `SysReq_action:2849`) call `enq_ta`/`enq_xta`
- * under ANY lock -- not connected, an operator error, or a host lock alike -- and then `return
- * true` regardless; the one thing that fails any of them is `check_argc`'s argument-shape
- * check, which this runner does its own way before ever calling `run`. Every other `KeyAction`
- * kind reaching `run` from the CLI also discards the result, the same way `applyAction`
- * (frontend) discards it for a key press.
+ * s3270's own action functions for all six return `true` UNCONDITIONALLY except for
+ * `check_argc`'s argument-shape check, which this runner does its own way before ever calling
+ * `run` -- but NOT all six get there the same way, corrected after the final review. `Enter_
+ * action`, `PF_action:929`, `PA_action` and `Clear_action` (`Common/kybd.c`) call `enq_ta`/
+ * `enq_xta` under ANY lock -- not connected, an operator error, or a host lock alike -- and
+ * `SysReq_action:2849`'s CLASSIC (non-E) arm does too. `Attn_action:982` and `SysReq_action`'s
+ * OWN `IN_E` arm do not call `enq_ta`/`enq_xta` at all: neither tests `kybdlock`, which is why
+ * `Session.run` now performs both immediately rather than routing them through the lock/queue
+ * logic that produces `'queued'` -- see `Session.run`'s own doc comment, step 2a. Every other
+ * `KeyAction` kind reaching `run` from the CLI also discards the result, the same way
+ * `applyAction` (frontend) discards it for a key press.
  */
 export type RunResult = 'done' | 'queued' | 'dropped' | 'refused';
 
