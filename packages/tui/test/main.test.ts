@@ -4,6 +4,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { SCHEMES } from '@tn3270/frontend';
 import { BANNER, buildSession, connectFirst, parseArgs, run, UsageError } from '../src/main.js';
 import type { HostProcess } from '../src/app.js';
+import { prefsToArgv, TUI_PREF_KEYS, resolveScheme } from '@tn3270/frontend';
+const SCHEME_OF = (n: string): unknown => resolveScheme(n);
+const COLORS_OF = (n: string): unknown => parseArgs(['--colors', n, 'vm']).colors;
+
 
 // Importing this module is safe: the entry point is behind an `isMain(import.meta.url)` guard
 // (packaging milestone, 2026-11-05 -- replaced the old `import.meta.url ===
@@ -435,5 +439,31 @@ describe('usage covers every flag', () => {
     expect(flags.length).toBeGreaterThan(5);
     const { USAGE } = await import('../src/main.js');
     expect(flags.filter((f) => !(USAGE as string).includes(f))).toEqual([]);
+  });
+});
+
+describe('a flag beats the preferences file, for every stored key', () => {
+  // [key, file value, flag tokens, read the parsed setting, the file's expected reading, the flag's]
+  const rows: Array<[string, unknown, string[], (a: any) => unknown, unknown, unknown]> = [
+    ['model', '3278-2', ['-model', '3278-4-E'], (a) => a.model, '3278-2', '3278-4-E'],
+    ['oversize', 'auto', ['-oversize', 'none'], (a) => a.oversize?.kind, 'auto', 'none'],
+    ['scheme', 'green', ['-scheme', 'default'], (a) => a.scheme, SCHEME_OF('green'), SCHEME_OF('default')],
+    ['codepage', 'cp037', ['-charset', 'bracket'], (a) => a.codePage?.name, 'cp037', 'bracket'],
+    ['tn3270e', true, ['-tn3270e', 'off'], (a) => a.tn3270e, true, false],
+    ['bind-image', false, ['-bind-image', 'on'], (a) => a.bindImage, false, true],
+    ['bind-limit', false, ['-bind-limit', 'on'], (a) => a.bindLimit, false, true],
+    ['ddm', false, ['-ddm', 'on'], (a) => a.ddm, false, true],
+    ['cafile', '/file.pem', ['-cafile', '/flag.pem'], (a) => (a.tls as { caFile?: string } | undefined)?.caFile, '/file.pem', '/flag.pem'],
+    ['colors', 16, ['--colors', '256'], (a) => a.colors, COLORS_OF('16'), COLORS_OF('256')],
+  ];
+  for (const [key, fileValue, flag, read, fromFile, fromFlag] of rows) {
+    it(key, () => {
+      const file = prefsToArgv({ [key]: fileValue }, TUI_PREF_KEYS).argv;
+      expect(read(parseArgs([...file, 'vm']))).toEqual(fromFile);
+      expect(read(parseArgs([...file, ...flag, 'vm']))).toEqual(fromFlag);
+    });
+  }
+  it('visualbell from the file (there is no flag to turn it off)', () => {
+    expect(parseArgs([...prefsToArgv({ visualbell: true }, TUI_PREF_KEYS).argv, 'vm']).visualBell).toBe(true);
   });
 });

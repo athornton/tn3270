@@ -5,6 +5,9 @@ import type { GeometrySetting } from '@tn3270/core';
 import {
   buildSession, MissingHostError, parseGuiArgs, printGeometryNotices, USAGE, UsageError,
 } from '../src/args.js';
+import { prefsToArgv, GUI_PREF_KEYS, resolveScheme } from '@tn3270/frontend';
+const SCHEME_OF = (n: string): unknown => resolveScheme(n);
+
 
 /**
  * A throwaway server that opens with IAC DO TERMINAL-TYPE and records the FIRST byte each client
@@ -431,5 +434,30 @@ describe('usage covers every flag', () => {
     expect(flags.length).toBeGreaterThan(5);
     const { USAGE } = await import('../src/args.js');
     expect(flags.filter((f) => !(USAGE as string).includes(f))).toEqual([]);
+  });
+});
+
+describe('a flag beats the preferences file, for every stored key', () => {
+  // [key, file value, flag tokens, read the parsed setting, the file's expected reading, the flag's]
+  const rows: Array<[string, unknown, string[], (a: any) => unknown, unknown, unknown]> = [
+    ['model', '3278-2', ['-model', '3278-4-E'], (a) => a.model, '3278-2', '3278-4-E'],
+    ['oversize', 'auto', ['-oversize', 'none'], (a) => a.oversize?.kind, 'auto', 'none'],
+    ['scheme', 'green', ['-scheme', 'default'], (a) => a.scheme, SCHEME_OF('green'), SCHEME_OF('default')],
+    ['codepage', 'cp037', ['-charset', 'bracket'], (a) => a.codePage?.name, 'cp037', 'bracket'],
+    ['tn3270e', true, ['-tn3270e', 'off'], (a) => a.tn3270e, true, false],
+    ['bind-image', false, ['-bind-image', 'on'], (a) => a.bindImage, false, true],
+    ['bind-limit', false, ['-bind-limit', 'on'], (a) => a.bindLimit, false, true],
+    ['ddm', false, ['-ddm', 'on'], (a) => a.ddm, false, true],
+    ['cafile', '/file.pem', ['-cafile', '/flag.pem'], (a) => (a.tls as { caFile?: string } | undefined)?.caFile, '/file.pem', '/flag.pem'],
+  ];
+  for (const [key, fileValue, flag, read, fromFile, fromFlag] of rows) {
+    it(key, () => {
+      const file = prefsToArgv({ [key]: fileValue }, GUI_PREF_KEYS).argv;
+      expect(read(parseGuiArgs([...file, 'vm']))).toEqual(fromFile);
+      expect(read(parseGuiArgs([...file, ...flag, 'vm']))).toEqual(fromFlag);
+    });
+  }
+  it('visualbell from the file (there is no flag to turn it off)', () => {
+    expect(parseGuiArgs([...prefsToArgv({ visualbell: true }, GUI_PREF_KEYS).argv, 'vm']).visualBell).toBe(true);
   });
 });
