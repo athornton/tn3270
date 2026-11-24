@@ -218,7 +218,8 @@ export class App {
   private readonly stdout: OutputStream;
   private readonly host: HostProcess;
   private readonly renderer: TerminalRenderer;
-  private readonly mode3279: boolean;
+  /** An explicit override of the session's color mode; absent means the snapshot's (the model's). */
+  private readonly mode3279: boolean | undefined;
   private readonly visualBell: boolean;
   private buffer: number[] = [];
   private escTimer: ReturnType<typeof setTimeout> | undefined;
@@ -351,7 +352,7 @@ export class App {
     this.stdout = opts.stdout;
     this.host = opts.host;
     this.files = opts.files;
-    this.mode3279 = opts.mode3279 ?? true;
+    this.mode3279 = opts.mode3279;
     this.visualBell = opts.visualBell ?? false;
     const screen = { rows: this.session.screen.rows, cols: this.session.screen.cols };
     this.renderer = new TerminalRenderer({
@@ -630,7 +631,8 @@ export class App {
     // Nothing may be painted once the terminal has been handed back; see the
     // note on `quitting`. Nor while suspended -- see that field.
     if (this.quitting || this.restored || this.suspended) return;
-    const cells = resolve(this.session.screen.snapshot(), { mode3279: this.mode3279 });
+    const cells = resolve(this.session.screen.snapshot(),
+      this.mode3279 !== undefined ? { mode3279: this.mode3279 } : {});
     const out = this.renderer.paint(
       cells, this.session.screen.cursor, this.session.oia.toText(),
       // At most one contributes: the two are mutually exclusive, so the order of this chain is

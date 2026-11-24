@@ -20,6 +20,7 @@ import { buildReply, DEFAULT_CAPABILITIES, withDdm, type QueryRequest } from './
 import { DftTransfer } from './ft/dft.js';
 import { AddressError } from './address.js';
 import { DEFAULT_CODE_PAGE, type CodePage } from './codepage.js';
+import { isColorModel } from './termtype.js';
 import { parseBind, parseUnbind, acceptBindDims, NO_BIND_TIMEOUT_MS } from './bind.js';
 import { resolveGeometry, type GeometrySetting, type ResolvedGeometry, type Size } from './geometry.js';
 
@@ -55,6 +56,8 @@ export interface SessionOptions {
   alternateRows?: number;
   alternateCols?: number;
   codePage?: CodePage;
+  /** x3270's `-mono`: every model is a mono 3278 (advertised and drawn). */
+  mono?: boolean;
   /** Telnet TERMINAL-TYPE to advertise. Defaults to IBM-3278-2-E. */
   terminalType?: string;
   /** Offer TN3270E. Defaults to true; `-tn3270e off` and the N: prefix clear it. */
@@ -503,13 +506,13 @@ export class Session {
       // a fixed oversize below the model, `-oversize` on a non-`-E` model -- is refused here,
       // to whoever built the session, and not at the first connect.
       this.validateGeometry(opts.geometry);
-      this.setting = opts.geometry;
+      this.setting = opts.mono === true ? { ...opts.geometry, mono: true } : opts.geometry;
       // THE MODEL'S GEOMETRY, NOT THE OVERSIZE'S: `auto` must not be measured here (the GUI's
       // font atlas, which its measure reads, does not exist yet -- see the spec's "Why auto is
       // measured at connect, and only then"), so the oversize is dropped for this one call and
       // the real resolve waits for `connect()`. A fixed oversize therefore also starts at the
       // model's sizes, which is harmless: nothing is on the screen before a connect.
-      const g = resolveGeometry({ ...opts.geometry, oversize: { kind: 'none' } });
+      const g = resolveGeometry({ ...this.setting, oversize: { kind: 'none' } });
       this.screen = new Screen({
         rows: g.default.rows,
         cols: g.default.cols,
@@ -535,6 +538,7 @@ export class Session {
       };
     }
     this.keyboard = new Keyboard(this.screen, this.oia, opts.codePage ?? DEFAULT_CODE_PAGE);
+    this.screen.mode3279 = this.colorMode();
   }
 
   /** The setting the next connect will resolve, or `undefined` in legacy mode. */
@@ -588,7 +592,8 @@ export class Session {
         + 'model and oversize apply at the next connect');
     }
     this.validateGeometry(next);
-    this.setting = next;
+    this.setting = this.opts.mono === true ? { ...next, mono: true } : next;
+    this.screen.mode3279 = this.colorMode();
   }
 
   /**
@@ -1166,6 +1171,15 @@ export class Session {
    * is what real hardware does, and a client that dies on a malformed record is
    * useless against real hosts.
    */
+  /**
+   * x3270's `mode3279`: the model's prefix (3279 or bare is color, 3278 mono), forced off by
+   * `-mono` (`Common/model.c:155`). Without a geometry setting (an explicit terminal type), only
+   * `-mono` decides, as in x3270, where a terminal-name override doesn't change the mode.
+   */
+  colorMode(): boolean {
+    return isColorModel(this.setting ?? (this.opts.mono === true ? { mono: true } : {}));
+  }
+
   /** See `ConnectionInfo`. */
   connectionInfo(): ConnectionInfo {
     return {

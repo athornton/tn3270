@@ -88,6 +88,11 @@ export interface ScreenSnapshot {
    * methods. Optional so hand-built test snapshots stay valid; absent means the default.
    */
   codePage?: string;
+  /**
+   * The color mode (x3270's `mode3279`) the session set: `resolve()` draws mono when false, without
+   * every caller passing it. Optional so hand-built test snapshots stay valid; absent means color.
+   */
+  mode3279?: boolean;
 }
 
 export interface ScreenOptions {
@@ -166,6 +171,8 @@ export class Screen {
   private bgs = new Uint8Array(0);
   private grs = new Uint8Array(0);
   private readonly codePage: CodePage;
+  /** Set by the session from its model and `-mono`; see `ScreenSnapshot.mode3279`. */
+  mode3279 = true;
 
   constructor(opts: ScreenOptions = {}) {
     const rows = opts.rows ?? MODEL_2.rows;
@@ -627,6 +634,7 @@ export class Screen {
       fields: Object.freeze(fields),
       formatted,
       codePage: this.codePage.name,
+      mode3279: this.mode3279,
     };
   }
 }
