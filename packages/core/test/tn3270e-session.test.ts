@@ -1221,3 +1221,19 @@ describe('connectionInfo() and the connection event', () => {
     expect(session.connectionInfo().recordsIn).toBe(0);
   });
 });
+
+describe('connectionInfo() ignores a superseded connection', () => {
+  it('bytes from the old connection after a reconnect are not counted', async () => {
+    const conns: FakeConnection[] = [];
+    const session = new Session({
+      connect: () => { const c = new FakeConnection(); conns.push(c); return c; },
+      terminalType: 'IBM-3278-2-E',
+    });
+    await session.connect('127.0.0.1', 992);
+    const oldOnData = conns[0]!.onData!;
+    await session.connect('127.0.0.1', 992);
+    expect(conns).toHaveLength(2);
+    oldOnData(Uint8Array.from([T.IAC, T.DO, O.TERMINAL_TYPE]));
+    expect(session.connectionInfo().bytesIn).toBe(0);
+  });
+});
