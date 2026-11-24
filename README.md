@@ -200,7 +200,7 @@ npm run build                                           # or from a checkout
 
 With no host it opens the Connect dialog (see *Installing*). The flags are the TUI's —
 `-model`, `--terminal-type`, `-oversize`, `-tn3270e on|off`, `-bind-image`, `-bind-limit`, `-ddm`,
-`-devname`, `-scheme`, `-visualbell`, the TLS set, and the full `[prefix:][LU,LU@]host[:port]`
+`-devname`, `-codepage`, `-scheme`, `-visualbell`, the TLS set, and the full `[prefix:][LU,LU@]host[:port]`
 shape — except `--colors`, since a canvas draws 24-bit RGB straight from the scheme. That is not a
 coincidence: the front ends parse them with the same code in `packages/frontend`. `-scheme` is the
 one flag not shared with the CLI, since a script-driven client has nothing to render; see *Using
@@ -534,7 +534,7 @@ window and `Cmd-Q` end the process, so they are covered only by the fake-transfe
 ```sh
 node packages/tui/dist/main.js [-model M] [--terminal-type T] [--colors N] [-scheme S] \
     [-tn3270e on|off] [-bind-image on|off] [-bind-limit on|off] [-ddm on|off] [-devname NAME] \
-    [-visualbell] [-oversize <cols>x<rows>|auto|none] [-insecure] [-noverifycert] \
+    [-codepage NAME] [-visualbell] [-oversize <cols>x<rows>|auto|none] [-insecure] [-noverifycert] \
     [-verifycert] [-cafile FILE] [prefix:][LU,LU@]host[:port]
 ```
 
@@ -859,6 +859,7 @@ assumed — see *Verification*.
 | `-bind-image on\|off` | request the BIND-IMAGE function (default **on**); `off` means the gate below never closes, because it is conditional on the host having *agreed* the function |
 | `-bind-limit on\|off` | range-check a BIND's geometry before honoring it (default **on**); see below |
 | `-devname NAME` | offer telnet option 39 (NEW-ENVIRON) and answer a host's `DEVNAME` request; see *Naming a session with `-devname`* |
+| `-codepage NAME` | the host code page (alias `-charset`): `bracket`, x3270's default and ours, or `cp037`; x3270's aliases work too (`oldibm`, `37`, `us`, ...). `[` and `]` are 0xAD/0xBD in `bracket` and 0xBA/0xBB in `cp037`; pick `cp037` if a host shows Ý and ¨ where you typed brackets |
 
 The host argument's full shape is `[prefix:][LU,LU@]host[:port]`. In the CLI an LU list
 must be **quoted** — `Connect("LUA,LUB@host")` — because the LU separator and the
@@ -932,7 +933,7 @@ variables it knows, this client answers `USER`, `DEVNAME`, `IBMELF`, `IBMAPPLID`
 then the literal `UNKNOWN`. x3270 sends it unconditionally and so do we, for
 compatibility — but it only ever leaves the machine if you asked for option 39 in the
 first place by passing `-devname`, and only to a host that asks for it. `CODEPAGE` is
-`037`, derived from the code page actually in use rather than hardcoded.
+`037` for both pages, from the page's CGCSGID as x3270 sends it, rather than hardcoded.
 
 **`IBMELF: YES` advertises the Express Logon Feature, and we cannot currently honor
 it.** ELF replaces an interactive logon with a **client certificate**: the host's TN3270
@@ -1174,7 +1175,8 @@ Its own options are double-dashed (`--listen`, `--bind`, `--auth`, `--token`, `-
 `--max-sessions`, `--allow-origin`, `--tls-cert`, `--tls-key`, `--tls-chain`, and the harness
 flags `--replay` and `--log-actions`); the client options it inherits keep s3270's single dash
 (`-insecure`, `-cafile`, `-noverifycert`, `-verifycert`, `-model`, `-oversize`, `-scheme`,
-`-bind-image`, `-bind-limit`, `-ddm`, `-devname`, `-visualbell`). `-oversize auto`
+`-bind-image`, `-bind-limit`, `-ddm`, `-devname`, `-codepage`, `-visualbell`; the gateway's
+`-codepage` applies to every session it serves). `-oversize auto`
 measures each browser's viewport, separately for each session; see *Oversize*. **`--scheme` is refused as an
 unknown flag** — that asymmetry is deliberate, since those flags mean the same thing in every
 front end.
@@ -1327,8 +1329,8 @@ gate, in the order agreed 2026-11-17; each milestone gets its own spec, plan and
 
 15. **Store parity with x3270**, in eight milestones:
    - **15a. Correctness first.** Behaviour bugs the checklist found in core, which every front end
-     shares, fixed in three parts. **Part 3, keyboard semantics, is done on branch
-     `keyboard-semantics`:** a typeahead queue now holds AID and editing keys behind a host lock
+     shares, fixed in three parts and the default code page; all done. **Part 3, keyboard semantics,
+     merged from branch `keyboard-semantics`:** a typeahead queue now holds AID and editing keys behind a host lock
      instead of letting them act at once, and an operator error locks the keyboard until a cursor
      move or Reset, as x3270 does (`typeahead`, `aid-keys`, `cursor-movement`, the erase keys,
      `oerr-lock`); insert mode now turns off on an AID, Reset and a host keyboard-restore
@@ -1337,16 +1339,17 @@ gate, in the order agreed 2026-11-17; each milestone gets its own spec, plan and
      always sending BREAK. Part 2, blink and intensify, drawn in the canvas front ends, and the
      host's alarm, which now rings, with `-visualbell` to flash instead of ringing it
      (`highlight-bold`, `bell`; see *Using the GUI*, *Using the TUI* and *Using the web gateway*).
-     Part 1, ascii transfers doing no local CR/LF conversion (`file-transfer`). **Still open:**
-     x3270's default code page is `bracket`, not cp037 (`code-page`).
+     Part 1, ascii transfers doing no local CR/LF conversion (`file-transfer`). **Code page done too:** x3270's `bracket` is now the default, and `-codepage`/`-charset` picks
+     `bracket` or `cp037` (`code-page`). 15a is complete.
    - **15b. The rest of the GUI ("milestone B").** `File` → `Connect…` and Disconnect in a running
      window (`connect-host`, `disconnect`), recent hosts and a host list, a config file and
      preferences (`save-options`), color scheme, model and font menus, light and dark modes, the
      window title, About, and `--help`/`--version`. See *What is not implemented*.
-   - **15c. Code pages.** Only `cp037` exists (`packages/core/src/codepages/cp037.ts`), which is
+   - **15c. Code pages.** Only `bracket` and `cp037` exist (`packages/core/src/codepages/`), which is
      wrong for any host outside the US: 273 (Germany/Austria), 285 (UK), 297 (France), 500
      (international), 1047 (z/OS Unix), the 1140-family euro pages, and so on. The canvas draws
-     through a cp037-fixed glyph table (`canvas/src/cg.ts`), so it changes too. A correctness gap
+     through a cp037-fixed glyph table (`canvas/src/cg.ts`): `drawList` maps each byte to cp037's
+     byte for the same character first, so pages with characters cp037 lacks need `cg.ts` work too. A correctness gap
      rather than a feature. **DBCS** (Japanese, Chinese and Korean hosts) is a separate, larger item,
      deferred in the checklist.
    - **15d. The mouse: click-to-place-cursor, then the light pen** (`move-cursor`,

@@ -5,7 +5,31 @@ then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log). For the most recent work, read the spec and plan the
 latest START HERE entry names. Each finished feature has its own pair under `docs/superpowers/`.
 
-## START HERE — LATEST FIRST; NEXT: 15a's LAST ITEM, THE `bracket` DEFAULT CODE PAGE (BRAINSTORM FIRST)
+## START HERE — LATEST FIRST; NEXT: THE CODE PAGE'S VM/370 WITNESS (plan Task 9), REVIEW, MERGE; THEN 15b
+
+**2026-11-24, LATEST: README *STAGING* 15a's LAST ITEM, THE `bracket` DEFAULT CODE PAGE, BUILT** on
+branch `bracket-codepage` (from `c59eae9`; UNPUSHED, UNMERGED). Spec
+`docs/superpowers/specs/2026-11-24-bracket-default-code-page-design.md`, plan
+`docs/superpowers/plans/2026-11-24-bracket-default-code-page.md`; run inline, in one session (the
+user's choice, for the month's budget). 4019 tests, build and typecheck clean.
+- **What changed:** `bracket` table (cp037 with 0xAD/0xBA/0xBB/0xBD moved, tested against
+  x3270's rows); `CodePage.cgcsgid`; `DEFAULT_CODE_PAGE = bracket` in Screen/Keyboard/Session;
+  `resolveCodePage` with x3270's aliases and its all-digits `cp` prefix; NEW-ENVIRON `CODEPAGE`
+  from the CGCSGID (`037`); `ScreenSnapshot.codePage` (a name) so `resolve()` decodes with the
+  session's page; `-codepage`/`-charset` in all four front ends via `frontend`'s `codePageFlag`.
+- **Two things the spec got wrong, found while building:** (1) `resolve()`'s callers never pass a
+  page, so `-codepage cp037` would have displayed as bracket: fixed by the snapshot's name. (2)
+  The canvas DID need a change: `drawlist.ts:164` is the OIA path; screen cells drew the raw byte
+  through the cp037 glyph map, so bracket's `[` drew as Ý. `drawList` now maps each byte to
+  cp037's byte for the same character first. Spec section 3 corrected.
+- **Mutation pass (Task 7):** 14 mutations, all killed, the three default sites re-run with
+  `cp037` imported so none died of a ReferenceError.
+- **Parity:** `code-page` now `partial` (gap: menu 15b, other pages 15c, `sbcsCgcsgid`, live
+  witness), `live: unwitnessed`; gate still FAIL 107 blocking.
+- **Owed (Task 9, needs VM/370 up):** type `[]` into a CMS file at the defaults and with
+  `-codepage cp037`, receive each BINARY, hexdump: expect `ad bd` and `ba bb`; `TYPE` each in
+  both sessions to see the display decode. Then review, merge, push.
+
 
 **2026-11-18/19, LATEST: README *STAGING* 15a PART 3, THE KEYBOARD SEMANTICS, MERGED** to `main`
 `--no-ff` as `d0d8395` and pushed (branch `keyboard-semantics`, from `b4fd071`; CI 44578218532 green 6/6 on `ddec36a`). Spec
