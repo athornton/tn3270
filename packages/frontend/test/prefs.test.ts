@@ -47,6 +47,9 @@ describe('argvToPrefs, the inverse', () => {
       '-visualbell', '-scheme', 'green', 'vm.example:3270', '-devname', 'x==='], GUI_PREF_KEYS);
     expect(p).toEqual({ model: '3278-4-E', ddm: false, visualbell: true, scheme: 'green' });
   });
+  it('skips a non-stored flag\'s value, even one that looks like a stored flag', () => {
+    expect(argvToPrefs(['-devname', '-visualbell', '--terminal-type', '-model'], GUI_PREF_KEYS)).toEqual({});
+  });
   it('reads an alias as its key', () => {
     expect(argvToPrefs(['-charset', 'cp037'], GUI_PREF_KEYS)).toEqual({ codepage: 'cp037' });
   });
