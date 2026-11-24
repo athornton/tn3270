@@ -19,7 +19,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const gui = join(here, '..');
 
 /** The documents main.ts loads. */
-export const DOCUMENTS = ['index.html', 'keypad.html', 'keyboard.html', 'transfer.html', 'connect.html'];
+export const DOCUMENTS = ['index.html', 'keypad.html', 'keyboard.html', 'transfer.html', 'connect.html', 'about.html'];
 
 /**
  * The window icon, relative to `packages/gui`. The bundle copies it flat (`app/icon.png`, where

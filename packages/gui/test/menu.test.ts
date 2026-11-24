@@ -455,3 +455,34 @@ describe('applyChoiceStates', () => {
     expect([a.enabled, b.enabled]).toEqual([false, false]);
   });
 });
+
+describe('About TN3270', () => {
+  const noop = (): void => {};
+  const handlers = { onCopy: noop, onPaste: noop, onKeypad: noop, onKeyboard: noop };
+  it('linux and win32: a Help menu with About, calling onAbout', () => {
+    for (const p of ['linux', 'win32'] as const) {
+      let called = 0;
+      const t = buildMenuTemplate(p, { ...handlers, onAbout: () => { called++; } });
+      const help = t.at(-1)!;
+      expect(help.label).toBe('Help');
+      const about = help.submenu!.find((i) => i.id === 'about')!;
+      expect(about.label).toBe('About TN3270');
+      about.click!();
+      expect(called).toBe(1);
+    }
+  });
+  it('darwin: the app menu\'s first item is our About, and it keeps Hide and Quit', () => {
+    let called = 0;
+    const t = buildMenuTemplate('darwin', { ...handlers, onAbout: () => { called++; } });
+    expect(t[0]!.role).toBeUndefined();
+    const items = t[0]!.submenu!;
+    expect(items[0]!.id).toBe('about');
+    items[0]!.click!();
+    expect(called).toBe(1);
+    expect(items.map((i) => i.role).filter(Boolean)).toEqual(['services', 'hide', 'hideOthers', 'unhide', 'quit']);
+  });
+  it('without onAbout, darwin keeps the stock appMenu and there is no Help menu', () => {
+    expect(buildMenuTemplate('darwin', handlers)[0]!.role).toBe('appMenu');
+    expect(buildMenuTemplate('linux', handlers).some((m) => m.label === 'Help')).toBe(false);
+  });
+});
