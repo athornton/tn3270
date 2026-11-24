@@ -157,6 +157,8 @@ export interface MenuHandlers {
    * which is what every caller had before the About window existed.
    */
   readonly onAbout?: () => void;
+  /** File -> Save Changed Options (the app menu on macOS). Present only with this handler. */
+  readonly onSaveOptions?: () => void;
 }
 
 /**
@@ -427,6 +429,11 @@ export function buildMenuTemplate(
   // before-input-event, which covers the Connect dialog (shown before this menu is installed) and
   // is what the key harness can drive; this item is what a user sees.
   const file: MenuItemTemplate = { label: 'File', submenu: [{ label: 'Quit', id: 'quit', role: 'quit', accelerator: 'Ctrl+Q' }] };
+  const onSave = handlers?.onSaveOptions;
+  const save: MenuItemTemplate[] = onSave === undefined ? [] : [
+    { label: 'Save Changed Options', id: 'save-options', click: onSave }, { type: 'separator' },
+  ];
+  if (save.length > 0) file.submenu!.unshift(...save);
   const onAbout = handlers?.onAbout;
   if (onAbout === undefined) return platform === 'darwin' ? [{ role: 'appMenu' }, ...menus] : [file, ...menus];
   const about: MenuItemTemplate = { label: 'About TN3270', id: 'about', click: onAbout };
@@ -435,7 +442,7 @@ export function buildMenuTemplate(
     // stock panel (which shows no licence and no configuration).
     const app: MenuItemTemplate = {
       label: 'TN3270',
-      submenu: [about, { type: 'separator' }, { role: 'services' }, { type: 'separator' },
+      submenu: [about, { type: 'separator' }, ...save, { role: 'services' }, { type: 'separator' },
         { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' },
         { role: 'quit' }],
     };

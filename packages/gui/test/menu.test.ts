@@ -486,3 +486,25 @@ describe('About TN3270', () => {
     expect(buildMenuTemplate('linux', handlers).some((m) => m.label === 'Help')).toBe(false);
   });
 });
+
+describe('Save Changed Options', () => {
+  const noop = (): void => {};
+  const base = { onCopy: noop, onPaste: noop, onKeypad: noop, onKeyboard: noop, onAbout: noop };
+  it('linux and win32: in File, before Quit', () => {
+    for (const p of ['linux', 'win32'] as const) {
+      let n = 0;
+      const file = buildMenuTemplate(p, { ...base, onSaveOptions: () => { n++; } })[0]!;
+      const ids = file.submenu!.map((i) => i.id ?? i.type);
+      expect(ids.indexOf('save-options')).toBeLessThan(ids.indexOf('quit'));
+      file.submenu!.find((i) => i.id === 'save-options')!.click!();
+      expect(n).toBe(1);
+    }
+  });
+  it('darwin: in the app menu', () => {
+    const app = buildMenuTemplate('darwin', { ...base, onSaveOptions: noop })[0]!;
+    expect(app.submenu!.some((i) => i.id === 'save-options')).toBe(true);
+  });
+  it('absent without the handler', () => {
+    expect(buildMenuTemplate('linux', base)[0]!.submenu!.some((i) => i.id === 'save-options')).toBe(false);
+  });
+});
