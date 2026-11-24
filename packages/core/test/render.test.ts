@@ -807,7 +807,7 @@ describe('resolve: text and hidden fields', () => {
     // every byte to a distinguishable character. Any assertion that passes with
     // this stub and with cp037 alike would be worthless, so 'Z' is chosen
     // precisely because cp037 decodes 0xC1 as 'A'.
-    const alwaysZ = new CodePage('always-Z', new Array<number>(256).fill(0x5a /* 'Z' */));
+    const alwaysZ = new CodePage('always-Z', new Array<number>(256).fill(0x5a /* 'Z' */), 37);
     const s = fielded(FA.PRINTABLE);
     expect(resolve(s.snapshot(), { codePage: alwaysZ })[1]!.text).toBe('Z');
     // And the default really is cp037, so the option is a genuine override.
