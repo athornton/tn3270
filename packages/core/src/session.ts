@@ -19,7 +19,7 @@ import { buildReadModified, buildReadBuffer } from './inbound.js';
 import { buildReply, DEFAULT_CAPABILITIES, withDdm, type QueryRequest } from './queryreply.js';
 import { DftTransfer } from './ft/dft.js';
 import { AddressError } from './address.js';
-import { cp037, DEFAULT_CODE_PAGE, type CodePage } from './codepage.js';
+import { DEFAULT_CODE_PAGE, type CodePage } from './codepage.js';
 import { parseBind, parseUnbind, acceptBindDims, NO_BIND_TIMEOUT_MS } from './bind.js';
 import { resolveGeometry, type GeometrySetting, type ResolvedGeometry, type Size } from './geometry.js';
 
@@ -504,7 +504,7 @@ export class Session {
         cols: opts.alternateCols ?? opts.cols ?? MODEL_2.cols,
       };
     }
-    this.keyboard = new Keyboard(this.screen, this.oia, opts.codePage ?? cp037);
+    this.keyboard = new Keyboard(this.screen, this.oia, opts.codePage ?? DEFAULT_CODE_PAGE);
   }
 
   /** The setting the next connect will resolve, or `undefined` in legacy mode. */

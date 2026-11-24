@@ -66,7 +66,7 @@
 import { FA, XAH } from './constants.js';
 // CodePage is a CLASS, not an interface, so it is a plain import. Its
 // byte-to-string method is `toUnicode(byte)`.
-import { cp037, CodePage } from './codepage.js';
+import { CODE_PAGES, DEFAULT_CODE_PAGE, CodePage } from './codepage.js';
 import { Color, PALETTE_3279, type Color3279 } from './palette.js';
 import type { ScreenSnapshot } from './screen.js';
 
@@ -336,7 +336,9 @@ function usableHighlight(code: number | undefined): number | undefined {
 
 export function resolve(snap: ScreenSnapshot, opts: ResolveOptions = {}): ResolvedCell[] {
   const mode3279 = opts.mode3279 ?? true;
-  const codePage = opts.codePage ?? cp037;
+  const codePage = opts.codePage
+    ?? (snap.codePage !== undefined ? CODE_PAGES.get(snap.codePage) : undefined)
+    ?? DEFAULT_CODE_PAGE;
   const size = snap.cells.length;
 
   // Which field governs each cell, precomputed as two parallel arrays: the

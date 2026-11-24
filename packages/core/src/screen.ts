@@ -1,5 +1,5 @@
 import { FA, MODEL_2 } from './constants.js';
-import { cp037, type CodePage } from './codepage.js';
+import { DEFAULT_CODE_PAGE, type CodePage } from './codepage.js';
 
 /**
  * The 3270 character buffer.
@@ -81,6 +81,13 @@ export interface ScreenSnapshot {
   cells: readonly Readonly<Cell>[];
   fields: readonly Readonly<Field>[];
   formatted: boolean;
+  /**
+   * The canonical name of the code page that decodes `cells` (`CodePage.name`), so `resolve()`
+   * decodes with the session's page without every caller passing it. A NAME, not the
+   * `CodePage`, because a snapshot crosses IPC, where a structured clone drops a class's
+   * methods. Optional so hand-built test snapshots stay valid; absent means the default.
+   */
+  codePage?: string;
 }
 
 export interface ScreenOptions {
@@ -169,7 +176,7 @@ export class Screen {
     checkGeometry(altRows, altCols);
     this.defaultSize = { rows, cols };
     this.alternateSize = { rows: altRows, cols: altCols };
-    this.codePage = opts.codePage ?? cp037;
+    this.codePage = opts.codePage ?? DEFAULT_CODE_PAGE;
     this.allocate(rows, cols);
   }
 
@@ -619,6 +626,7 @@ export class Screen {
       cells: Object.freeze(cells),
       fields: Object.freeze(fields),
       formatted,
+      codePage: this.codePage.name,
     };
   }
 }
