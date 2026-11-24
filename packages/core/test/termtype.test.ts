@@ -1,15 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import {
-  resolveTerminalType, resolveAlternateSize, KNOWN_MODELS, TerminalTypeError,
+  resolveTerminalType, resolveAlternateSize, KNOWN_MODELS, TerminalTypeError, parseModel, isColorModel,
 } from '../src/termtype.js';
 import { TERMINAL_TYPE } from '../src/constants.js';
 
 describe('terminal type resolution', () => {
-  it('defaults to IBM-3278-2-E, which is what MVS TSO requires', () => {
+  it('defaults to IBM-3279-2-E: color, extended, and accepted by MVS TSO', () => {
     // Changed 2026-09-14: a bare IBM-3278-2 gets IKT00405I from MVS 3.8j TSO and no logon
-    // (termtype.ts header). Both live systems accept -E, so the default that works on both
-    // is the one a user who read no manual should get.
-    expect(resolveTerminalType({})).toBe('IBM-3278-2-E');
+    // (termtype.ts header). Changed again 2026-11-24 to x3270's color default for model 2
+    // (create_3270_termtype): IBM-3279-2-E reached TSO's IKJ56700A ENTER USERID on TK5 and CMS
+    // Ready; on VM/370, live, the same day, while IBM-3278-2 still got IKT00405I (the control).
+    expect(resolveTerminalType({})).toBe('IBM-3279-2-E');
     expect(resolveTerminalType({})).toBe(TERMINAL_TYPE);
   });
 
@@ -42,7 +43,7 @@ describe('terminal type resolution', () => {
   });
 
   it('names the models it knows in the error, so the message is actionable', () => {
-    expect(() => resolveTerminalType({ model: 'bogus' })).toThrow(/3278-2-E/);
+    expect(() => resolveTerminalType({ model: 'bogus' })).toThrow(/use 3279-N or 3278-N .* e\.g\. 3279-2-E/);
   });
 
   it('rejects an empty raw terminal type', () => {
@@ -55,8 +56,8 @@ describe('terminal type resolution', () => {
     // could not be honestly claimed. Alternate-size support is what earned the
     // rest: EW/EWA now switch the buffer, so the claim is now true.
     expect(Object.keys(KNOWN_MODELS)).toEqual([
-      '3278-2', '3278-2-E', '3278-3', '3278-3-E',
-      '3278-4', '3278-4-E', '3278-5', '3278-5-E',
+      '3279-2', '3279-2-E', '3279-3', '3279-3-E', '3279-4', '3279-4-E', '3279-5', '3279-5-E',
+      '3278-2', '3278-2-E', '3278-3', '3278-3-E', '3278-4', '3278-4-E', '3278-5', '3278-5-E',
     ]);
   });
 
@@ -127,5 +128,36 @@ describe('terminal type resolution', () => {
     for (const name of ['constructor', 'toString', 'valueOf', '__proto__']) {
       expect(() => resolveTerminalType({ model: name })).toThrow(TerminalTypeError);
     }
+  });
+});
+
+describe('x3270 model names and advertising (model.c canonical_model_x, telnet.c create_3270_termtype)', () => {
+  it.each(['3278-2', '3279-2', '2', '3279-4-E', 'ibm-3279-3-e', 'IBM-3278-5-E', '5'])('accepts %s', (m) => {
+    expect(parseModel(m)).toBeDefined();
+  });
+  it.each(['3277-2', '3279-6', '6', '3279-2-X', '3279--2', '2-E', ''])('refuses %s, naming the forms', (m) => {
+    expect(parseModel(m)).toBeUndefined();
+    expect(() => resolveTerminalType({ model: m || 'x' })).toThrow(/use 3279-N or 3278-N/);
+  });
+  it.each([
+    ['3279-2-E', false, 'IBM-3279-2-E'], ['3279-3', false, 'IBM-3279-3'],
+    ['3279-4-E', false, 'IBM-3278-4-E'], ['3279-5-E', false, 'IBM-3278-5-E'],
+    ['3278-2-E', false, 'IBM-3278-2-E'], ['2', false, 'IBM-3279-2'], ['4', false, 'IBM-3278-4'],
+    ['3279-2-E', true, 'IBM-3278-2-E'], ['3279-3', true, 'IBM-3278-3'],
+  ] as const)('%s (mono %s) advertises %s', (model, mono, tt) => {
+    expect(resolveTerminalType({ model, mono })).toBe(tt);
+  });
+  it('no model: IBM-3279-2-E, or IBM-3278-2-E with mono', () => {
+    expect(resolveTerminalType({})).toBe('IBM-3279-2-E');
+    expect(resolveTerminalType({ mono: true })).toBe('IBM-3278-2-E');
+  });
+  it('the color mode: 3279 and bare are color, 3278 is mono, mono forces it', () => {
+    expect([isColorModel({ model: '3279-4-E' }), isColorModel({ model: '4' }), isColorModel({}),
+      isColorModel({ model: '3278-4-E' }), isColorModel({ model: '3279-4-E', mono: true })])
+      .toEqual([true, true, true, false, false]);
+  });
+  it('the alternate size follows the number, whatever the prefix', () => {
+    expect(resolveAlternateSize({ model: '3279-4-E' })).toEqual(resolveAlternateSize({ model: '3278-4-E' }));
+    expect(resolveAlternateSize({ model: '5' })).toEqual(resolveAlternateSize({ model: '3278-5' }));
   });
 });

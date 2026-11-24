@@ -383,7 +383,7 @@ describe('buildSession', () => {
       printGeometryNotices(session, { write: (t) => { errors.push(t); } });
       await session.connect('127.0.0.1', port);
       expect(errors).toEqual([
-        "oversize auto: window fits 20 rows by 80 columns, less than model 3278-2-E's 24 rows by 80 columns; using the model\n",
+        "oversize auto: window fits 20 rows by 80 columns, less than model 3279-2-E's 24 rows by 80 columns; using the model\n",
       ]);
       fits = { rows: 50, cols: 132 };                  // a fit: no notice, nothing printed
       await session.connect('127.0.0.1', port);

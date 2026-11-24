@@ -41,7 +41,7 @@ describe('promptConnect', () => {
     expect(h.tried).toHaveLength(1);
     expect(h.tried[0]!.host).toBe('herc');
     expect(h.tried[0]!.port).toBe(3270);
-    expect(h.tried[0]!.model).toBe('3278-2-E');
+    expect(h.tried[0]!.model).toBe('3279-2-E');
     expect(h.tried[0]!.tls).toEqual({ kind: 'tls', verify: true });
     expect(h.transcript()).toContain('Connecting to herc:3270...');
   });
@@ -70,7 +70,7 @@ describe('promptConnect', () => {
   it('re-asks an unknown model, listing the known ones', async () => {
     const h = harness(['vm', '9999', '3278-3-E', ''], ['ok']);
     await promptConnect([], h, h.attempt);
-    expect(h.transcript()).toMatch(/unknown model "9999".*3278-2-E/s);
+    expect(h.transcript()).toMatch(/unknown model "9999".*3279-2-E/s);
     expect(h.tried[0]!.model).toBe('3278-3-E');
   });
 
@@ -293,7 +293,7 @@ describe('promptConnect in terminal mode', () => {
     });
     const p = promptConnect([], t, attempt);
     await t.until('Host: '); t.input.write('vm\r');
-    await t.until('Model [3278-2-E]: '); t.input.write('\r');
+    await t.until('Model [3279-2-E]: '); t.input.write('\r');
     await t.until('TLS [Y/n]: '); t.input.write('\r');
     await t.until('Connecting to vm:23...\n');
     t.input.write('xyz');
@@ -301,7 +301,7 @@ describe('promptConnect in terminal mode', () => {
     fail();
     await t.until('Host [vm]: ');
     t.input.write('\r');
-    await t.until('Model [3278-2-E]: '); t.input.write('\r');
+    await t.until('Model [3279-2-E]: '); t.input.write('\r');
     await t.until('TLS [Y/n]: '); t.input.write('n\r');
     expect(await p).toBeDefined();
     expect(t.transcript()).not.toContain('xyz');
@@ -318,7 +318,7 @@ describe('promptConnect in terminal mode', () => {
     });
     const p = promptConnect([], t, attempt);
     await t.until('Host: '); t.input.write('vm\r');
-    await t.until('Model [3278-2-E]: '); t.input.write('\r');
+    await t.until('Model [3279-2-E]: '); t.input.write('\r');
     await t.until('TLS [Y/n]: '); t.input.write('\r');
     await t.until('Connecting to vm:23...\n');
     t.input.write('\x03');
@@ -339,7 +339,7 @@ describe('promptConnect in terminal mode', () => {
     });
     const p = promptConnect([], t, attempt);
     await t.until('Host: '); t.input.write('vm\r');
-    await t.until('Model [3278-2-E]: '); t.input.write('\r');
+    await t.until('Model [3279-2-E]: '); t.input.write('\r');
     await t.until('TLS [Y/n]: '); t.input.write('\r');
     await t.until('Connecting to vm:23...\n');
     t.input.write('\x03');
