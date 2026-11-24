@@ -1,11 +1,32 @@
-# Handoff — state as of 2026-11-24 (README *STAGING* 15a LAST ITEM, THE `bracket` DEFAULT CODE PAGE + `-codepage`, BUILT on branch `bracket-codepage` (MERGED a3b836d; witnessed on VM/370 from the CLI and the GUI); README *STAGING* 15a PART 3, KEYBOARD SEMANTICS, MERGED (`d0d8395`): typeahead, oerrLock, Reset's half reset, insert-mode resets, the erase keys, numericLock off, Attn on TN3270E, GUI-witnessed on VM, gate FAIL 107 blocking; next: 15a's remaining item, x3270's default code page `bracket` (then 15b); README *STAGING* 15a PART 2, BLINK/INTENSIFY/THE BELL, MERGED (`86a9999`): canvas blink and intensify drawn, the host's alarm rings in the GUI, the browser and the TUI, `-visualbell` flashes instead, gate still FAIL 113 blocking; 15a PART 1, ASCII LINE ENDS, MERGED (`13e41b2`); PARITY TRIAGED, gate 113 blocking; ROADMAP = README item 15a-15h; x3270 PARITY CHECKLIST MERGED (`df62e6f`); THE PACKAGED GUI'S DROPPED FIRST ARGUMENT AND SYSTEM-WIDE Ctrl-] FIXED (`gui-argv-and-quit`): 413 x3270 names, 158 checklist rows, `parity.mjs gate` FAIL 157 blocking; 0.1.4 RELEASED: npm by the tag workflow with provenance, and the first GitHub release with the seven installers, SHA256SUMS and scriv notes; macOS CODE SIGNING MERGED (`db5a93d`; released installers up to 0.1.4 are UNSIGNED), Windows CI signing DROPPED for the Microsoft Store; STORE PROBE MERGED (`559ea78`); README AUDIT + FIXES MERGED (`ae8724f`); WEB RECEIVE DOWNLOADS ON COMPLETION (`4a940fe`, live-verified); `Exist` PER DIRECTION (`f533bff`); next: README *Staging* 15a part 3, the keyboard semantics (typeahead and keyboard lock, insert-mode reset, x3270's erase rules, oerr-lock))
+# Handoff — state as of 2026-11-24 (README *STAGING* 15b SUB-PROJECT A, IDENTITY AND HELP, BUILT on branch `identity-and-help`; gate 102 blocking; next: 15b B, brainstorm first; README *STAGING* 15a LAST ITEM, THE `bracket` DEFAULT CODE PAGE + `-codepage`, BUILT on branch `bracket-codepage` (MERGED a3b836d; witnessed on VM/370 from the CLI and the GUI); README *STAGING* 15a PART 3, KEYBOARD SEMANTICS, MERGED (`d0d8395`): typeahead, oerrLock, Reset's half reset, insert-mode resets, the erase keys, numericLock off, Attn on TN3270E, GUI-witnessed on VM, gate FAIL 107 blocking; next: 15a's remaining item, x3270's default code page `bracket` (then 15b); README *STAGING* 15a PART 2, BLINK/INTENSIFY/THE BELL, MERGED (`86a9999`): canvas blink and intensify drawn, the host's alarm rings in the GUI, the browser and the TUI, `-visualbell` flashes instead, gate still FAIL 113 blocking; 15a PART 1, ASCII LINE ENDS, MERGED (`13e41b2`); PARITY TRIAGED, gate 113 blocking; ROADMAP = README item 15a-15h; x3270 PARITY CHECKLIST MERGED (`df62e6f`); THE PACKAGED GUI'S DROPPED FIRST ARGUMENT AND SYSTEM-WIDE Ctrl-] FIXED (`gui-argv-and-quit`): 413 x3270 names, 158 checklist rows, `parity.mjs gate` FAIL 157 blocking; 0.1.4 RELEASED: npm by the tag workflow with provenance, and the first GitHub release with the seven installers, SHA256SUMS and scriv notes; macOS CODE SIGNING MERGED (`db5a93d`; released installers up to 0.1.4 are UNSIGNED), Windows CI signing DROPPED for the Microsoft Store; STORE PROBE MERGED (`559ea78`); README AUDIT + FIXES MERGED (`ae8724f`); WEB RECEIVE DOWNLOADS ON COMPLETION (`4a940fe`, live-verified); `Exist` PER DIRECTION (`f533bff`); next: README *Staging* 15a part 3, the keyboard semantics (typeahead and keyboard lock, insert-mode reset, x3270's erase rules, oerr-lock))
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log). For the most recent work, read the spec and plan the
 latest START HERE entry names. Each finished feature has its own pair under `docs/superpowers/`.
 
-## START HERE — LATEST FIRST; NEXT: 15b (BRAINSTORM FIRST); 15a IS DONE
+## START HERE — LATEST FIRST; NEXT: 15b SUB-PROJECT B, PREFERENCES AND APPEARANCE (BRAINSTORM FIRST)
+
+**2026-11-24, LATEST: 15b SUB-PROJECT A, IDENTITY AND HELP, BUILT** on branch `identity-and-help`.
+15b was split with the user into A (identity and help), B (preferences and appearance) and C
+(connecting from a running window). Spec `docs/superpowers/specs/2026-11-24-gui-identity-and-help-design.md`,
+plan `docs/superpowers/plans/2026-11-24-gui-identity-and-help.md`, run inline in one session.
+4056 tests, build and typecheck clean.
+- **What changed:** core `Session.connectionInfo()` + a `'connection'` event (TLS stays with the
+  front ends); `frontend`'s `infoFlag`/`answerInfoFlag`/`versionText`/`windowTitle`; `--help`/`-?`
+  and `--version`/`-v` in all four front ends (a lone argument only, as x3270); usage lines for
+  the CLI and web, and a test per front end that every `case` flag is in its usage (`-charset` was
+  missing from all four); the GUI title (with `page-title-updated` prevented) and the browser tab
+  (the first title rides on the `session` message: the handshake order is a tested contract);
+  Help → About TN3270, one window, live, with Copy; the keys seam's new `menu:ID` step.
+- **Found while building:** Electron reports `openssl: '0.0.0'` (BoringSSL), now printed as such.
+- **Mutation (Task 6):** 9 mutations, 1 survivor (stale-connection bytes counted), killed by a new test.
+- **Live:** `docs/live-testing.md`, *Identity and help, from the GUI and the CLI, TUI and web
+  binaries*: the title before and after connecting, About through the menu with real counters.
+- **Parity:** gate 107 -> 102 blocking. cmdline-help, version-flag, about-version, about-config
+  `ours`; about-status `partial` (suppressHost waits for B); window-title (Title()) `skipped`.
+- **Not done:** the macOS About path and the browser tab title are tests only; Copy is not read back.
+
 
 **2026-11-24, LATEST: README *STAGING* 15a's LAST ITEM, THE `bracket` DEFAULT CODE PAGE, BUILT** on
 branch `bracket-codepage` (from `c59eae9`; UNPUSHED, UNMERGED). Spec

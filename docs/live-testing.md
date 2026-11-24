@@ -927,6 +927,27 @@ and the Recording log says what happened when they were run.
   we hardcode.** Not a TN3270E problem — `IBM-3278-2-E` reaches TSO with the TN3270E
   option never negotiated. See the Recording log. `record-mvs.txt` remains a draft.
 
+## Identity and help, from the GUI and the CLI, TUI and web binaries — 2026-11-24
+
+**15b sub-project A, witnessed.** Branch `identity-and-help`. Electron GUI under Xvfb (the rebuilt
+toolchain; see the code page entry below) against VM/370 CE on `127.0.0.1:3270`.
+
+- **The title**, read back with `win.getTitle()` after each set: `TN3270 — not connected` at
+  startup, then `127.0.0.1:3270 — TN3270 3278-2-E` once connected.
+- **Help → About TN3270**, clicked through the keys seam's new `menu:about` step (the same `click`
+  a person's click calls). The text was read back from the About window's own DOM: 523 chars,
+  with the version block, the Configuration (`Code page: bracket (CGCSGID 37)`, `Terminal type:
+  IBM-3278-2-E`) and the Connection section. **The counters were real**, after a logon and
+  `IPL CMS`: `Bytes in/out: 3902 / 343`, `Host records: 41`, `TN3270E: no`, `TLS: off`.
+- **`--help` and `--version`** from the built CLI, TUI and web binaries and the GUI: each exits 0
+  as a lone argument. `--help vm` stays a usage error (exit 2). The GUI's first try printed
+  `TLS: OpenSSL 0.0.0`: Electron's Node reports a placeholder because it's built on BoringSSL. It
+  now prints `TLS: BoringSSL (Electron's)`.
+
+**Not witnessed:** the browser tab's title (tests only, `web/test/integration.test.ts` and
+`bridgecore.test.ts`); the About window on macOS (the explicit app menu is tests only); Copy
+(the clipboard write is not read back). CMSUSER was logged off.
+
 ## The `bracket` default code page, from the CLI and GUI against VM/370 — 2026-11-24
 
 **At the defaults, typed `[]` reaches the host as `AD BD`, x3270's `bracket` bytes, and with
