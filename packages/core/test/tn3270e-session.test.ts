@@ -1164,3 +1164,60 @@ describe('Session.run: unbound TN3270E drops a key rather than queuing it (final
     expect(conn.writes).toEqual([]);
   });
 });
+
+describe('connectionInfo() and the connection event', () => {
+  it('before connecting: nothing connected, counters zero', () => {
+    const { session } = newSession();
+    expect(session.connectionInfo()).toEqual({
+      connected: false, host: undefined, port: undefined, lu: undefined, tn3270e: false,
+      terminalType: 'IBM-3278-2-E', since: undefined, bytesIn: 0, bytesOut: 0, recordsIn: 0,
+    });
+  });
+
+  it('after connect: host, port and since', async () => {
+    const { session } = newSession();
+    await session.connect('127.0.0.1', 992);
+    const i = session.connectionInfo();
+    expect([i.connected, i.host, i.port]).toEqual([true, '127.0.0.1', 992]);
+    expect(i.since).toBeInstanceOf(Date);
+  });
+
+  it('counts bytes each way', async () => {
+    const { session, conn } = newSession();
+    await session.connect('127.0.0.1', 992);
+    conn.host(T.IAC, T.DO, O.TERMINAL_TYPE);
+    const i = session.connectionInfo();
+    expect(i.bytesIn).toBe(3);
+    expect(i.bytesOut).toBe(conn.sent.length);
+    expect(i.bytesOut).toBeGreaterThan(0);
+  });
+
+  it('fires on connect, on TN3270E with its LU, and on disconnect, not on data', async () => {
+    const { session, conn } = newSession();
+    const seen: string[] = [];
+    session.on('connection', () => {
+      const i = session.connectionInfo();
+      seen.push(`${i.connected}/${i.lu ?? '-'}/${i.tn3270e}`);
+    });
+    await session.connect('127.0.0.1', 992);
+    conn.host(T.IAC, T.DO, O.TERMINAL_TYPE);
+    expect(seen).toEqual(['true/-/false']);
+    conn.negotiateE();
+    expect(seen.at(-1)).toBe('true/TESTLU01/true');
+    const before = seen.length;
+    session.disconnect();
+    expect(seen.length).toBe(before + 1);
+    expect(seen.at(-1)).toBe('false/-/false');
+  });
+
+  it('keeps the last counters after disconnect, and resets them on the next connect', async () => {
+    const { session, conn } = newSession();
+    await session.connect('127.0.0.1', 992);
+    conn.host(T.IAC, T.DO, O.TERMINAL_TYPE);
+    session.disconnect();
+    expect(session.connectionInfo().bytesIn).toBe(3);
+    await session.connect('127.0.0.1', 992);
+    expect(session.connectionInfo().bytesIn).toBe(0);
+    expect(session.connectionInfo().recordsIn).toBe(0);
+  });
+});
