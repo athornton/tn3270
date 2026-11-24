@@ -639,7 +639,7 @@ describe('the gateway end to end', () => {
     });
     // A replay session is never connected, so disconnect() emits nothing; the gateway's forwarding
     // of the event is what is under test, so emit it as core would.
-    registry.peek(first['id'] as string)!.emit('connection');
+    (registry.peek(first['id'] as string)! as unknown as { emit(e: string): void }).emit('connection');
     const deadline = Date.now() + 2000;
     while (!after.some((m) => m['kind'] === 'title') && Date.now() < deadline) {
       await new Promise((r) => { setTimeout(r, 10); });
