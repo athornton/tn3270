@@ -927,7 +927,7 @@ and the Recording log says what happened when they were run.
   we hardcode.** Not a TN3270E problem — `IBM-3278-2-E` reaches TSO with the TN3270E
   option never negotiated. See the Recording log. `record-mvs.txt` remains a draft.
 
-## The `bracket` default code page, from the CLI against VM/370 — 2026-11-24
+## The `bracket` default code page, from the CLI and GUI against VM/370 — 2026-11-24
 
 **At the defaults, typed `[]` reaches the host as `AD BD`, x3270's `bracket` bytes, and with
 `-codepage cp037` as `BA BB`. Each session displays the other's file as `Ý¨`.** The proof comes
@@ -947,10 +947,31 @@ where the quotes are needed because `Transfer()` splits unquoted values on space
 | `CPTEST DATA A` | defaults (`bracket`) | `ad bd 40 40 …` (80 bytes, F 80) | `[]` | `Ý¨` |
 | `CPTEST2 DATA A` | `-codepage cp037` | `ba bb 40 40 …` (80 bytes, F 80) | `Ý¨` | `[]` |
 
-**What it does NOT witness:** the canvas. This was the CLI, whose `ScreenText` decodes through
-core's `resolve()` and the snapshot's page. The GUI's and browser's glyph path (`drawList`'s
-cp037 byte map, which the spec wrongly said needed no change) is tested offline only. CMSUSER was
-logged off at the end.
+**The GUI canvas, the same day.** The Electron GUI at the defaults (`-insecure -model 3278-2-E`)
+under Xvfb, driven by `TN3270_GUI_KEYS` through logon, `IPL CMS`, `TYPE CPTEST DATA A` and
+`TYPE CPTEST2 DATA A`, with `TN3270_GUI_SHOT` capturing the window. **`CPTEST DATA A` (host bytes
+`AD BD`) is drawn as `[]`.** This discriminates: before `drawList`'s cp037 byte map, those bytes
+drew as `Ý¨`. `CPTEST2`'s line sat behind `MORE...` in the capture, so the reverse case (cp037
+bytes drawn under bracket) is witnessed from the CLI only. The PNG wasn't committed (720x350,
+`/tmp/witness/cp.png` on the day). CMSUSER was logged off after each run.
+
+**The GUI toolchain was rebuilt for this.** `~/micromamba/envs/gui` had vanished from the host.
+The LSST stack (`. /opt/lsst/software/stack/loadLSST.bash`) supplies GTK and ALSA but not
+NSS/NSPR or Xvfb, so a small env adds those, created with the stack's own mamba and a writable
+package cache:
+
+```bash
+. /opt/lsst/software/stack/loadLSST.bash
+CONDA_PKGS_DIRS=$HOME/.cache/conda-pkgs mamba create -y -p ~/micromamba/envs/gui \
+    -c conda-forge --override-channels nss nspr xorg-xvfb-server
+G=$HOME/micromamba/envs/gui
+LD_LIBRARY_PATH=$G/lib nohup $G/bin/Xvfb :99 -screen 0 1280x1024x24 &
+DISPLAY=:99 LD_LIBRARY_PATH=$G/lib:$CONDA_PREFIX/lib ./node_modules/.bin/electron \
+    packages/gui/dist/main.js --no-sandbox --disable-gpu ...
+```
+
+**A `wait:` step is case-sensitive, and CMS echoes commands in lowercase**: `wait:CPTEST2` timed
+out where `wait:cptest2` matched.
 
 ## The four keys and reconnect, from the GUI against VM/370 and TK5 — 2026-11-17
 

@@ -799,12 +799,12 @@
   x3270: "Options → Code Page menu, from charsetList (x3270/menubar.c:2502-2538, x3270/fb-x3270:107); -codepage, with -charset an alias (x3270/x3270.c:156, :159); sbcsCgcsgid overrides the reported CGCSGID"
   gui: "bracket is the default, as x3270's (Common/codepage.c:358), so [ and ] are 0xAD/0xBD at the defaults; -codepage NAME, with -charset an alias, picks bracket or cp037 and takes x3270's aliases for them (Common/unicode.c:381-422, the all-digits cp prefix :791-793); an unknown name is a usage error. NEW-ENVIRON CODEPAGE is 037 from the page's CGCSGID. The canvas maps each byte to cp037's byte for the same character before its cp037 glyph table (canvas/src/drawlist.ts cp037Bytes)"
   status: partial
-  gap: "no Options → Code Page menu (15b); only bracket and cp037, not x3270's charsetList (15c); no sbcsCgcsgid override; live-witnessed from the CLI only ('The `bracket` default code page, from the CLI against VM/370 — 2026-11-24': AD BD at the defaults, BA BB with -codepage cp037); the GUI's canvas glyph path has no live witness"
+  gap: "no Options → Code Page menu (15b); only bracket and cp037, not x3270's charsetList (15c); no sbcsCgcsgid override; live-witnessed ('The `bracket` default code page, from the CLI and GUI against VM/370 — 2026-11-24': AD BD at the defaults, BA BB with -codepage cp037, and the GUI canvas drawing AD BD as []); the browser has no live witness"
   browser: "same flag on the web gateway, for every session it serves; no per-browser choice"
   evidence:
     code: [packages/core/src/codepage.ts, packages/core/src/codepages/bracket.ts, packages/core/src/render.ts, packages/canvas/src/drawlist.ts, packages/frontend/src/codepageFlag.ts]
     tests: [packages/core/test/codepage.test.ts, packages/core/test/default-codepage.test.ts, packages/core/test/session.test.ts, packages/canvas/test/drawlist.test.ts, packages/frontend/test/codepageFlag.test.ts]
-    live: unwitnessed
+    live: "The `bracket` default code page, from the CLI and GUI against VM/370 — 2026-11-24"
 - id: dbcs
   area: display
   title: DBCS (Japanese, Chinese and Korean) host character sets
