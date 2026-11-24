@@ -1155,3 +1155,20 @@ describe('the viewport, for -oversize auto', () => {
     }
   });
 });
+
+describe('the title message', () => {
+  it('sets the title from a well-formed message, and drops a malformed one', async () => {
+    const socket = fakeSocket();
+    const titles: string[] = [];
+    createBridge({
+      socket: socket as never, storage: fakeStorage() as never, inflate: async (d) => String(d),
+      setTitle: (t) => { titles.push(t); },
+    });
+    deliver(socket, { kind: 'session', id: 'x', title: 'TN3270 — not connected' });
+    deliver(socket, { kind: 'title', text: 'vm:3270 — TN3270 3278-2-E' });
+    deliver(socket, { kind: 'title', text: 42 });
+    deliver(socket, { kind: 'title' });
+    await settle();
+    expect(titles).toEqual(['TN3270 — not connected', 'vm:3270 — TN3270 3278-2-E']);
+  });
+});

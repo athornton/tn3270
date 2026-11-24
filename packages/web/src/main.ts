@@ -6,7 +6,7 @@ import type { Session } from '@tn3270/core';
 import { readAtlas, drawList, blankColumns, extractText } from '@tn3270/canvas';
 import { resolve } from '@tn3270/core';
 import {
-  answerInfoFlag, applyAction, applyPaste, resolveScheme, resolveTls, startTransfer,
+  answerInfoFlag, windowTitle, applyAction, applyPaste, resolveScheme, resolveTls, startTransfer,
 } from '@tn3270/frontend';
 import { isMain } from '@tn3270/node-files';
 import {
@@ -267,7 +267,9 @@ export function buildServer(args: WebArgs) {
         setViewport = attached.setViewport;
         const mine = attached.session;
         if (attached.created) {
-          conn.sendBinary(encodeServerMessage({ kind: 'session', id: attached.id }));
+          conn.sendBinary(encodeServerMessage({
+            kind: 'session', id: attached.id, title: windowTitle(attached.session.connectionInfo()),
+          }));
         }
         conn.sendBinary(encodeServerMessage({
           kind: 'atlas', geometry: atlas.geometry, coverage: atlas.coverage, blank,
@@ -317,6 +319,12 @@ export function buildServer(args: WebArgs) {
           process.stdout.write(`bell: ${args.visualBell ? 'visual' : 'audible'}\n`);
         };
         mine.on('alarm', alarm);
+        const title = (): void => {
+          conn.sendBinary(encodeServerMessage({ kind: 'title', text: windowTitle(mine.connectionInfo()) }));
+        };
+        // NOT sent now: the handshake's order (session, atlas, frame) is a tested contract, so the
+        // first title rides on the `session` message above, and these are only the changes.
+        mine.on('connection', title);
         const choiceEvents = ['geometry', 'connect', 'connectSettled', 'disconnect'] as const;
         for (const ev of choiceEvents) mine.on(ev, refreshChoices);
         // Paired with the lines above, in one place, so another event cannot be added to one
@@ -326,6 +334,7 @@ export function buildServer(args: WebArgs) {
           mine.off('connect', send);
           mine.off('disconnect', send);
           mine.off('alarm', alarm);
+          mine.off('connection', title);
           for (const ev of choiceEvents) mine.off(ev, refreshChoices);
         };
         repaint = send;

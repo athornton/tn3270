@@ -40,6 +40,11 @@
  * The test fakes pass `as never`, so they are unaffected by this and still need no DOM.
  */
 export interface BridgeDeps {
+  /**
+   * Set the page's title from the gateway's `title` message. Injected for tests; absent means
+   * `document.title`, the browser tab's title.
+   */
+  readonly setTitle?: (title: string) => void;
   readonly socket: {
     send(data: string): void;
     close(): void;
@@ -550,6 +555,10 @@ export function createBridge(deps: BridgeDeps): BridgeApi {
   // THE RENDERER'S `onCopyFailed`, if it registered one. Not in `handlers`, because it is not
   // queued -- see that member's docstring.
   let copyFailed: ((message: string) => void) | undefined;
+  const setTitle = (t: string): void => {
+    if (deps.setTitle !== undefined) deps.setTitle(t);
+    else if (typeof document !== 'undefined') document.title = t;
+  };
   // EVERY `onFlash` THE RENDERER REGISTERED -- in practice exactly one, `renderer.ts`'s own, but
   // an array rather than a single slot for the same reason `handlers` is a map and not a switch:
   // nothing here assumes there is only one consumer. NOT IN `handlers`/`dispatch`, for `onFlash`'s
@@ -642,6 +651,8 @@ export function createBridge(deps: BridgeDeps): BridgeApi {
       const msg = JSON.parse(text) as { kind: string } & Record<string, unknown>;
       if (msg.kind === 'session') {
         deps.storage.setItem(ID_KEY, String(msg['id']));
+        // The first window title rides here so the handshake keeps its order; see `title` below.
+        if (typeof msg['title'] === 'string') setTitle(msg['title']);
         return;
       }
       if (msg.kind === 'atlas') {
@@ -697,6 +708,14 @@ export function createBridge(deps: BridgeDeps): BridgeApi {
         one tab, not a crashed server -- so dropping it silently is the right answer, matching
         every other inbound kind above rather than inventing a stricter rule for this one alone.
       */
+      // The window title (`frontend`'s `windowTitle`, host first). Shape-checked and dropped if
+      // malformed, as `alarm` below is.
+      if (msg.kind === 'title') {
+        const text = msg['text'];
+        if (typeof text !== 'string') return;
+        setTitle(text);
+        return;
+      }
       if (msg.kind === 'alarm') {
         const visual = msg['visual'];
         if (typeof visual !== 'boolean') return;

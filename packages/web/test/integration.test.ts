@@ -618,6 +618,36 @@ describe('the gateway end to end', () => {
     a new seam. `disconnect()` first because `replay()` refuses a connected session; it is a
     no-op here (replay never sets `this.conn`) but costs nothing and matches that pattern.
   */
+  it('sends the first title on the session message, and a title message on each connection change', async () => {
+    const args = parseWebArgs(['--replay', trace, '--listen', '0', '127.0.0.1:3270']);
+    const { server, registry } = buildServer(args);
+    await new Promise<void>((r) => { server.listen(0, '127.0.0.1', r); });
+    const port = (server.address() as { port: number }).port;
+    stop = () => { registry.closeAll(); server.close(); };
+
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    await new Promise((r) => ws.addEventListener('open', r, { once: true }));
+    const hello = collect(ws, 4);
+    ws.send(JSON.stringify({ kind: 'hello' }));
+    const first = (await hello)[0]!;
+    expect(first['kind']).toBe('session');
+    expect(typeof first['title']).toBe('string');
+
+    const after: Array<Record<string, unknown>> = [];
+    ws.addEventListener('message', (e) => {
+      after.push(JSON.parse(inflateSync(Buffer.from(e.data as ArrayBuffer)).toString()) as Record<string, unknown>);
+    });
+    // A replay session is never connected, so disconnect() emits nothing; the gateway's forwarding
+    // of the event is what is under test, so emit it as core would.
+    registry.peek(first['id'] as string)!.emit('connection');
+    const deadline = Date.now() + 2000;
+    while (!after.some((m) => m['kind'] === 'title') && Date.now() < deadline) {
+      await new Promise((r) => { setTimeout(r, 10); });
+    }
+    expect(after.find((m) => m['kind'] === 'title')).toEqual({ kind: 'title', text: 'TN3270 — not connected' });
+    ws.close();
+  });
+
   it('rings the host\'s alarm in the browser: forwards a new {kind:"alarm",visual} message', async () => {
     const args = parseWebArgs(['--replay', trace, '--listen', '0', '127.0.0.1:3270']);
     const { server, registry } = buildServer(args);

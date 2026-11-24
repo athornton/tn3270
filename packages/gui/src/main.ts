@@ -10,7 +10,7 @@ import {
   type GeometrySetting, type Session, type Size,
 } from '@tn3270/core';
 import {
-  answerInfoFlag,
+  answerInfoFlag, windowTitle,
   applyAction, applyGeometryChoice, applyPaste, describeConnectError, describeTlsError, resolveScheme,
   startTransfer, transferCommand, DEFAULT_TLS,
   type Action, type ConnectForm, type GeometryChoice, type TlsRemedy,
@@ -464,6 +464,9 @@ app.whenReady().then(async () => {
       ...(process.env['TN3270_GUI_URL'] ? {} : { preload: layout.preload('preload.cjs') }),
     },
   });
+  // The title is ours (`windowTitle`, set from the session), so the page's `<title>` must not
+  // overwrite it whenever index.html loads, which Electron does unless this is prevented.
+  win.on('page-title-updated', (e) => { e.preventDefault(); });
   // Renderer console and load failures forwarded to stdout. Without this a renderer that
   // throws produces a BLANK WINDOW and no explanation anywhere -- which is exactly how the
   // first screenshot came out, and it is indistinguishable from a drawing bug.
@@ -1356,6 +1359,11 @@ async function startSession(
   session.on('screen', send);
   session.on('connect', send);
   session.on('disconnect', send);
+  const retitle = (): void => {
+    if (!win.isDestroyed()) win.setTitle(windowTitle(session.connectionInfo()));
+  };
+  session.on('connection', retitle);
+  retitle();
 
   // THE HOST'S ALARM (WCC bit; core emits 'alarm'), rung as x3270's ring_bell does: the system
   // beep, or with -visualbell a flash of the window instead (x3270/screen.c:5457).
