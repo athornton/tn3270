@@ -37,6 +37,7 @@ export type { TlsFlags, TlsOptions, TlsRemedy } from './tls.js';
 // `-oversize`, the same way: one parser so the front ends cannot drift on it either.
 export { takeOversizeFlag, OVERSIZE_USAGE } from './oversizeFlag.js';
 export { codePageFlag } from './codepageFlag.js';
+export { infoFlag, versionText, windowTitle, COPYRIGHT } from './identity.js';
 
 // A model or oversize PICKED FROM A LIST (the GUI's Model menu, the web's Alt-M overlay): one
 // rule for what a click does, including the reset to None when the old oversize refuses the model.
