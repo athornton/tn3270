@@ -1370,8 +1370,14 @@ gate, in the order agreed 2026-11-17; each milestone gets its own spec, plan and
      preferences (`save-options`), color scheme, model and font menus, light and dark modes. Split
      with the user 2026-11-24 into **A, identity and help: done** (the window title, Help → About,
      `--help`/`--version` in all four front ends; `Title()` skipped); **B, preferences and
-     appearance**, itself split into **B1, the preferences store: done** (GUI and TUI), B2, appearance
-     changed while running, and B3, other fonts; **C, connecting from a running window**. See *What is not implemented*.
+     appearance**, itself split into **B1, the preferences store: done** (GUI and TUI), B2, color mode
+     (the model's 3278/3279 prefix, as x3270, advertising IBM-3279-N) and appearance changed while
+     running (spec `docs/superpowers/specs/2026-11-24-appearance-while-running-design.md`), and B3,
+     other fonts. **Deferred from B2, kept here so they aren't lost:** live switching in the
+     browser's Alt-M panel (not a parity gate: the gateway has no x3270 counterpart); free scaling
+     with vector fonts, for the Super-Terminal; a color picker for each 3279 color and the
+     background, built-in light and dark terminal themes, and saving a set of colors as a named
+     theme; x3270's `wrongTerminalName`; fixed-size windows; **C, connecting from a running window**. See *What is not implemented*.
    - **15c. Code pages.** Only `bracket` and `cp037` exist (`packages/core/src/codepages/`), which is
      wrong for any host outside the US: 273 (Germany/Austria), 285 (UK), 297 (France), 500
      (international), 1047 (z/OS Unix), the 1140-family euro pages, and so on. The canvas draws
