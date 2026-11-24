@@ -1196,9 +1196,13 @@
   title: Save changed options to a profile or session file
   covers: [menu:saveOption]
   x3270: "File → Save Changed Options, a dialog for the profile/session file name (x3270/menubar.c:1203, x3270/fb-x3270:875-876)"
-  gui: "none: there is no preferences store (README *Using the GUI*, *Staging* item 15b). Store: a profile outside the app's data would need a store-probe check (docs/releasing.md:808)"
-  status: missing
-  browser: "none"
+  gui: "File → Save Changed Options (the app menu on macOS) writes preferences.json in Electron's userData: our own JSON keyed by our flag names, not an x3270 profile, by the user's choice 2026-11-24. Loaded at startup as flags before the typed ones (defaults < file < flags). The TUI has the same as tui.json and -save. TLS weakenings, the host and -devname are never stored. Store builds: the probe (docs/releasing.md:661-668) launches with an explicit --user-data-dir, so the default userData under each sandbox is not yet exercised"
+  status: ours
+  browser: "n/a: the gateway is configured by its command line"
+  evidence:
+    code: [packages/frontend/src/prefs.ts, packages/gui/src/guiPrefs.ts, packages/gui/src/main.ts, packages/gui/src/menu.ts, packages/tui/src/main.ts]
+    tests: [packages/frontend/test/prefs.test.ts, packages/gui/test/guiPrefs.test.ts, packages/gui/test/menu.test.ts, packages/gui/test/args.test.ts, packages/tui/test/main.test.ts]
+    live: "The preferences store, from the GUI and the TUI — 2026-11-24"
 - id: local-codepage
   area: files
   title: Windows ANSI code page for local text conversion

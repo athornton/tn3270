@@ -206,6 +206,17 @@ TN3270E, bytes and records), with a Copy button for bug reports. **`tn3270-gui -
 the usage and **`--version`** (or `-v`) the version block, each only as the lone argument, as
 x3270 does; the TUI, CLI and web gateway take the same two flags.
 
+**Preferences.** File → Save Changed Options (the app menu on macOS) writes the current settings
+to `preferences.json` in the app's data directory (`~/.config/TN3270/` on Linux,
+`~/Library/Application Support/TN3270/` on macOS, `%APPDATA%\TN3270\` on Windows), and the next
+launch starts from them. That includes a model chosen in the Model menu, which the Connect dialog
+then offers as its default. It's a flat JSON object keyed by flag name, e.g.
+`{"model": "3278-4-E", "scheme": "green", "codepage": "cp037", "visualbell": true}`. The stored
+keys are `model`, `oversize`, `scheme`, `codepage`, `visualbell`, `tn3270e`, `bind-image`,
+`bind-limit`, `ddm` and `cafile`. A flag on the command line beats the file. **`-insecure`,
+`-noverifycert`, the host and `-devname` are never stored**: a saved TLS weakening would apply to
+every connection. A bad value stops startup with the file's name; an unknown key is a warning.
+
 With no host it opens the Connect dialog (see *Installing*). The flags are the TUI's —
 `-model`, `--terminal-type`, `-oversize`, `-tn3270e on|off`, `-bind-image`, `-bind-limit`, `-ddm`,
 `-devname`, `-codepage`, `-scheme`, `-visualbell`, the TLS set, and the full `[prefix:][LU,LU@]host[:port]`
@@ -542,9 +553,14 @@ window and `Cmd-Q` end the process, so they are covered only by the fake-transfe
 ```sh
 node packages/tui/dist/main.js [-model M] [--terminal-type T] [--colors N] [-scheme S] \
     [-tn3270e on|off] [-bind-image on|off] [-bind-limit on|off] [-ddm on|off] [-devname NAME] \
-    [-codepage NAME] [-visualbell] [-oversize <cols>x<rows>|auto|none] [-insecure] [-noverifycert] \
+    [-codepage|-charset NAME] [-visualbell] [-save] [-oversize <cols>x<rows>|auto|none] [-insecure] [-noverifycert] \
     [-verifycert] [-cafile FILE] [prefix:][LU,LU@]host[:port]
 ```
+
+**Preferences: `-save`** writes this run's settings (the file's plus the flags') to
+`$XDG_CONFIG_HOME/tn3270/tui.json` (`~/.config/tn3270/tui.json`; `%APPDATA%\tn3270\tui.json` on
+Windows), and later runs start from them. It has the same keys and rules as the GUI's
+`preferences.json` (see *Using the GUI*), plus `colors`.
 
 `-model 3278-2-E` is usually what you want: TSO rejects a plain `IBM-3278-2`. Port
 defaults to 23. Models 2–5 are accepted, with or without `-E`; see *Screen models*.
@@ -1354,7 +1370,8 @@ gate, in the order agreed 2026-11-17; each milestone gets its own spec, plan and
      preferences (`save-options`), color scheme, model and font menus, light and dark modes. Split
      with the user 2026-11-24 into **A, identity and help: done** (the window title, Help → About,
      `--help`/`--version` in all four front ends; `Title()` skipped); **B, preferences and
-     appearance**; **C, connecting from a running window**. See *What is not implemented*.
+     appearance**, itself split into **B1, the preferences store: done** (GUI and TUI), B2, appearance
+     changed while running, and B3, other fonts; **C, connecting from a running window**. See *What is not implemented*.
    - **15c. Code pages.** Only `bracket` and `cp037` exist (`packages/core/src/codepages/`), which is
      wrong for any host outside the US: 273 (Germany/Austria), 285 (UK), 297 (France), 500
      (international), 1047 (z/OS Unix), the 1140-family euro pages, and so on. The canvas draws

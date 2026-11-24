@@ -83,6 +83,13 @@ file means no preferences, not an error.
 - **Success is reported** (`saved 4 settings to <path>`: in the GUI through the window's notice
   path, in the TUI on stderr). **A failure is shown, never swallowed.**
 
+**AMENDED WHILE PLANNING AND BUILDING (2026-11-24):** a save writes what the file, a flag or a
+menu set (it inverts the effective tokens with `argvToPrefs`, because a parsed `Scheme` has no
+name), not strictly "everything not at its default". A value set explicitly to its default is
+kept, and an unset default is still never written. The GUI's Connect dialog now takes its default
+model from the startup argv: it always used the built-in default, which dropped a `-model` given
+without a host. The store-probe check is recorded as a gap: the probe passes `--user-data-dir`.
+
 ## Testing
 
 - **Unit:** `prefsToArgv` (each type, refused and unknown keys, bad JSON); the file-versus-flag
