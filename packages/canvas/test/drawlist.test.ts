@@ -2,11 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { Screen, resolve, Color, type ResolvedCell } from '@tn3270/core';
+import { Screen, resolve, Color, cp037, type ResolvedCell } from '@tn3270/core';
 import { SCHEMES, schemeRgb, type Scheme } from '@tn3270/frontend';
 import { drawList } from '../src/drawlist.js';
 import type { AtlasGeometry } from '../src/geometry.js';
-import { ebcdicToCg, CG_BOXSOLID } from '../src/cg.js';
+import { ebcdicToCg, CG_BOXSOLID, column } from '../src/cg.js';
 
 /** The real atlas, so the glyph indices under test are the ones that will be drawn. */
 const atlas: AtlasGeometry = JSON.parse(readFileSync(
@@ -228,5 +228,26 @@ describe('drawList honors the scheme it is given', () => {
     const oia = list.oia!.cells[list.oia!.cells.length - 1]!;
     expect(oia.fg).toEqual([0, 255, 0]);             // green's LIME for neutral-white
     expect(oia.bg).toEqual([0, 0, 0]);
+  });
+});
+
+describe('the screen\'s code page', () => {
+  // The glyph map (cg.ts) is cp037's, so a byte must first become cp037's byte for the same
+  // character. Without that, a bracket screen's 0xAD (its '[') draws cp037's 0xAD, Y-acute.
+  const cp037Byte = { '[': 0xba, ']': 0xbb, 'Ý': 0xad, '¨': 0xbd } as const;
+
+  it('a bracket (default) screen draws 0xAD 0xBA 0xBB 0xBD as [ Ý ¨ ]', () => {
+    const s = screenWith([[0, 0xad], [1, 0xba], [2, 0xbb], [3, 0xbd]]);
+    const dl = listFor(s);
+    const want = (['[', 'Ý', '¨', ']'] as const).map((c) => column(atlas, ebcdicToCg(cp037Byte[c])));
+    expect(dl.cells.slice(0, 4).map((c) => c.glyph)).toEqual(want);
+  });
+
+  it('a cp037 screen draws its bytes unchanged', () => {
+    const s = new Screen({ rows: 24, cols: 80, codePage: cp037 });
+    for (const [a, b] of [[0, 0xad], [1, 0xba], [2, 0xbb], [3, 0xbd]] as const) s.setChar(a, b);
+    const dl = listFor(s);
+    expect(dl.cells.slice(0, 4).map((c) => c.glyph))
+      .toEqual([0xad, 0xba, 0xbb, 0xbd].map((b) => column(atlas, ebcdicToCg(b))));
   });
 });

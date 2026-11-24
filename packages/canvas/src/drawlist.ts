@@ -45,7 +45,7 @@
  */
 
 import {
-  cp037, Color, type ResolvedCell, type ScreenSnapshot,
+  CODE_PAGES, DEFAULT_CODE_PAGE, cp037, Color, type ResolvedCell, type ScreenSnapshot,
 } from '@tn3270/core';
 import { schemeRgb, type Scheme } from '@tn3270/frontend';
 import { ebcdicToCg, column } from './cg.js';
@@ -74,6 +74,26 @@ export interface DrawList {
 /** EBCDIC space, which is what a hidden cell draws instead of its own character. */
 const EBCDIC_SPACE = 0x40;
 
+/**
+ * Per page, each byte's cp037 byte for the same character. The glyph map (`cg.ts`) is cp037's,
+ * so a cell drawn straight from its byte draws cp037's character: a bracket screen's 0xAD, its
+ * `[`, would draw as Y-acute. Translating through Unicode first fixes that for any page with
+ * cp037's character set, which bracket has (it only moves four bytes). Characters cp037 lacks
+ * become its substitute; pages that have them are README *Staging* 15c, with `cg.ts`.
+ */
+const CP037_BYTES = new Map<string, Uint8Array>();
+
+function cp037Bytes(name: string | undefined): Uint8Array {
+  const page = (name !== undefined ? CODE_PAGES.get(name) : undefined) ?? DEFAULT_CODE_PAGE;
+  let t = CP037_BYTES.get(page.name);
+  if (t === undefined) {
+    t = new Uint8Array(256);
+    for (let b = 0; b < 256; b++) t[b] = cp037.fromUnicode(page.toUnicode(b));
+    CP037_BYTES.set(page.name, t);
+  }
+  return t;
+}
+
 // `scheme` comes BEFORE `oiaText`: an existing call passing OIA text positionally would
 // otherwise silently take it as the scheme, with no type error and no failing test.
 //
@@ -90,6 +110,7 @@ export function drawList(
   oiaText?: string,
 ): DrawList {
   const blank = column(atlas, ebcdicToCg(EBCDIC_SPACE));
+  const toCp037 = cp037Bytes(snapshot.codePage);
   const cells: DrawCell[] = [];
 
   for (let i = 0; i < snapshot.cells.length; i++) {
@@ -106,7 +127,7 @@ export function drawList(
     cells.push({
       x: col * atlas.cellWidth,
       y: row * atlas.cellHeight,
-      glyph: r.hidden ? blank : column(atlas, ebcdicToCg(raw.ebcdic ?? EBCDIC_SPACE)),
+      glyph: r.hidden ? blank : column(atlas, ebcdicToCg(toCp037[raw.ebcdic ?? EBCDIC_SPACE]!)),
       fg,
       bg,
       cursor: i === snapshot.cursor,
