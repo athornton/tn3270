@@ -1,11 +1,11 @@
-# Handoff — state as of 2026-11-24 (README *STAGING* 15a LAST ITEM, THE `bracket` DEFAULT CODE PAGE + `-codepage`, BUILT on branch `bracket-codepage` (unpushed, unmerged; VM/370 witness owed, plan Task 9); README *STAGING* 15a PART 3, KEYBOARD SEMANTICS, MERGED (`d0d8395`): typeahead, oerrLock, Reset's half reset, insert-mode resets, the erase keys, numericLock off, Attn on TN3270E, GUI-witnessed on VM, gate FAIL 107 blocking; next: 15a's remaining item, x3270's default code page `bracket` (then 15b); README *STAGING* 15a PART 2, BLINK/INTENSIFY/THE BELL, MERGED (`86a9999`): canvas blink and intensify drawn, the host's alarm rings in the GUI, the browser and the TUI, `-visualbell` flashes instead, gate still FAIL 113 blocking; 15a PART 1, ASCII LINE ENDS, MERGED (`13e41b2`); PARITY TRIAGED, gate 113 blocking; ROADMAP = README item 15a-15h; x3270 PARITY CHECKLIST MERGED (`df62e6f`); THE PACKAGED GUI'S DROPPED FIRST ARGUMENT AND SYSTEM-WIDE Ctrl-] FIXED (`gui-argv-and-quit`): 413 x3270 names, 158 checklist rows, `parity.mjs gate` FAIL 157 blocking; 0.1.4 RELEASED: npm by the tag workflow with provenance, and the first GitHub release with the seven installers, SHA256SUMS and scriv notes; macOS CODE SIGNING MERGED (`db5a93d`; released installers up to 0.1.4 are UNSIGNED), Windows CI signing DROPPED for the Microsoft Store; STORE PROBE MERGED (`559ea78`); README AUDIT + FIXES MERGED (`ae8724f`); WEB RECEIVE DOWNLOADS ON COMPLETION (`4a940fe`, live-verified); `Exist` PER DIRECTION (`f533bff`); next: README *Staging* 15a part 3, the keyboard semantics (typeahead and keyboard lock, insert-mode reset, x3270's erase rules, oerr-lock))
+# Handoff — state as of 2026-11-24 (README *STAGING* 15a LAST ITEM, THE `bracket` DEFAULT CODE PAGE + `-codepage`, BUILT on branch `bracket-codepage` (unpushed, unmerged; CLI-witnessed on VM/370, GUI canvas unwitnessed); README *STAGING* 15a PART 3, KEYBOARD SEMANTICS, MERGED (`d0d8395`): typeahead, oerrLock, Reset's half reset, insert-mode resets, the erase keys, numericLock off, Attn on TN3270E, GUI-witnessed on VM, gate FAIL 107 blocking; next: 15a's remaining item, x3270's default code page `bracket` (then 15b); README *STAGING* 15a PART 2, BLINK/INTENSIFY/THE BELL, MERGED (`86a9999`): canvas blink and intensify drawn, the host's alarm rings in the GUI, the browser and the TUI, `-visualbell` flashes instead, gate still FAIL 113 blocking; 15a PART 1, ASCII LINE ENDS, MERGED (`13e41b2`); PARITY TRIAGED, gate 113 blocking; ROADMAP = README item 15a-15h; x3270 PARITY CHECKLIST MERGED (`df62e6f`); THE PACKAGED GUI'S DROPPED FIRST ARGUMENT AND SYSTEM-WIDE Ctrl-] FIXED (`gui-argv-and-quit`): 413 x3270 names, 158 checklist rows, `parity.mjs gate` FAIL 157 blocking; 0.1.4 RELEASED: npm by the tag workflow with provenance, and the first GitHub release with the seven installers, SHA256SUMS and scriv notes; macOS CODE SIGNING MERGED (`db5a93d`; released installers up to 0.1.4 are UNSIGNED), Windows CI signing DROPPED for the Microsoft Store; STORE PROBE MERGED (`559ea78`); README AUDIT + FIXES MERGED (`ae8724f`); WEB RECEIVE DOWNLOADS ON COMPLETION (`4a940fe`, live-verified); `Exist` PER DIRECTION (`f533bff`); next: README *Staging* 15a part 3, the keyboard semantics (typeahead and keyboard lock, insert-mode reset, x3270's erase rules, oerr-lock))
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log). For the most recent work, read the spec and plan the
 latest START HERE entry names. Each finished feature has its own pair under `docs/superpowers/`.
 
-## START HERE — LATEST FIRST; NEXT: THE CODE PAGE'S VM/370 WITNESS (plan Task 9), REVIEW, MERGE; THEN 15b
+## START HERE — LATEST FIRST; NEXT: REVIEW AND MERGE `bracket-codepage` (CLI-witnessed on VM/370); THEN 15b
 
 **2026-11-24, LATEST: README *STAGING* 15a's LAST ITEM, THE `bracket` DEFAULT CODE PAGE, BUILT** on
 branch `bracket-codepage` (from `c59eae9`; UNPUSHED, UNMERGED). Spec
@@ -26,9 +26,10 @@ user's choice, for the month's budget). 4019 tests, build and typecheck clean.
   `cp037` imported so none died of a ReferenceError.
 - **Parity:** `code-page` now `partial` (gap: menu 15b, other pages 15c, `sbcsCgcsgid`, live
   witness), `live: unwitnessed`; gate still FAIL 107 blocking.
-- **Owed (Task 9, needs VM/370 up):** type `[]` into a CMS file at the defaults and with
-  `-codepage cp037`, receive each BINARY, hexdump: expect `ad bd` and `ba bb`; `TYPE` each in
-  both sessions to see the display decode. Then review, merge, push.
+- **Task 9 DONE from the CLI on VM/370 (2026-11-24):** binary receives hexdump `ad bd` (defaults)
+  and `ba bb` (`-codepage cp037`); `TYPE` shows each as `[]` in its own page and `Ý¨` in the other
+  (`docs/live-testing.md`). **Not witnessed live: the GUI canvas glyph path.** Next: review, merge,
+  push; a GUI witness of `[]` drawing would close the parity row's last live gap.
 
 
 **2026-11-18/19, LATEST: README *STAGING* 15a PART 3, THE KEYBOARD SEMANTICS, MERGED** to `main`

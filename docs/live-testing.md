@@ -927,6 +927,31 @@ and the Recording log says what happened when they were run.
   we hardcode.** Not a TN3270E problem — `IBM-3278-2-E` reaches TSO with the TN3270E
   option never negotiated. See the Recording log. `record-mvs.txt` remains a draft.
 
+## The `bracket` default code page, from the CLI against VM/370 — 2026-11-24
+
+**At the defaults, typed `[]` reaches the host as `AD BD`, x3270's `bracket` bytes, and with
+`-codepage cp037` as `BA BB`. Each session displays the other's file as `Ý¨`.** The proof comes
+from the host's bytes, not from our tables: each file was fetched with a binary `IND$FILE`
+receive (no translation) and hexdumped locally. Branch `bracket-codepage`.
+
+**Method.** CLI (`packages/cli/dist/main.js -insecure`, with and without `-codepage cp037`) to
+VM/370 CE on `127.0.0.1:3270`, user `CMSUSER`. The sequence: two Enters after connect (see *The
+logon sequence*), `logon cmsuser`, the password, `ipl cms`, and Clear at each `MORE...`. Then
+`EDIT CPTEST DATA A`, `INPUT`, `[]`, a null line, `FILE`. **A reconnect lands at `CP READ`, not in
+CMS**, so each run re-IPLs. Receive:
+`Transfer(Direction=receive,"HostFile=cptest data a",LocalFile=/tmp/cptest.bin,Mode=binary,Host=vm)`,
+where the quotes are needed because `Transfer()` splits unquoted values on spaces.
+
+| file | typed with | `od -An -tx1` of the binary receive | `TYPE` at defaults | `TYPE` with cp037 |
+|---|---|---|---|---|
+| `CPTEST DATA A` | defaults (`bracket`) | `ad bd 40 40 …` (80 bytes, F 80) | `[]` | `Ý¨` |
+| `CPTEST2 DATA A` | `-codepage cp037` | `ba bb 40 40 …` (80 bytes, F 80) | `Ý¨` | `[]` |
+
+**What it does NOT witness:** the canvas. This was the CLI, whose `ScreenText` decodes through
+core's `resolve()` and the snapshot's page. The GUI's and browser's glyph path (`drawList`'s
+cp037 byte map, which the spec wrongly said needed no change) is tested offline only. CMSUSER was
+logged off at the end.
+
 ## The four keys and reconnect, from the GUI against VM/370 and TK5 — 2026-11-17
 
 **Dup, Field Mark and Sys Req now have live witnesses from the Electron GUI on both hosts, and
