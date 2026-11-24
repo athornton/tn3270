@@ -61,7 +61,7 @@ export function buildSession(args: TuiArgs, terminal: () => Geometry = processTe
     };
     return defaultSession(
       resolveTerminalType(typeOpts), args.tls, resolveAlternateSize(typeOpts),
-      args.tn3270e, args.bindImage, args.bindLimit, args.devname, args.ddm,
+      args.tn3270e, args.bindImage, args.bindLimit, args.devname, args.ddm, undefined, args.codePage,
     );
   }
   return defaultSession(
@@ -74,6 +74,7 @@ export function buildSession(args: TuiArgs, terminal: () => Geometry = processTe
       },
       measure: () => measureTerminal(terminal()),
     },
+    args.codePage,
   );
 }
 
@@ -120,7 +121,7 @@ export async function run(
     if (interactive === undefined) {
       throw new UsageError(
         `usage: tn3270 [-model M] [--terminal-type T] [--colors N] [-scheme S] `
-        + `[-tn3270e on|off] [-bind-image on|off] [-bind-limit on|off] [-ddm on|off] [-devname NAME] `
+        + `[-tn3270e on|off] [-bind-image on|off] [-bind-limit on|off] [-ddm on|off] [-devname NAME] [-codepage NAME] `
         + `[-visualbell] ${OVERSIZE_USAGE} ${TLS_USAGE} [prefix:][LU,LU@]host[:port]`,
       );
     }

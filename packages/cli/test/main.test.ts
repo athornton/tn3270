@@ -217,3 +217,28 @@ describe('-bind-limit', () => {
     expect(() => parseArgs(['-bind-limit'])).toThrow(UsageError);
   });
 });
+
+describe('-codepage', () => {
+  it('-codepage cp037 selects cp037', () => {
+    expect(parseArgs(['-codepage', 'cp037']).codePage?.name).toBe('cp037');
+  });
+  it('-charset is an alias, and takes x3270\'s aliases', () => {
+    expect(parseArgs(['-charset', 'oldibm']).codePage?.name).toBe('bracket');
+  });
+  it('absent leaves it undefined, for core\'s default', () => {
+    expect(parseArgs([]).codePage).toBeUndefined();
+  });
+  it('an unknown name is a usage error, remedy first', () => {
+    expect(() => parseArgs(['-codepage', 'cp273'])).toThrow(UsageError);
+    expect(() => parseArgs(['-codepage', 'cp273'])).toThrow("-codepage: use one of bracket, cp037 (got 'cp273')");
+  });
+  it('a missing value is a usage error', () => {
+    expect(() => parseArgs(['-codepage'])).toThrow(UsageError);
+  });
+  it('reaches the session, on both buildSession paths', () => {
+    expect(buildSession(parseArgs(['-codepage', 'cp037'])).screen.snapshot().codePage).toBe('cp037');
+    expect(buildSession(parseArgs(['--terminal-type', 'IBM-3278-2', '-codepage', 'cp037']))
+      .screen.snapshot().codePage).toBe('cp037');
+    expect(buildSession(parseArgs([])).screen.snapshot().codePage).toBe('bracket');
+  });
+});

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseWebArgs, UsageError } from '../src/args.js';
+import { buildSession, parseWebArgs, UsageError } from '../src/args.js';
 
 /**
  * The gateway's own flags. The HOST-side flags (-insecure, -cafile, -model, -scheme) are
@@ -257,5 +257,29 @@ describe('-oversize', () => {
 
   it('ACCEPTS auto, because the gateway has a window to measure: the browser\'s', () => {
     expect(() => parseWebArgs(['-model', '3278-4-E', '-oversize', 'auto', 'vm:3270'])).not.toThrow();
+  });
+});
+
+describe('-codepage', () => {
+  it('-codepage cp037 selects cp037', () => {
+    expect(parseWebArgs(['-codepage', 'cp037', '127.0.0.1:3270']).codePage?.name).toBe('cp037');
+  });
+  it('-charset is an alias, and takes x3270\'s aliases', () => {
+    expect(parseWebArgs(['-charset', 'oldibm', '127.0.0.1:3270']).codePage?.name).toBe('bracket');
+  });
+  it('absent leaves it undefined, for core\'s default', () => {
+    expect(parseWebArgs(['127.0.0.1:3270']).codePage).toBeUndefined();
+  });
+  it('an unknown name is a usage error, remedy first', () => {
+    expect(() => parseWebArgs(['-codepage', 'cp273', '127.0.0.1:3270'])).toThrow(UsageError);
+    expect(() => parseWebArgs(['-codepage', 'cp273', '127.0.0.1:3270'])).toThrow("-codepage: use one of bracket, cp037 (got 'cp273')");
+  });
+  it('a missing value is a usage error', () => {
+    expect(() => parseWebArgs(['-codepage'])).toThrow(UsageError);
+  });
+  it('reaches the gateway\'s sessions', () => {
+    const a = parseWebArgs(['-codepage', 'cp037', '127.0.0.1:3270']);
+    const { session } = buildSession(a, { kind: 'plain' } as never, { width: 8, height: 16 }, undefined);
+    expect(session.screen.snapshot().codePage).toBe('cp037');
   });
 });

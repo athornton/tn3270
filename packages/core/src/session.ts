@@ -19,7 +19,7 @@ import { buildReadModified, buildReadBuffer } from './inbound.js';
 import { buildReply, DEFAULT_CAPABILITIES, withDdm, type QueryRequest } from './queryreply.js';
 import { DftTransfer } from './ft/dft.js';
 import { AddressError } from './address.js';
-import { cp037, type CodePage } from './codepage.js';
+import { DEFAULT_CODE_PAGE, type CodePage } from './codepage.js';
 import { parseBind, parseUnbind, acceptBindDims, NO_BIND_TIMEOUT_MS } from './bind.js';
 import { resolveGeometry, type GeometrySetting, type ResolvedGeometry, type Size } from './geometry.js';
 
@@ -504,7 +504,7 @@ export class Session {
         cols: opts.alternateCols ?? opts.cols ?? MODEL_2.cols,
       };
     }
-    this.keyboard = new Keyboard(this.screen, this.oia, opts.codePage ?? cp037);
+    this.keyboard = new Keyboard(this.screen, this.oia, opts.codePage ?? DEFAULT_CODE_PAGE);
   }
 
   /** The setting the next connect will resolve, or `undefined` in legacy mode. */
@@ -808,26 +808,23 @@ export class Session {
         // fallback is all we ever send, which is consistent with not supporting ELF.
         m.set('IBMAPPLID', 'None');
         // CODEPAGE: x3270 derives this from `cgcsgid & 0xffff`, formatted `%03d` when
-        // under 100 else `%d` (telnet_new_environ.c:255-260). We have no cgcsgid field
-        // anywhere in this codebase (`codepage.ts`'s `CodePage` carries only a `name`
-        // like 'cp037'), so the value is derived from that name instead: stripping the
-        // 'cp' prefix from our default and only code page, 'cp037', yields exactly the
-        // "037" x3270 computes for ITS default codepage (`Common/codepage.c:250`,
-        // `set_codepage_number` falling back to "037"). Not hardcoded as a bare string:
-        // if `codePage` ever changes, this changes with it rather than silently lying
-        // about which page is live.
+        // under 100 else `%d` (telnet_new_environ.c:255-260), and so do we, from
+        // `CodePage.cgcsgid`. It used to be the page's NAME minus a 'cp' prefix, which was
+        // right only while cp037 was the one page: x3270's default, 'bracket', would have
+        // gone out as the word "bracket" where x3270 sends "037" (bracket declares
+        // CGCSGID 37, Common/unicode.c:293).
         //
         // CHARSET is deliberately NOT sent: x3270 derives it from `(cgcsgid >> 16) &
-        // 0xffff`, the GCSGID half of the SAME field we do not model, and there is no
-        // honest value to compute here without inventing one.
+        // 0xffff`, the GCSGID half. Our `cgcsgid` holds only what x3270's tables declare
+        // (37), which has no GCSGID half, so there is no honest value to send.
         // KBDTYPE is deliberately NOT sent: x3270 only sends it when `kybdtype` is
         // configured, which nothing in this codebase sets.
         // Confirmed WORTH sending despite the original design spec's "no trace asks for
         // this" belief: four traces (dbcs-wrap.trc among them) send an empty-body SEND,
         // which parseEnvironSend expands to "every variable", and x3270 answers with all
         // six -- so a real host asking for everything gets this one from x3270 today.
-        const codePageName = this.opts.codePage?.name ?? cp037.name;
-        m.set('CODEPAGE', codePageName.replace(/^cp/i, ''));
+        const cpgid = (this.opts.codePage ?? DEFAULT_CODE_PAGE).cgcsgid & 0xffff;
+        m.set('CODEPAGE', cpgid < 100 ? String(cpgid).padStart(3, '0') : String(cpgid));
         return m;
       },
     };

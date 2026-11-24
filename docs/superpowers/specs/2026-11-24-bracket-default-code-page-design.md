@@ -63,15 +63,15 @@ table entries).
 
 ### 3. Canvas
 
-**No change to the drawing path.** `drawlist.ts:164` maps each screen character through
-`cp037.fromUnicode` and then `ebcdicToCg`. That byte is only an intermediate for the glyph
-lookup, so any character in cp037's set gets its correct glyph whichever page decoded it, and
-`bracket` has the same set. The cp037-fixed `cg.ts` path only matters for pages with
-characters cp037 lacks, which is 15c. The parity row's `cg.ts` remark moves to 15c's
-README text.
-
-This is a claim from reading the code, so a test must show it: a screen whose bytes 0xAD,
-0xBA, 0xBB and 0xBD were decoded under `bracket` draws the CG glyphs for `[`, Ý, ¨ and `]`.
+**CORRECTED 2026-11-24 DURING IMPLEMENTATION.** This section first said the canvas needed no
+change, because `drawlist.ts:164` maps characters through Unicode. That line is the status
+line's (OIA) path. Screen cells are drawn at the cell loop from the RAW EBCDIC byte through the
+cp037-fixed glyph map, so at the new default a host's 0xAD (`[` in bracket) would have drawn as
+Y-acute. The fix: `drawList` translates each byte through the snapshot's page into cp037's byte
+for the same character before the glyph lookup. It's an exact permutation for bracket, since
+both pages hold the same characters, and an identity for cp037. A test draws all four moved
+bytes on a bracket screen and on a cp037 one, and it failed before the fix. Pages with
+characters cp037 lacks still need `cg.ts` work, which is 15c.
 
 ## Testing
 

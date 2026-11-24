@@ -7,9 +7,9 @@
  * works.
  */
 
-import { resolveGeometry, OversizeError, type Oversize } from '@tn3270/core';
+import { resolveGeometry, OversizeError, type CodePage, type Oversize } from '@tn3270/core';
 import {
-  resolveHostSpec, resolveScheme, SCHEME_NAMES, takeTlsFlag, takeOversizeFlag, resolveTls,
+  codePageFlag, resolveHostSpec, resolveScheme, SCHEME_NAMES, takeTlsFlag, takeOversizeFlag, resolveTls,
   type Scheme, type TlsFlags, type TlsOptions,
 } from '@tn3270/frontend';
 import type { Depth } from './colors.js';
@@ -54,6 +54,8 @@ export interface TuiArgs {
    * telnet option 39 entirely -- see `SessionOptions.devname`.
    */
   devname?: string;
+  /** `-codepage NAME` / `-charset NAME`: the host code page. Absent means core's default, `bracket`. */
+  codePage?: CodePage;
   /**
    * `-oversize <cols>x<rows>|auto|none`. Absent means `none`: the model's own alternate size.
    * Unlike the CLI's, `auto` is allowed -- there is a terminal to measure, at every connect and
@@ -190,6 +192,11 @@ export function parseArgs(argv: readonly string[]): TuiArgs {
         i++;
         break;
       }
+      case '-codepage':
+      case '-charset':
+        args.codePage = codePageFlag(flag, value, (m) => new UsageError(m));
+        i++;
+        break;
       case '-devname':
         if (value === undefined) throw new UsageError('-devname needs a value, e.g. -devname foo===');
         args.devname = value;

@@ -392,3 +392,32 @@ describe('buildSession', () => {
     });
   });
 });
+
+describe('-codepage', () => {
+  it('-codepage cp037 selects cp037', () => {
+    expect(parseGuiArgs(['-codepage', 'cp037', 'vm']).codePage?.name).toBe('cp037');
+  });
+  it('-charset is an alias, and takes x3270\'s aliases', () => {
+    expect(parseGuiArgs(['-charset', 'oldibm', 'vm']).codePage?.name).toBe('bracket');
+  });
+  it('absent leaves it undefined, for core\'s default', () => {
+    expect(parseGuiArgs(['vm']).codePage).toBeUndefined();
+  });
+  it('an unknown name is a usage error, remedy first', () => {
+    expect(() => parseGuiArgs(['-codepage', 'cp273', 'vm'])).toThrow(UsageError);
+    expect(() => parseGuiArgs(['-codepage', 'cp273', 'vm'])).toThrow("-codepage: use one of bracket, cp037 (got 'cp273')");
+  });
+  it('a missing value is a usage error', () => {
+    expect(() => parseGuiArgs(['-codepage'])).toThrow(UsageError);
+  });
+  it('reaches the session, on both buildSession paths', () => {
+    const none = (): undefined => undefined;
+    expect(buildSession(parseGuiArgs(['-codepage', 'cp037', 'vm']), none).screen.snapshot().codePage).toBe('cp037');
+    expect(buildSession(parseGuiArgs(['--terminal-type', 'IBM-3278-2', '-codepage', 'cp037', 'vm']), none)
+      .screen.snapshot().codePage).toBe('cp037');
+    expect(buildSession(parseGuiArgs(['vm']), none).screen.snapshot().codePage).toBe('bracket');
+  });
+  it('is in the usage line', () => {
+    expect(USAGE).toContain('[-codepage NAME]');
+  });
+});

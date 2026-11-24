@@ -1,4 +1,4 @@
-import { cp037, type CodePage } from './codepage.js';
+import { DEFAULT_CODE_PAGE, type CodePage } from './codepage.js';
 import { EBCDIC_DUP, EBCDIC_FIELD_MARK } from './constants.js';
 import { Oia, KeyboardState } from './oia.js';
 import type { Screen, Field } from './screen.js';
@@ -30,7 +30,7 @@ export class Keyboard {
   constructor(
     private readonly screen: Screen,
     readonly oia: Oia,
-    private readonly codePage: CodePage = cp037,
+    private readonly codePage: CodePage = DEFAULT_CODE_PAGE,
   ) {}
 
   // ---- typing ----

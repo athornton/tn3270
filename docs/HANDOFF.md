@@ -1,11 +1,44 @@
-# Handoff — state as of 2026-11-19 (README *STAGING* 15a PART 3, KEYBOARD SEMANTICS, MERGED (`d0d8395`): typeahead, oerrLock, Reset's half reset, insert-mode resets, the erase keys, numericLock off, Attn on TN3270E, GUI-witnessed on VM, gate FAIL 107 blocking; next: 15a's remaining item, x3270's default code page `bracket` (then 15b); README *STAGING* 15a PART 2, BLINK/INTENSIFY/THE BELL, MERGED (`86a9999`): canvas blink and intensify drawn, the host's alarm rings in the GUI, the browser and the TUI, `-visualbell` flashes instead, gate still FAIL 113 blocking; 15a PART 1, ASCII LINE ENDS, MERGED (`13e41b2`); PARITY TRIAGED, gate 113 blocking; ROADMAP = README item 15a-15h; x3270 PARITY CHECKLIST MERGED (`df62e6f`); THE PACKAGED GUI'S DROPPED FIRST ARGUMENT AND SYSTEM-WIDE Ctrl-] FIXED (`gui-argv-and-quit`): 413 x3270 names, 158 checklist rows, `parity.mjs gate` FAIL 157 blocking; 0.1.4 RELEASED: npm by the tag workflow with provenance, and the first GitHub release with the seven installers, SHA256SUMS and scriv notes; macOS CODE SIGNING MERGED (`db5a93d`; released installers up to 0.1.4 are UNSIGNED), Windows CI signing DROPPED for the Microsoft Store; STORE PROBE MERGED (`559ea78`); README AUDIT + FIXES MERGED (`ae8724f`); WEB RECEIVE DOWNLOADS ON COMPLETION (`4a940fe`, live-verified); `Exist` PER DIRECTION (`f533bff`); next: README *Staging* 15a part 3, the keyboard semantics (typeahead and keyboard lock, insert-mode reset, x3270's erase rules, oerr-lock))
+# Handoff — state as of 2026-11-24 (README *STAGING* 15a LAST ITEM, THE `bracket` DEFAULT CODE PAGE + `-codepage`, BUILT on branch `bracket-codepage` (unpushed, unmerged; CLI-witnessed on VM/370, GUI canvas unwitnessed); README *STAGING* 15a PART 3, KEYBOARD SEMANTICS, MERGED (`d0d8395`): typeahead, oerrLock, Reset's half reset, insert-mode resets, the erase keys, numericLock off, Attn on TN3270E, GUI-witnessed on VM, gate FAIL 107 blocking; next: 15a's remaining item, x3270's default code page `bracket` (then 15b); README *STAGING* 15a PART 2, BLINK/INTENSIFY/THE BELL, MERGED (`86a9999`): canvas blink and intensify drawn, the host's alarm rings in the GUI, the browser and the TUI, `-visualbell` flashes instead, gate still FAIL 113 blocking; 15a PART 1, ASCII LINE ENDS, MERGED (`13e41b2`); PARITY TRIAGED, gate 113 blocking; ROADMAP = README item 15a-15h; x3270 PARITY CHECKLIST MERGED (`df62e6f`); THE PACKAGED GUI'S DROPPED FIRST ARGUMENT AND SYSTEM-WIDE Ctrl-] FIXED (`gui-argv-and-quit`): 413 x3270 names, 158 checklist rows, `parity.mjs gate` FAIL 157 blocking; 0.1.4 RELEASED: npm by the tag workflow with provenance, and the first GitHub release with the seven installers, SHA256SUMS and scriv notes; macOS CODE SIGNING MERGED (`db5a93d`; released installers up to 0.1.4 are UNSIGNED), Windows CI signing DROPPED for the Microsoft Store; STORE PROBE MERGED (`559ea78`); README AUDIT + FIXES MERGED (`ae8724f`); WEB RECEIVE DOWNLOADS ON COMPLETION (`4a940fe`, live-verified); `Exist` PER DIRECTION (`f533bff`); next: README *Staging* 15a part 3, the keyboard semantics (typeahead and keyboard lock, insert-mode reset, x3270's erase rules, oerr-lock))
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log). For the most recent work, read the spec and plan the
 latest START HERE entry names. Each finished feature has its own pair under `docs/superpowers/`.
 
-## START HERE — LATEST FIRST; NEXT: 15a's LAST ITEM, THE `bracket` DEFAULT CODE PAGE (BRAINSTORM FIRST)
+## START HERE — LATEST FIRST; NEXT: REVIEW AND MERGE `bracket-codepage` (CLI-witnessed on VM/370); THEN 15b
+
+**2026-11-24, LATEST: README *STAGING* 15a's LAST ITEM, THE `bracket` DEFAULT CODE PAGE, BUILT** on
+branch `bracket-codepage` (from `c59eae9`; UNPUSHED, UNMERGED). Spec
+`docs/superpowers/specs/2026-11-24-bracket-default-code-page-design.md`, plan
+`docs/superpowers/plans/2026-11-24-bracket-default-code-page.md`; run inline, in one session (the
+user's choice, for the month's budget). 4019 tests, build and typecheck clean.
+- **What changed:** `bracket` table (cp037 with 0xAD/0xBA/0xBB/0xBD moved, tested against
+  x3270's rows); `CodePage.cgcsgid`; `DEFAULT_CODE_PAGE = bracket` in Screen/Keyboard/Session;
+  `resolveCodePage` with x3270's aliases and its all-digits `cp` prefix; NEW-ENVIRON `CODEPAGE`
+  from the CGCSGID (`037`); `ScreenSnapshot.codePage` (a name) so `resolve()` decodes with the
+  session's page; `-codepage`/`-charset` in all four front ends via `frontend`'s `codePageFlag`.
+- **Two things the spec got wrong, found while building:** (1) `resolve()`'s callers never pass a
+  page, so `-codepage cp037` would have displayed as bracket: fixed by the snapshot's name. (2)
+  The canvas DID need a change: `drawlist.ts:164` is the OIA path; screen cells drew the raw byte
+  through the cp037 glyph map, so bracket's `[` drew as Ý. `drawList` now maps each byte to
+  cp037's byte for the same character first. Spec section 3 corrected.
+- **Mutation pass (Task 7):** 14 mutations, all killed, the three default sites re-run with
+  `cp037` imported so none died of a ReferenceError.
+- **Parity:** `code-page` now `partial` (gap: menu 15b, other pages 15c, `sbcsCgcsgid`, live
+  witness), `live: unwitnessed`; gate still FAIL 107 blocking.
+- **Task 9 DONE from the CLI on VM/370 (2026-11-24):** binary receives hexdump `ad bd` (defaults)
+  and `ba bb` (`-codepage cp037`); `TYPE` shows each as `[]` in its own page and `Ý¨` in the other
+  (`docs/live-testing.md`). **Not witnessed live: the GUI canvas glyph path.** Next: review, merge,
+  push; a GUI witness of `[]` drawing would close the parity row's last live gap.
+- **Review (2026-11-24, inline, no subagents) found two items, neither blocking:** (1) nit: the
+  snapshot carries only the page's NAME, so a `Screen` built with an unregistered `CodePage`
+  (only tests do this) would `resolve()` as `bracket`; register pages, or carry the table, if a
+  front end ever builds one. (2) Pre-existing, for 15c: x3270's DFT ascii transfers translate
+  through the host code page (`Common/ft.c:1238` `ft_ebcdic_to_multibyte`); ours never consult
+  the session page. Check what our DFT ascii path does with `[ ]` before calling 15c done.
+- **GUI witness BLOCKED 2026-11-24:** `~/micromamba/envs/gui` is gone from this host (Electron:
+  `libnspr4.so` missing), so the userspace Xvfb/Electron stack must be rebuilt before any GUI run.
+
 
 **2026-11-18/19, LATEST: README *STAGING* 15a PART 3, THE KEYBOARD SEMANTICS, MERGED** to `main`
 `--no-ff` as `d0d8395` and pushed (branch `keyboard-semantics`, from `b4fd071`; CI 44578218532 green 6/6 on `ddec36a`). Spec

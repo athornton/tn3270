@@ -1,9 +1,9 @@
 import { randomBytes } from 'node:crypto';
 import {
-  resolveGeometry, OversizeError, TerminalTypeError, type Oversize, type Session,
+  resolveGeometry, OversizeError, TerminalTypeError, type CodePage, type Oversize, type Session,
 } from '@tn3270/core';
 import {
-  defaultSession, resolveHostSpec, takeOversizeFlag, takeTlsFlag, type TlsFlags, type TlsOptions,
+  codePageFlag, defaultSession, resolveHostSpec, takeOversizeFlag, takeTlsFlag, type TlsFlags, type TlsOptions,
 } from '@tn3270/frontend';
 import { measureViewport } from './viewport.js';
 
@@ -97,6 +97,8 @@ export interface WebArgs {
    * not one of the gateway's own (`--bind`, `--listen`, ...).
    */
   readonly devname?: string;
+  /** `-codepage NAME` / `-charset NAME`: the host code page for every session this gateway serves. Absent means core's default, `bracket`. */
+  readonly codePage?: CodePage;
   /**
    * `-oversize <cols>x<rows>|auto|none`. Absent means `none`. `auto` is allowed: the gateway's
    * window is each BROWSER's viewport, sent in `hello` and on every resize and measured at scale 1
@@ -166,6 +168,7 @@ export function parseWebArgs(argv: readonly string[]): WebArgs {
   let ddm: boolean | undefined;
   let bindLimit: boolean | undefined;
   let devname: string | undefined;
+  let codePage: CodePage | undefined;
   let visualBell: boolean | undefined;
   const geometry: { oversize?: Oversize } = {};
 
@@ -225,6 +228,9 @@ export function parseWebArgs(argv: readonly string[]): WebArgs {
         continue;
       }
       case '-devname': devname = value(args, i, a); i += 1; continue;
+      case '-codepage':
+      case '-charset':
+        codePage = codePageFlag(a, args[i + 1], (m) => new UsageError(m)); i += 1; continue;
       // Bare, like the GUI's own `-visualbell` -- no `on`/`off` value, unlike the mainframe-client
       // flags just above. See `WebArgs.visualBell` for why this is one flag across every front end.
       case '-visualbell': visualBell = true; continue;
@@ -321,6 +327,7 @@ export function parseWebArgs(argv: readonly string[]): WebArgs {
     ...(ddm === undefined ? {} : { ddm }),
     ...(bindLimit === undefined ? {} : { bindLimit }),
     ...(devname === undefined ? {} : { devname }),
+    ...(codePage === undefined ? {} : { codePage }),
     ...(oversize === undefined ? {} : { oversize }),
     ...(visualBell === undefined ? {} : { visualBell }),
   };
@@ -362,6 +369,7 @@ export function buildSession(
       },
       measure: () => measureViewport(viewport, cell),
     },
+    args.codePage,
   );
   return { session, setViewport: (v) => { viewport = v; } };
 }

@@ -1,4 +1,4 @@
-import { Session, type GeometrySetting, type Size } from '@tn3270/core';
+import { Session, type CodePage, type GeometrySetting, type Size } from '@tn3270/core';
 import { tcpConnect, DEFAULT_TLS, type TlsOptions } from './tls.js';
 
 /**
@@ -73,6 +73,11 @@ export function defaultSession(
    * geometry being one source of truth or none (see its "ONE SOURCE OF GEOMETRY" comment).
    */
   geometry?: { readonly setting: GeometrySetting; readonly measure?: () => Size | undefined },
+  /**
+   * The host code page, from `-codepage`/`-charset` (`codePageFlag`). Absent means core's
+   * default, x3270's `bracket`.
+   */
+  codePage?: CodePage,
 ): Session {
   return new Session({
     connect: (h, p) => tcpConnect(h, p, typeof tls === 'function' ? tls() : tls),
@@ -85,6 +90,7 @@ export function defaultSession(
     ...(bindLimit === undefined ? {} : { bindLimit }),
     ...(devname === undefined ? {} : { devname }),
     ...(ddm === undefined ? {} : { ddm }),
+    ...(codePage === undefined ? {} : { codePage }),
     ...(geometry !== undefined ? { geometry: geometry.setting } : {}),
     ...(geometry?.measure !== undefined ? { measure: geometry.measure } : {}),
   });

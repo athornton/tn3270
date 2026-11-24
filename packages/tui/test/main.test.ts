@@ -400,3 +400,28 @@ describe('run() with no host', () => {
     expect(transcript).toContain(`Host [127.0.0.1:${port}]: `);
   });
 });
+
+describe('-codepage', () => {
+  it('-codepage cp037 selects cp037', () => {
+    expect(parseArgs(['-codepage', 'cp037', 'vm']).codePage?.name).toBe('cp037');
+  });
+  it('-charset is an alias, and takes x3270\'s aliases', () => {
+    expect(parseArgs(['-charset', 'oldibm', 'vm']).codePage?.name).toBe('bracket');
+  });
+  it('absent leaves it undefined, for core\'s default', () => {
+    expect(parseArgs(['vm']).codePage).toBeUndefined();
+  });
+  it('an unknown name is a usage error, remedy first', () => {
+    expect(() => parseArgs(['-codepage', 'cp273', 'vm'])).toThrow(UsageError);
+    expect(() => parseArgs(['-codepage', 'cp273', 'vm'])).toThrow("-codepage: use one of bracket, cp037 (got 'cp273')");
+  });
+  it('a missing value is a usage error', () => {
+    expect(() => parseArgs(['-codepage'])).toThrow(UsageError);
+  });
+  it('reaches the session, on both buildSession paths', () => {
+    const term = () => ({ rows: 24, cols: 80 });
+    expect(buildSession(parseArgs(['-codepage', 'cp037', 'vm']), term as never).screen.snapshot().codePage).toBe('cp037');
+    expect(buildSession(parseArgs(['--terminal-type', 'IBM-3278-2', '-codepage', 'cp037', 'vm']), term as never)
+      .screen.snapshot().codePage).toBe('cp037');
+  });
+});
