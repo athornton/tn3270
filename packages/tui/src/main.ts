@@ -10,7 +10,12 @@ import type { Readable, Writable } from 'node:stream';
 import {
   resolveTerminalType, resolveAlternateSize, TerminalTypeError, type Session,
 } from '@tn3270/core';
-import { answerInfoFlag, defaultSession, OVERSIZE_USAGE, TLS_USAGE } from '@tn3270/frontend';
+import {
+  answerInfoFlag, argvToPrefs, defaultSession, loadPrefs, nodePrefsFs, savePrefs, OVERSIZE_USAGE,
+  TLS_USAGE, TUI_PREF_KEYS, type PrefsFs,
+} from '@tn3270/frontend';
+import { homedir } from 'node:os';
+import { basename, join } from 'node:path';
 import { nodeTransferFiles, isMain } from '@tn3270/node-files';
 import { App, type HostProcess } from './app.js';
 import { layout, measureTerminal, type Geometry } from './render.js';
@@ -115,12 +120,71 @@ export async function connectFirst(
 /** The TUI's usage line: every flag `parseArgs` accepts (a test checks it). */
 export const USAGE = `usage: tn3270 [-model M] [--terminal-type T] [--colors N] [-scheme S] `
   + `[-tn3270e on|off] [-bind-image on|off] [-bind-limit on|off] [-ddm on|off] [-devname NAME] `
-  + `[-codepage|-charset NAME] [-visualbell] ${OVERSIZE_USAGE} ${TLS_USAGE} [prefix:][LU,LU@]host[:port]`;
+  + `[-codepage|-charset NAME] [-visualbell] [-save] ${OVERSIZE_USAGE} ${TLS_USAGE} [prefix:][LU,LU@]host[:port]`;
+
+/**
+ * Where the TUI's preferences live (spec 2026-11-24-preferences-store-design.md section 1):
+ * `$XDG_CONFIG_HOME/tn3270/tui.json`, else `~/.config/tn3270/tui.json`; `%APPDATA%\tn3270` on Windows.
+ */
+export function tuiPrefsPath(
+  env: Readonly<Record<string, string | undefined>>, platform: string, home: string,
+): string {
+  if (platform === 'win32') {
+    return `${env['APPDATA'] ?? join(home, 'AppData', 'Roaming')}\\tn3270\\tui.json`;
+  }
+  const xdg = env['XDG_CONFIG_HOME'];
+  return join(xdg !== undefined && xdg !== '' ? xdg : join(home, '.config'), 'tn3270', 'tui.json');
+}
+
+/** The real preferences file, for the entry point. Tests pass their own or none. */
+export function realTuiPrefs(): { readonly path: string; readonly fs: PrefsFs } {
+  return { path: tuiPrefsPath(process.env, process.platform, homedir()), fs: nodePrefsFs };
+}
+
+/**
+ * The argv the parser sees: the preferences file's tokens, then the typed ones (defaults < file <
+ * flags). Warnings go to `stderr`; a bad file is a UsageError naming it. Exported for tests.
+ */
+export function effectiveArgv(
+  typed: readonly string[], stderr: { write(t: string): unknown },
+  prefs: { readonly path: string; readonly fs: PrefsFs } | undefined,
+): string[] {
+  if (prefs === undefined) return [...typed];
+  let loaded;
+  try {
+    loaded = loadPrefs(prefs.path, TUI_PREF_KEYS, prefs.fs);
+  } catch (e) {
+    throw new UsageError((e as Error).message);
+  }
+  for (const w of loaded.warnings) stderr.write(`${w}\n`);
+  // The file's tokens parsed ON THEIR OWN first, so a bad value is reported against the file
+  // rather than against the command line it is prepended to.
+  try {
+    parseArgs(loaded.argv);
+  } catch (e) {
+    throw new UsageError(`${basename(prefs.path)}: ${(e as Error).message}`);
+  }
+  return [...loaded.argv, ...typed];
+}
 
 export async function run(
-  argv: readonly string[], host: HostProcess, interactive?: { input: Readable; output: Writable },
+  typed: readonly string[], host: HostProcess, interactive?: { input: Readable; output: Writable },
+  /**
+   * The preferences file. ABSENT MEANS NONE, deliberately: only the entry point passes the real
+   * one (`realTuiPrefs()`), so no test can read a developer's own `tui.json`.
+   */
+  prefs?: { readonly path: string; readonly fs: PrefsFs },
 ): Promise<number> {
+  const argv = effectiveArgv(typed, host.stderr, prefs);
   const args = parseArgs(argv);
+  if (args.save === true && prefs !== undefined) {
+    try {
+      const n = savePrefs(prefs.path, argvToPrefs(argv, TUI_PREF_KEYS), TUI_PREF_KEYS, prefs.fs);
+      host.stderr.write(`saved ${n} setting${n === 1 ? '' : 's'} to ${prefs.path}\n`);
+    } catch (e) {
+      host.stderr.write(`could not save ${prefs.path}: ${(e as Error).message}\n`);
+    }
+  }
   let session: Session;
   if (args.host === undefined) {
     if (interactive === undefined) {
@@ -186,7 +250,7 @@ if (isMain(import.meta.url)) {
     ? { input: process.stdin, output: process.stdout } : undefined;
   const infoExit = answerInfoFlag(process.argv.slice(2), 'tui', USAGE, (s) => { process.stdout.write(s); });
   if (infoExit !== undefined) process.exit(infoExit);
-  run(process.argv.slice(2), realHost, interactive).catch((err: unknown) => {
+  run(process.argv.slice(2), realHost, interactive, realTuiPrefs()).catch((err: unknown) => {
     // A bad command line is the operator's mistake, not a crash: print the
     // message alone. Exit 2 is the conventional usage-error status, matching the
     // CLI, and keeps it distinguishable from a real failure's 1.

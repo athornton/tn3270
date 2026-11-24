@@ -2,7 +2,7 @@ import { createServer, type AddressInfo, type Server, type Socket } from 'node:n
 import { PassThrough } from 'node:stream';
 import { afterEach, describe, expect, it } from 'vitest';
 import { SCHEMES } from '@tn3270/frontend';
-import { BANNER, buildSession, connectFirst, parseArgs, run, UsageError } from '../src/main.js';
+import { BANNER, buildSession, connectFirst, effectiveArgv, parseArgs, run, tuiPrefsPath, UsageError } from '../src/main.js';
 import type { HostProcess } from '../src/app.js';
 import { prefsToArgv, TUI_PREF_KEYS, resolveScheme } from '@tn3270/frontend';
 const SCHEME_OF = (n: string): unknown => resolveScheme(n);
@@ -465,5 +465,50 @@ describe('a flag beats the preferences file, for every stored key', () => {
   }
   it('visualbell from the file (there is no flag to turn it off)', () => {
     expect(parseArgs([...prefsToArgv({ visualbell: true }, TUI_PREF_KEYS).argv, 'vm']).visualBell).toBe(true);
+  });
+});
+
+describe('the preferences file (tui.json)', () => {
+  const mem = (files: Record<string, string> = {}) => ({
+    files,
+    readFile: (p: string) => files[p],
+    writeFile: (p: string, t: string) => { files[p] = t; },
+    rename: (a: string, b: string) => { files[b] = files[a]!; delete files[a]; },
+    mkdir: () => {},
+  });
+  const err = () => { const out: string[] = []; return { out, write: (t: string) => { out.push(t); } }; };
+
+  it('lives under XDG_CONFIG_HOME, else ~/.config, and under APPDATA on Windows', () => {
+    expect(tuiPrefsPath({ XDG_CONFIG_HOME: '/x' }, 'linux', '/h')).toBe('/x/tn3270/tui.json');
+    expect(tuiPrefsPath({}, 'linux', '/h')).toBe('/h/.config/tn3270/tui.json');
+    expect(tuiPrefsPath({ APPDATA: 'C:\\A' }, 'win32', 'C:\\H')).toBe('C:\\A\\tn3270\\tui.json');
+  });
+  it('puts the file\'s settings before the typed flags', () => {
+    const fs = mem({ '/c/tui.json': '{"model":"3278-4-E","ddm":false}' });
+    expect(effectiveArgv(['vm'], err(), { path: '/c/tui.json', fs }))
+      .toEqual(['-model', '3278-4-E', '-ddm', 'off', 'vm']);
+    expect(parseArgs(effectiveArgv(['vm'], err(), { path: '/c/tui.json', fs })).model).toBe('3278-4-E');
+  });
+  it('no prefs given: the typed argv alone', () => {
+    expect(effectiveArgv(['vm'], err(), undefined)).toEqual(['vm']);
+  });
+  it('a bad value is reported against the file', () => {
+    const fs = mem({ '/c/tui.json': '{"scheme":"nope"}' });
+    expect(() => effectiveArgv(['vm'], err(), { path: '/c/tui.json', fs })).toThrow(/^tui\.json: /);
+  });
+  it('warnings go to stderr', () => {
+    const e = err();
+    effectiveArgv(['vm'], e, { path: '/c/tui.json', fs: mem({ '/c/tui.json': '{"insecure":true}' }) });
+    expect(e.out.join('')).toMatch(/tui\.json: ignoring "insecure"/);
+  });
+  it('-save writes the run\'s stored settings, without save or the host', async () => {
+    const fs = mem();
+    const e = err();
+    const host = { on: () => {}, exit: () => {}, stderr: e };
+    // No host and no interactive prompt: run() saves, then refuses with the usage line.
+    await expect(run(['-model', '3278-4-E', '-save'], host, undefined, { path: '/c/tui.json', fs }))
+      .rejects.toThrow(UsageError);
+    expect(JSON.parse(fs.files['/c/tui.json']!)).toEqual({ model: '3278-4-E' });
+    expect(e.out.join('')).toContain('saved 1 setting to /c/tui.json');
   });
 });
