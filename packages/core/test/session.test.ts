@@ -1,5 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { Session, type Connection, type SessionOptions } from '../src/session.js';
+import { CodePage, cp037 } from '../src/codepage.js';
+import { CP037_TO_UNICODE } from '../src/codepages/cp037.js';
 import {
   TelnetCmd as T, TelnetOpt as O, TelnetSubopt as S, SnaCmd, Cmd, Order, AID, FA, Qcode, Sfid,
   WCC,
@@ -1471,5 +1473,39 @@ describe('the pending AID', () => {
       conn.host(SnaCmd.RM, T.IAC, T.EOR);
       expect(conn.sent[0]).toBe(AID.NONE);
     });
+  });
+});
+
+describe('NEW-ENVIRON CODEPAGE', () => {
+  const a = (s: string): number[] => Array.from(s, (c) => c.charCodeAt(0));
+  /** The CODEPAGE value the session sends when a host asks for every variable. */
+  async function codepageSent(opts: Partial<SessionOptions>): Promise<string> {
+    const { session, conn } = newSession({ devname: 'foo===', ...opts });
+    await session.connect('localhost', 3270);
+    conn.host(T.IAC, T.DO, O.NEW_ENVIRON);
+    // An empty SEND means "every variable" (parseEnvironSend), as four real traces send.
+    conn.host(T.IAC, T.SB, O.NEW_ENVIRON, 1 /* SEND */, T.IAC, T.SE);
+    const sent = conn.sent;
+    const name = [...a('CODEPAGE'), 1 /* VALUE */];
+    for (let i = 0; i + name.length <= sent.length; i++) {
+      if (name.every((b, k) => sent[i + k] === b)) {
+        let v = '';
+        for (let j = i + name.length; sent[j]! >= 0x20 && sent[j]! < 0x7f; j++) v += String.fromCharCode(sent[j]!);
+        return v;
+      }
+    }
+    throw new Error('CODEPAGE not sent');
+  }
+
+  it('sends 037 at the default (bracket), from its CGCSGID, not its name', async () => {
+    expect(await codepageSent({})).toBe('037');
+  });
+
+  it('sends 037 for cp037', async () => {
+    expect(await codepageSent({ codePage: cp037 })).toBe('037');
+  });
+
+  it('formats a CGCSGID of 100 or more with no padding (%d)', async () => {
+    expect(await codepageSent({ codePage: new CodePage('x', CP037_TO_UNICODE, 1047) })).toBe('1047');
   });
 });
