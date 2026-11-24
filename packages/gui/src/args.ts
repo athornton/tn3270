@@ -1,9 +1,9 @@
 import {
   resolveGeometry, resolveTerminalType, resolveAlternateSize, OversizeError,
-  type GeometrySetting, type Oversize, type Session, type Size,
+  type CodePage, type GeometrySetting, type Oversize, type Session, type Size,
 } from '@tn3270/core';
 import {
-  defaultSession, resolveHostSpec, takeTlsFlag, takeOversizeFlag, resolveTls, resolveScheme, SCHEME_NAMES,
+  codePageFlag, defaultSession, resolveHostSpec, takeTlsFlag, takeOversizeFlag, resolveTls, resolveScheme, SCHEME_NAMES,
   OVERSIZE_USAGE, TLS_USAGE, type TlsFlags, type TlsOptions, type Scheme,
 } from '@tn3270/frontend';
 
@@ -74,6 +74,8 @@ export interface GuiArgs {
    * telnet option 39 entirely -- see `SessionOptions.devname`.
    */
   devname?: string;
+  /** `-codepage NAME` / `-charset NAME`: the host code page. Absent means core's default, `bracket`. */
+  codePage?: CodePage;
   /**
    * `-oversize <cols>x<rows>|auto|none`. Absent means `none`: the model's own alternate size.
    * `auto` is allowed, as in the TUI: the display is measured at every connect (`measure.ts`).
@@ -90,7 +92,7 @@ export interface GuiArgs {
 
 export const USAGE =
   `usage: tn3270-gui [-model M] [--terminal-type T] [-scheme S] [-tn3270e on|off] `
-  + `[-bind-image on|off] [-bind-limit on|off] [-ddm on|off] [-devname NAME] [-visualbell] `
+  + `[-bind-image on|off] [-bind-limit on|off] [-ddm on|off] [-devname NAME] [-codepage NAME] [-visualbell] `
   + `${OVERSIZE_USAGE} ${TLS_USAGE} [prefix:][LU,LU@]host[:port]`;
 
 export function parseGuiArgs(argv: readonly string[]): GuiArgs {
@@ -173,6 +175,11 @@ export function parseGuiArgs(argv: readonly string[]): GuiArgs {
         i++;
         break;
       }
+      case '-codepage':
+      case '-charset':
+        args.codePage = codePageFlag(flag, value, (m) => new UsageError(m));
+        i++;
+        break;
       case '-devname':
         if (value === undefined) throw new UsageError('-devname needs a value, e.g. -devname foo===');
         args.devname = value;
@@ -267,7 +274,7 @@ export function buildSession(
     };
     return defaultSession(
       resolveTerminalType(typeOpts), tls ?? args.tls, resolveAlternateSize(typeOpts), args.tn3270e,
-      args.bindImage, args.bindLimit, args.devname, args.ddm,
+      args.bindImage, args.bindLimit, args.devname, args.ddm, undefined, args.codePage,
     );
   }
   // `session` is read only when connect() calls the measure, by which time it is assigned.
@@ -281,6 +288,7 @@ export function buildSession(
       },
       measure: () => measure(session.geometrySetting),
     },
+    args.codePage,
   );
   return session;
 }

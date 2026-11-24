@@ -3,11 +3,11 @@ import { createInterface } from 'node:readline';
 import { readFileSync } from 'node:fs';
 import {
   resolveTerminalType, resolveAlternateSize, resolveGeometry, OversizeError, TerminalTypeError,
-  type Oversize, type Session,
+  type CodePage, type Oversize, type Session,
 } from '@tn3270/core';
 import { Runner } from './runner.js';
 import {
-  takeTlsFlag, takeOversizeFlag, resolveTls, defaultSession,
+  codePageFlag, takeTlsFlag, takeOversizeFlag, resolveTls, defaultSession,
   type TlsFlags, type TlsOptions,
 } from '@tn3270/frontend';
 import { nodeTransferFiles } from '@tn3270/node-files';
@@ -43,6 +43,8 @@ export interface CliArgs {
    * telnet option 39 entirely -- see `SessionOptions.devname`.
    */
   devname?: string;
+  /** `-codepage NAME` / `-charset NAME`: the host code page. Absent means core's default, `bracket`. */
+  codePage?: CodePage;
   /**
    * `-oversize <cols>x<rows>|auto|none`. Absent means `none`: the model's own alternate
    * size, exactly as before this flag existed. A combination `resolveGeometry` would
@@ -134,6 +136,11 @@ export function parseArgs(argv: readonly string[]): CliArgs {
         i++;
         break;
       }
+      case '-codepage':
+      case '-charset':
+        args.codePage = codePageFlag(flag, value, (m) => new UsageError(m));
+        i++;
+        break;
       case '-devname':
         if (value === undefined) throw new UsageError('-devname needs a value, e.g. -devname foo===');
         args.devname = value;
@@ -184,7 +191,7 @@ export function buildSession(args: CliArgs): Session {
   if (args.terminalType !== undefined) {
     return defaultSession(
       resolveTerminalType(args), args.tls, resolveAlternateSize(args), args.tn3270e,
-      args.bindImage, args.bindLimit, args.devname, args.ddm,
+      args.bindImage, args.bindLimit, args.devname, args.ddm, undefined, args.codePage,
     );
   }
   return defaultSession(
@@ -196,6 +203,7 @@ export function buildSession(args: CliArgs): Session {
         oversize: args.oversize ?? { kind: 'none' },
       },
     },
+    args.codePage,
   );
 }
 
