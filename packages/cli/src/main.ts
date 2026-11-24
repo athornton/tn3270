@@ -7,7 +7,8 @@ import {
 } from '@tn3270/core';
 import { Runner } from './runner.js';
 import {
-  codePageFlag, takeTlsFlag, takeOversizeFlag, resolveTls, defaultSession,
+  answerInfoFlag, codePageFlag, takeTlsFlag, takeOversizeFlag, resolveTls, defaultSession,
+  OVERSIZE_USAGE, TLS_USAGE,
   type TlsFlags, type TlsOptions,
 } from '@tn3270/frontend';
 import { nodeTransferFiles } from '@tn3270/node-files';
@@ -68,6 +69,11 @@ export interface CliArgs {
  * ignoring a flag the operator typed produces a session that negotiates
  * something nobody asked for, which is very hard to diagnose from a trace.
  */
+/** The CLI's usage line: every flag `parseArgs` accepts (a test checks it). */
+export const USAGE = 'usage: tn3270-cli [-model M] [--terminal-type T] [-tn3270e on|off] '
+  + '[-bind-image on|off] [-bind-limit on|off] [-ddm on|off] [-devname NAME] [-codepage|-charset NAME] '
+  + `${OVERSIZE_USAGE} ${TLS_USAGE}  (s3270-style actions on stdin, e.g. Connect(host:port))`;
+
 export function parseArgs(argv: readonly string[]): CliArgs {
   const args: CliArgs = {};
   const tlsFlags: TlsFlags = {};
@@ -225,6 +231,8 @@ async function main(): Promise<void> {
   // no flags, `buildSession` below takes the geometry-mode branch with no model and no
   // oversize, which resolves to the same IBM-3278-2-E the telnet layer would have defaulted
   // to before geometry mode existed -- see `main.test.ts`'s `buildSession` tests.
+  const infoExit = answerInfoFlag(process.argv.slice(2), 'cli', USAGE, (s) => { process.stdout.write(s); });
+  if (infoExit !== undefined) process.exit(infoExit);
   const args = parseArgs(process.argv.slice(2));
   const session = buildSession(args);
   const runner = new Runner(session, {

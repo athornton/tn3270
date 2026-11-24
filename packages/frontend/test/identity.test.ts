@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { infoFlag, versionText, windowTitle, COPYRIGHT } from '../src/identity.js';
+import { answerInfoFlag, infoFlag, versionText, windowTitle, COPYRIGHT } from '../src/identity.js';
 
 describe('infoFlag', () => {
   it.each([['--help', 'help'], ['-?', 'help'], ['--version', 'version'], ['-v', 'version']])(
@@ -30,6 +30,11 @@ describe('versionText', () => {
     expect(versionText('gui', { node: 'v22.1.0', openssl: '3', electron: '44.3.0' }))
       .toContain('Electron v44.3.0');
   });
+  it('Electron\'s openssl 0.0.0 placeholder is reported as BoringSSL, not a version', () => {
+    const g = versionText('gui', { node: 'v24.22.2', openssl: '0.0.0', electron: '44.10.2' });
+    expect(g).toContain('TLS: BoringSSL');
+    expect(g).not.toContain('0.0.0');
+  });
   it('ends with the copyright and licence', () => {
     expect(t.split('\n').at(-1)).toBe(COPYRIGHT);
   });
@@ -56,5 +61,24 @@ describe('windowTitle', () => {
   it('not connected', () => {
     expect(windowTitle({ connected: false, host: 'h', port: 23, lu: undefined, terminalType: undefined }))
       .toBe('TN3270 — not connected');
+  });
+});
+
+describe('answerInfoFlag', () => {
+  const v = { node: 'v1', openssl: '1' };
+  it('a lone --help writes the usage and returns 0', () => {
+    let out = '';
+    expect(answerInfoFlag(['--help'], 'cli', 'usage: x', (s) => { out += s; }, v)).toBe(0);
+    expect(out).toBe('usage: x\n');
+  });
+  it('a lone -v writes the version block', () => {
+    let out = '';
+    expect(answerInfoFlag(['-v'], 'cli', 'usage: x', (s) => { out += s; }, v)).toBe(0);
+    expect(out.startsWith('tn3270-cli ')).toBe(true);
+  });
+  it('anything else writes nothing and returns undefined', () => {
+    let out = '';
+    expect(answerInfoFlag(['--help', 'vm'], 'cli', 'usage: x', (s) => { out += s; }, v)).toBeUndefined();
+    expect(out).toBe('');
   });
 });

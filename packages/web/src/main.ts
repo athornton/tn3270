@@ -6,11 +6,11 @@ import type { Session } from '@tn3270/core';
 import { readAtlas, drawList, blankColumns, extractText } from '@tn3270/canvas';
 import { resolve } from '@tn3270/core';
 import {
-  applyAction, applyPaste, resolveScheme, resolveTls, startTransfer,
+  answerInfoFlag, applyAction, applyPaste, resolveScheme, resolveTls, startTransfer,
 } from '@tn3270/frontend';
 import { isMain } from '@tn3270/node-files';
 import {
-  buildSession, parseWebArgs, printGeometryNotices, UsageError, type WebArgs,
+  buildSession, parseWebArgs, printGeometryNotices, USAGE, UsageError, type WebArgs,
 } from './args.js';
 import { resolveAsset, tokenCookie, parseCookies } from './httpstatic.js';
 import { checkUpgrade, tokenMatches } from './handshake.js';
@@ -714,6 +714,8 @@ export function buildServer(args: WebArgs) {
 
 /** Entry point. Kept separate from `buildServer` so tests can bind an ephemeral port. */
 export function run(argv: readonly string[]): void {
+  const infoExit = answerInfoFlag(argv, 'web', USAGE, (s) => { process.stdout.write(s); });
+  if (infoExit !== undefined) process.exit(infoExit);
   let args;
   let built;
   // `buildServer` IS INSIDE THE TRY, not after it. It resolves the TLS flags, and a contradiction

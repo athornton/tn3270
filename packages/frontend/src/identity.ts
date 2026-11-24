@@ -36,7 +36,9 @@ export function versionText(
   return [
     `tn3270-${frontend} ${pkg.version}`,
     `Node ${node}${versions.electron !== undefined ? `; Electron v${versions.electron}` : ''}`,
-    `TLS: OpenSSL ${versions.openssl}`,
+    // Electron's Node is built on BoringSSL and reports `openssl: '0.0.0'` (measured, Electron
+    // 44.10.2), so that placeholder must not be printed as a version.
+    versions.openssl === '0.0.0' ? 'TLS: BoringSSL (Electron\'s)' : `TLS: OpenSSL ${versions.openssl}`,
     `Code pages: ${pages}`,
     COPYRIGHT,
   ].join('\n');
@@ -53,4 +55,19 @@ export function windowTitle(
   const where = `${info.host}${info.port !== undefined ? `:${info.port}` : ''}${info.lu !== undefined ? ` [${info.lu}]` : ''}`;
   const model = info.terminalType?.replace(/^IBM-/, '');
   return `${where} — TN3270${model !== undefined ? ` ${model}` : ''}`;
+}
+
+/**
+ * Answer a lone `--help`/`-?` or `--version`/`-v`: write the usage or the version block and
+ * return the exit code, 0. Returns undefined when argv is anything else, so the caller parses it
+ * as usual. Each front end calls this first, before any other parsing or I/O.
+ */
+export function answerInfoFlag(
+  argv: readonly string[], frontend: string, usage: string, write: (s: string) => void,
+  versions: { readonly node: string; readonly openssl: string; readonly electron?: string } = process.versions,
+): number | undefined {
+  const f = infoFlag(argv);
+  if (f === undefined) return undefined;
+  write(`${f === 'help' ? usage : versionText(frontend, versions)}\n`);
+  return 0;
 }

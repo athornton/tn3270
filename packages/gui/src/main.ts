@@ -10,13 +10,14 @@ import {
   type GeometrySetting, type Session, type Size,
 } from '@tn3270/core';
 import {
+  answerInfoFlag,
   applyAction, applyGeometryChoice, applyPaste, describeConnectError, describeTlsError, resolveScheme,
   startTransfer, transferCommand, DEFAULT_TLS,
   type Action, type ConnectForm, type GeometryChoice, type TlsRemedy,
 } from '@tn3270/frontend';
 import { nodeTransferFiles } from '@tn3270/node-files';
 import { drawList, blankColumns, extractText, readAtlas } from '@tn3270/canvas';
-import { buildSession, printGeometryNotices, UsageError, type GuiArgs } from './args.js';
+import { buildSession, printGeometryNotices, USAGE, UsageError, type GuiArgs } from './args.js';
 import { connectModels, parseConnectSeam, planStartup, submitConnect } from './connectDialog.js';
 import { makeConnector, type DialogConnector } from './connectAttempt.js';
 import { measureAuto, windowScale } from './measure.js';
@@ -410,6 +411,15 @@ function explain(err: unknown, target?: ConnectTarget): string {
   }
   return String(err);
 }
+
+/**
+ * A LONE `--help` OR `--version` IS ANSWERED HERE, before `app.whenReady()` creates any window,
+ * as x3270 answers it before contacting a server (x3270/x3270.c:497-506). `userArgv` gives the
+ * same argv the startup plan sees, packaged or not (`a5aa71e`).
+ */
+const infoExit = answerInfoFlag(userArgv(process.argv, process.defaultApp), 'gui', USAGE,
+  (s) => { process.stdout.write(s); });
+if (infoExit !== undefined) app.exit(infoExit);
 
 app.whenReady().then(async () => {
   /*

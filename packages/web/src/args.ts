@@ -3,7 +3,8 @@ import {
   resolveGeometry, OversizeError, TerminalTypeError, type CodePage, type Oversize, type Session,
 } from '@tn3270/core';
 import {
-  codePageFlag, defaultSession, resolveHostSpec, takeOversizeFlag, takeTlsFlag, type TlsFlags, type TlsOptions,
+  codePageFlag, defaultSession, resolveHostSpec, takeOversizeFlag, takeTlsFlag, OVERSIZE_USAGE, TLS_USAGE,
+  type TlsFlags, type TlsOptions,
 } from '@tn3270/frontend';
 import { measureViewport } from './viewport.js';
 
@@ -144,6 +145,13 @@ function nonNegativeInt(raw: string, flag: string): number {
   if (!Number.isInteger(n) || n < 0) throw new UsageError(`${flag} needs a non-negative integer`);
   return n;
 }
+
+/** The gateway's usage line: every flag `parseWebArgs` accepts (a test checks it). */
+export const USAGE = 'usage: tn3270-web [--bind ADDR] [--listen PORT] [--token TOKEN] [--auth on|off] '
+  + '[--allow-origin ORIGIN]... [--grace SECONDS] [--max-sessions N] [--tls-cert FILE --tls-key FILE '
+  + '[--tls-chain FILE]] [--replay TRACE] [--log-actions] [-model M] [-scheme S] [-bind-image on|off] '
+  + '[-bind-limit on|off] [-ddm on|off] [-devname NAME] [-codepage|-charset NAME] [-visualbell] '
+  + `${OVERSIZE_USAGE} ${TLS_USAGE} [prefix:][LU,LU@]host[:port]`;
 
 export function parseWebArgs(argv: readonly string[]): WebArgs {
   const rest: string[] = [];
