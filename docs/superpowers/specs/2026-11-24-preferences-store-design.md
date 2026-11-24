@@ -25,7 +25,9 @@ Parity row: `save-options` (missing today: "there is no preferences store").
 | TUI | `$XDG_CONFIG_HOME/tn3270/tui.json`, else `~/.config/tn3270/tui.json`; `%APPDATA%\tn3270\tui.json` on Windows |
 
 The GUI's path is the one place the Microsoft Store (MSIX) build can write without its writes being
-redirected (the parity row's store-probe note, `docs/releasing.md:808`). A flat JSON object, e.g.
+redirected (the parity row's store-probe note; the store probe is `docs/releasing.md:661-668`, which
+launches sandboxed stand-ins of both store packages in CI). The row's own citation, `:808`, is stale:
+the plan should correct it. A flat JSON object, e.g.
 `{ "model": "3278-4-E", "scheme": "green", "codepage": "cp037", "visualbell": true }`. A missing
 file means no preferences, not an error.
 
@@ -89,6 +91,10 @@ file means no preferences, not an error.
 - **GUI:** the menu item calls the save handler; save, then a new instance loads it.
 - **Live (Xvfb + VM/370):** choose a model in the Model menu, save, restart with no flags, and see
   that model used. In the TUI, `-save` once, then a plain run uses the saved settings.
+- **Store probe:** if the probe's drivers (`scripts/store-probe.mjs`) can run a step, make it
+  save and reload preferences inside the App Sandbox and MSIX stand-ins. A save that works
+  unsandboxed and fails in a store package is exactly what the probe exists to catch. If the
+  drivers can't, the plan says so and records the gap.
 - **Parity:** `save-options` becomes `ours`. The `gui` text says it's a JSON file, not an x3270
   profile, by the user's choice.
 
