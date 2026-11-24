@@ -461,3 +461,13 @@ describe('a flag beats the preferences file, for every stored key', () => {
     expect(parseGuiArgs([...prefsToArgv({ visualbell: true }, GUI_PREF_KEYS).argv, 'vm']).visualBell).toBe(true);
   });
 });
+
+describe('-mono', () => {
+  it('makes the session a mono 3278, advertised and drawn', () => {
+    const none = (): undefined => undefined;
+    const s = buildSession(parseGuiArgs(['-mono', 'vm']), none);
+    expect(s.colorMode()).toBe(false);
+    expect(s.connectionInfo().terminalType).toBe('IBM-3278-2-E');
+    expect(buildSession(parseGuiArgs(['vm']), none).colorMode()).toBe(true);
+  });
+});

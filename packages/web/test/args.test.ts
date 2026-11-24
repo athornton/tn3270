@@ -295,3 +295,10 @@ describe('usage covers every flag', () => {
     expect(flags.filter((f) => !(USAGE as string).includes(f))).toEqual([]);
   });
 });
+
+describe('-mono', () => {
+  it('makes every gateway session mono', () => {
+    const { session } = buildSession(parseWebArgs(['-mono', '127.0.0.1:3270']), { kind: 'plain' } as never, { width: 8, height: 16 }, undefined);
+    expect(session.colorMode()).toBe(false);
+  });
+});

@@ -512,3 +512,10 @@ describe('the preferences file (tui.json)', () => {
     expect(e.out.join('')).toContain('saved 1 setting to /c/tui.json');
   });
 });
+
+describe('-mono', () => {
+  it('makes the session mono', () => {
+    const term = () => ({ rows: 24, cols: 80 });
+    expect(buildSession(parseArgs(['-mono', 'vm']), term as never).colorMode()).toBe(false);
+  });
+});

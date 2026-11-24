@@ -76,6 +76,8 @@ export interface GuiArgs {
   devname?: string;
   /** `-codepage NAME` / `-charset NAME`: the host code page. Absent means core's default, `bracket`. */
   codePage?: CodePage;
+  /** `-mono`: every model is a mono 3278 (x3270's -mono). */
+  mono?: boolean;
   /**
    * `-oversize <cols>x<rows>|auto|none`. Absent means `none`: the model's own alternate size.
    * `auto` is allowed, as in the TUI: the display is measured at every connect (`measure.ts`).
@@ -92,7 +94,7 @@ export interface GuiArgs {
 
 export const USAGE =
   `usage: tn3270-gui [-model M] [--terminal-type T] [-scheme S] [-tn3270e on|off] `
-  + `[-bind-image on|off] [-bind-limit on|off] [-ddm on|off] [-devname NAME] [-codepage|-charset NAME] [-visualbell] `
+  + `[-bind-image on|off] [-bind-limit on|off] [-ddm on|off] [-devname NAME] [-codepage|-charset NAME] [-mono] [-visualbell] `
   + `${OVERSIZE_USAGE} ${TLS_USAGE} [prefix:][LU,LU@]host[:port]`;
 
 export function parseGuiArgs(argv: readonly string[]): GuiArgs {
@@ -175,6 +177,9 @@ export function parseGuiArgs(argv: readonly string[]): GuiArgs {
         i++;
         break;
       }
+      case '-mono':
+        args.mono = true;
+        break;
       case '-codepage':
       case '-charset':
         args.codePage = codePageFlag(flag, value, (m) => new UsageError(m));
@@ -274,7 +279,7 @@ export function buildSession(
     };
     return defaultSession(
       resolveTerminalType(typeOpts), tls ?? args.tls, resolveAlternateSize(typeOpts), args.tn3270e,
-      args.bindImage, args.bindLimit, args.devname, args.ddm, undefined, args.codePage,
+      args.bindImage, args.bindLimit, args.devname, args.ddm, undefined, args.codePage, args.mono,
     );
   }
   // `session` is read only when connect() calls the measure, by which time it is assigned.
@@ -288,7 +293,7 @@ export function buildSession(
       },
       measure: () => measure(session.geometrySetting),
     },
-    args.codePage,
+    args.codePage, args.mono,
   );
   return session;
 }

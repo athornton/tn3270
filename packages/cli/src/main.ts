@@ -46,6 +46,8 @@ export interface CliArgs {
   devname?: string;
   /** `-codepage NAME` / `-charset NAME`: the host code page. Absent means core's default, `bracket`. */
   codePage?: CodePage;
+  /** `-mono`: every model is a mono 3278 (x3270's -mono). */
+  mono?: boolean;
   /**
    * `-oversize <cols>x<rows>|auto|none`. Absent means `none`: the model's own alternate
    * size, exactly as before this flag existed. A combination `resolveGeometry` would
@@ -71,7 +73,7 @@ export interface CliArgs {
  */
 /** The CLI's usage line: every flag `parseArgs` accepts (a test checks it). */
 export const USAGE = 'usage: tn3270-cli [-model M] [--terminal-type T] [-tn3270e on|off] '
-  + '[-bind-image on|off] [-bind-limit on|off] [-ddm on|off] [-devname NAME] [-codepage|-charset NAME] '
+  + '[-bind-image on|off] [-bind-limit on|off] [-ddm on|off] [-devname NAME] [-codepage|-charset NAME] [-mono] '
   + `${OVERSIZE_USAGE} ${TLS_USAGE}  (s3270-style actions on stdin, e.g. Connect(host:port))`;
 
 export function parseArgs(argv: readonly string[]): CliArgs {
@@ -142,6 +144,9 @@ export function parseArgs(argv: readonly string[]): CliArgs {
         i++;
         break;
       }
+      case '-mono':
+        args.mono = true;
+        break;
       case '-codepage':
       case '-charset':
         args.codePage = codePageFlag(flag, value, (m) => new UsageError(m));
@@ -197,7 +202,7 @@ export function buildSession(args: CliArgs): Session {
   if (args.terminalType !== undefined) {
     return defaultSession(
       resolveTerminalType(args), args.tls, resolveAlternateSize(args), args.tn3270e,
-      args.bindImage, args.bindLimit, args.devname, args.ddm, undefined, args.codePage,
+      args.bindImage, args.bindLimit, args.devname, args.ddm, undefined, args.codePage, args.mono,
     );
   }
   return defaultSession(
@@ -209,7 +214,7 @@ export function buildSession(args: CliArgs): Session {
         oversize: args.oversize ?? { kind: 'none' },
       },
     },
-    args.codePage,
+    args.codePage, args.mono,
   );
 }
 

@@ -25,6 +25,7 @@ const COMMON: readonly PrefKey[] = [
   { key: 'scheme', flag: '-scheme', type: 'string' },
   { key: 'codepage', flag: '-codepage', aliases: ['-charset'], type: 'string' },
   { key: 'visualbell', flag: '-visualbell', type: 'bare' },
+  { key: 'mono', flag: '-mono', type: 'bare' },
   { key: 'tn3270e', flag: '-tn3270e', type: 'onoff' },
   { key: 'bind-image', flag: '-bind-image', type: 'onoff' },
   { key: 'bind-limit', flag: '-bind-limit', type: 'onoff' },

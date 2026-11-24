@@ -56,6 +56,8 @@ export interface TuiArgs {
   devname?: string;
   /** `-codepage NAME` / `-charset NAME`: the host code page. Absent means core's default, `bracket`. */
   codePage?: CodePage;
+  /** `-mono`: every model is a mono 3278 (x3270's -mono). */
+  mono?: boolean;
   /**
    * `-oversize <cols>x<rows>|auto|none`. Absent means `none`: the model's own alternate size.
    * Unlike the CLI's, `auto` is allowed -- there is a terminal to measure, at every connect and
@@ -194,6 +196,9 @@ export function parseArgs(argv: readonly string[]): TuiArgs {
         i++;
         break;
       }
+      case '-mono':
+        args.mono = true;
+        break;
       case '-codepage':
       case '-charset':
         args.codePage = codePageFlag(flag, value, (m) => new UsageError(m));
