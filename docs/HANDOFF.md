@@ -30,6 +30,14 @@ user's choice, for the month's budget). 4019 tests, build and typecheck clean.
   and `ba bb` (`-codepage cp037`); `TYPE` shows each as `[]` in its own page and `Ý¨` in the other
   (`docs/live-testing.md`). **Not witnessed live: the GUI canvas glyph path.** Next: review, merge,
   push; a GUI witness of `[]` drawing would close the parity row's last live gap.
+- **Review (2026-11-24, inline, no subagents) found two items, neither blocking:** (1) nit: the
+  snapshot carries only the page's NAME, so a `Screen` built with an unregistered `CodePage`
+  (only tests do this) would `resolve()` as `bracket`; register pages, or carry the table, if a
+  front end ever builds one. (2) Pre-existing, for 15c: x3270's DFT ascii transfers translate
+  through the host code page (`Common/ft.c:1238` `ft_ebcdic_to_multibyte`); ours never consult
+  the session page. Check what our DFT ascii path does with `[ ]` before calling 15c done.
+- **GUI witness BLOCKED 2026-11-24:** `~/micromamba/envs/gui` is gone from this host (Electron:
+  `libnspr4.so` missing), so the userspace Xvfb/Electron stack must be rebuilt before any GUI run.
 
 
 **2026-11-18/19, LATEST: README *STAGING* 15a PART 3, THE KEYBOARD SEMANTICS, MERGED** to `main`
