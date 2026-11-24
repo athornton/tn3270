@@ -80,6 +80,12 @@ row says the same).
 - `'connection'` fires whenever any field except the counters changes: connect, BIND or unbind
   (the LU), disconnect.
 
+**AMENDED WHILE PLANNING (2026-11-24):** core never sees TLS, because `frontend`'s `tcpConnect`
+opens the connection. So `connectionInfo()` has no `tls`; each front end adds it from its own
+resolved TLS options. There is no outbound record counter and no recorded TLS peer name, so
+`recordsOut` and the peer name are dropped rather than invented. `terminalType` is added, for
+the title's model.
+
 ## Testing
 
 - **Unit:** `infoFlags` (lone versus mixed, each alias); each front end's exit code and stdout for
