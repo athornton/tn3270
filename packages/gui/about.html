@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>About TN3270</title>
+<!--
+  Help -> About TN3270 (spec docs/superpowers/specs/2026-11-24-gui-identity-and-help-design.md
+  section 3). Built like `connect.html`: its own page, its own `.cjs` preload (`aboutPreload.cts`),
+  a thin boot file, the shared `ui.css`. NO IMPORT MAP: `aboutBoot.ts` imports nothing; the text
+  is built in main (`about.ts`'s `aboutText`) and arrives through the preload, live.
+-->
+<link rel="stylesheet" href="./ui.css">
+<style>
+  #about-text { user-select: text; white-space: pre; font-family: monospace; margin: 0 0 0.75em 0; }
+</style>
+</head>
+<body class="ui-surface">
+  <pre id="about-text"></pre>
+  <div id="buttons">
+    <button id="copy" type="button">Copy</button>
+  </div>
+  <script type="module" src="./dist/aboutBoot.js"></script>
+</body></html>

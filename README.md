@@ -198,6 +198,14 @@ npm run build                                           # or from a checkout
 ./node_modules/.bin/electron packages/gui/dist/main.js -insecure -model 3278-4-E HOST:PORT
 ```
 
+**The window title names the host first**, for example `vm.example:3270 [LU01] — TN3270 3278-2-E`,
+or `TN3270 — not connected`, so several windows stay distinguishable in a taskbar that truncates.
+**Help → About TN3270** (the app menu's About on macOS) shows the version, the configuration (model,
+terminal type, code page and CGCSGID, scheme) and the live connection status (host, LU, TLS,
+TN3270E, bytes and records), with a Copy button for bug reports. **`tn3270-gui --help`** prints
+the usage and **`--version`** (or `-v`) the version block, each only as the lone argument, as
+x3270 does; the TUI, CLI and web gateway take the same two flags.
+
 With no host it opens the Connect dialog (see *Installing*). The flags are the TUI's —
 `-model`, `--terminal-type`, `-oversize`, `-tn3270e on|off`, `-bind-image`, `-bind-limit`, `-ddm`,
 `-devname`, `-codepage`, `-scheme`, `-visualbell`, the TLS set, and the full `[prefix:][LU,LU@]host[:port]`
@@ -1343,8 +1351,10 @@ gate, in the order agreed 2026-11-17; each milestone gets its own spec, plan and
      `bracket` or `cp037` (`code-page`). 15a is complete.
    - **15b. The rest of the GUI ("milestone B").** `File` → `Connect…` and Disconnect in a running
      window (`connect-host`, `disconnect`), recent hosts and a host list, a config file and
-     preferences (`save-options`), color scheme, model and font menus, light and dark modes, the
-     window title, About, and `--help`/`--version`. See *What is not implemented*.
+     preferences (`save-options`), color scheme, model and font menus, light and dark modes. Split
+     with the user 2026-11-24 into **A, identity and help: done** (the window title, Help → About,
+     `--help`/`--version` in all four front ends; `Title()` skipped); **B, preferences and
+     appearance**; **C, connecting from a running window**. See *What is not implemented*.
    - **15c. Code pages.** Only `bracket` and `cp037` exist (`packages/core/src/codepages/`), which is
      wrong for any host outside the US: 273 (Germany/Austria), 285 (UK), 297 (France), 500
      (international), 1047 (z/OS Unix), the 1140-family euro pages, and so on. The canvas draws

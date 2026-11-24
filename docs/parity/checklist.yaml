@@ -912,9 +912,12 @@
   title: Window title naming the model and host, and the Title action
   covers: [action:Title]
   x3270: "the title is x3270-<model> <host> when connected (x3270/x3270.c:922-955); Title() replaces it (x3270/screen.c:6732)"
-  gui: "none: the terminal window's title is always tn3270 (packages/gui/index.html)"
-  status: missing
-  browser: "none"
+  gui: "no Title() action: the GUI has no script interface. The title itself names the host first, then the model (frontend windowTitle), on every connection change, in the GUI and the browser tab"
+  status: skipped
+  category: declined
+  reason: "Title() is a script action and the GUI runs no scripts; the CLI, which does, has no window. The automatic title is built."
+  decided: "2026-11-24, user"
+  browser: "the tab title follows the same windowTitle, from the gateway's session and title messages"
 - id: window-state
   area: display
   title: Iconify or restore the window
@@ -1442,30 +1445,38 @@
   title: About dialog with the version and copyright
   covers: [menu:aboutOption, menu:aboutCopyright]
   x3270: "File → About x3270 → Copyright, a popup with the build string, copyright and licence text (x3270/menubar.c:1103-1124, x3270/about.c:183)"
-  gui: "menu: macOS app menu → About (Electron's standard panel, from the appMenu role); none on Linux or Windows"
-  status: partial
-  gap: "Linux and Windows have no About at all; the macOS panel shows the version and a default copyright line, but no licence text."
-  evidence:
-    code: [packages/gui/src/menu.ts:418]
-    tests: [packages/gui/test/menu.test.ts]
-    live: n/a
+  gui: "Help → About TN3270 on every platform (the macOS app menu's About opens it too, instead of Electron's stock panel): the version block and the copyright and licence line. One window, not x3270's three panels (the user's choice, 2026-11-24); Copy copies it all"
+  status: ours
   browser: "none"
+  evidence:
+    code: [packages/gui/src/about.ts, packages/gui/src/main.ts, packages/gui/src/menu.ts, packages/gui/about.html]
+    tests: [packages/gui/test/about.test.ts, packages/gui/test/menu.test.ts]
+    live: "Identity and help, from the GUI and the CLI, TUI and web binaries — 2026-11-24"
 - id: about-config
   area: other
   title: About → Configuration (model, terminal name, fonts, code page, keymap)
   covers: [menu:aboutConfig]
   x3270: "File → About x3270 → Configuration: process and window id, model and size, colour and data-stream mode, terminal name, fonts, character sets, code page and CGCSGIDs, input method, locale codeset, keymaps and compose map (x3270/about.c:301-490)"
-  gui: none
-  status: missing
+  gui: "the About window's Configuration section: model, terminal type, color mode, code page and CGCSGID, font, scheme, keymap. Less than x3270's (no process or window id, input method, locale or compose map, which have no equivalent here)"
+  status: ours
   browser: "none"
+  evidence:
+    code: [packages/gui/src/about.ts, packages/gui/src/main.ts]
+    tests: [packages/gui/test/about.test.ts]
+    live: "Identity and help, from the GUI and the CLI, TUI and web binaries — 2026-11-24"
 - id: about-status
   area: other
   title: About → Connection Status, optionally hiding the host name
   covers: [menu:aboutStatus, resource:suppressHost]
   x3270: "File → About x3270 → Connection Status: host, port, LU, TLS, mode and traffic counts (x3270/about.c:496); suppressHost, default false (x3270/resources.c:262-263), leaves the host name out of it (x3270/about.c:547)"
-  gui: "none: the status line is not a status dialog"
-  status: missing
+  gui: "the About window's Connection section, live: host, port, LU, TLS, TN3270E, connected-since, bytes each way and host records (core Session.connectionInfo())"
+  status: partial
+  gap: "no suppressHost: it waits for 15b sub-project B's config file"
   browser: "none"
+  evidence:
+    code: [packages/gui/src/about.ts, packages/core/src/session.ts]
+    tests: [packages/gui/test/about.test.ts, packages/core/test/tn3270e-session.test.ts]
+    live: "Identity and help, from the GUI and the CLI, TUI and web binaries — 2026-11-24"
 - id: online-help
   area: other
   title: Online help
@@ -1479,17 +1490,25 @@
   title: Print command-line usage
   covers: [option:--help, option:-?]
   x3270: "a lone --help or -? prints the option list and exits (x3270/x3270.c:502-506)"
-  gui: "none: refused as an unrecognized argument (args.ts:176-177), from npm and (since a5aa71e, which stopped the packaged app dropping its first argument) from the packaged app too."
-  status: missing
+  gui: "a lone --help or -? prints the usage and exits 0, as x3270 (packages/frontend/src/identity.ts answerInfoFlag, called before any window opens); mixed with other arguments it stays a usage error. The same in the TUI, CLI and web gateway"
+  status: ours
   browser: "n/a"
+  evidence:
+    code: [packages/frontend/src/identity.ts, packages/gui/src/main.ts, packages/gui/src/args.ts]
+    tests: [packages/frontend/test/identity.test.ts, packages/gui/test/args.test.ts]
+    live: "Identity and help, from the GUI and the CLI, TUI and web binaries — 2026-11-24"
 - id: version-flag
   area: other
   title: Print the version and build options
   covers: [option:-v, option:--version]
   x3270: "a lone -v or --version prints the build, build options, TLS provider, code pages and copyright, then exits (x3270/x3270.c:497-501, Common/util.c:944-956)"
-  gui: "none: refused as an unrecognized argument (args.ts:176-177), from npm and (since a5aa71e, which stopped the packaged app dropping its first argument) from the packaged app too."
-  status: missing
+  gui: "a lone -v or --version prints the version, Node and Electron versions, the TLS library, the code pages and the copyright, then exits 0 (frontend versionText); no build options or commit, which the build does not record"
+  status: ours
   browser: "n/a"
+  evidence:
+    code: [packages/frontend/src/identity.ts, packages/gui/src/main.ts]
+    tests: [packages/frontend/test/identity.test.ts]
+    live: "Identity and help, from the GUI and the CLI, TUI and web binaries — 2026-11-24"
 - id: min-version
   area: other
   title: Refuse to start below a given version

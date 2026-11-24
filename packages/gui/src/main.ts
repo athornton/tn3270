@@ -6,17 +6,18 @@ import { writeFileSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname } from 'node:path';
 import {
-  resolve, OversizeError, TerminalTypeError, KNOWN_MODELS,
+  resolve, OversizeError, TerminalTypeError, KNOWN_MODELS, DEFAULT_CODE_PAGE,
   type GeometrySetting, type Session, type Size,
 } from '@tn3270/core';
 import {
+  answerInfoFlag, versionText, windowTitle,
   applyAction, applyGeometryChoice, applyPaste, describeConnectError, describeTlsError, resolveScheme,
   startTransfer, transferCommand, DEFAULT_TLS,
   type Action, type ConnectForm, type GeometryChoice, type TlsRemedy,
 } from '@tn3270/frontend';
 import { nodeTransferFiles } from '@tn3270/node-files';
 import { drawList, blankColumns, extractText, readAtlas } from '@tn3270/canvas';
-import { buildSession, printGeometryNotices, UsageError, type GuiArgs } from './args.js';
+import { buildSession, printGeometryNotices, USAGE, UsageError, type GuiArgs } from './args.js';
 import { connectModels, parseConnectSeam, planStartup, submitConnect } from './connectDialog.js';
 import { makeConnector, type DialogConnector } from './connectAttempt.js';
 import { measureAuto, windowScale } from './measure.js';
@@ -25,6 +26,7 @@ import { buildMenuTemplate, modelMenuStates, applyChoiceStates, type GeometryMen
 import { createTransferController, saveDialogOptions, suggestedNameFrom } from './transferWindow.js';
 import { layoutFor } from './appRoot.js';
 import { userArgv } from './electronSwitches.js';
+import { aboutText } from './about.js';
 import { quitOnChord } from './quitChord.js';
 import { probeLine } from './probe.js';
 import { describeFileError } from './seamFile.js';
@@ -411,6 +413,15 @@ function explain(err: unknown, target?: ConnectTarget): string {
   return String(err);
 }
 
+/**
+ * A LONE `--help` OR `--version` IS ANSWERED HERE, before `app.whenReady()` creates any window,
+ * as x3270 answers it before contacting a server (x3270/x3270.c:497-506). `userArgv` gives the
+ * same argv the startup plan sees, packaged or not (`a5aa71e`).
+ */
+const infoExit = answerInfoFlag(userArgv(process.argv, process.defaultApp), 'gui', USAGE,
+  (s) => { process.stdout.write(s); });
+if (infoExit !== undefined) app.exit(infoExit);
+
 app.whenReady().then(async () => {
   /*
     A TENTH TEST SEAM: `TN3270_GUI_PROBE=1` prints the process's OWN confinement signals -- macOS's
@@ -454,6 +465,9 @@ app.whenReady().then(async () => {
       ...(process.env['TN3270_GUI_URL'] ? {} : { preload: layout.preload('preload.cjs') }),
     },
   });
+  // The title is ours (`windowTitle`, set from the session), so the page's `<title>` must not
+  // overwrite it whenever index.html loads, which Electron does unless this is prevented.
+  win.on('page-title-updated', (e) => { e.preventDefault(); });
   // Renderer console and load failures forwarded to stdout. Without this a renderer that
   // throws produces a BLANK WINDOW and no explanation anywhere -- which is exactly how the
   // first screenshot came out, and it is indistinguishable from a drawing bug.
@@ -964,6 +978,72 @@ async function startSession(
   };
 
   /**
+   * HELP -> ABOUT TN3270 (spec 2026-11-24-gui-identity-and-help-design.md section 3), built like
+   * the Keypad window above: one window, focused if already open. The text is `aboutText`, rebuilt
+   * on each send, and sent on load, on each 'connection' event and once a second while open, so the
+   * counters stay live. Copy is done HERE, from the same function, so the copied text is exactly
+   * the shown text. The Configuration values main does not hold as names are worded rather than
+   * guessed: the scheme (a `Scheme` carries no name) is `default` or `set by -scheme`.
+   */
+  let aboutWin: BrowserWindow | undefined;
+  const aboutNow = (): string => {
+    const tls = tlsChoice.current.kind === 'plaintext'
+      ? 'off'
+      : `on (${tlsChoice.current.verify ? 'certificate verified' : 'certificate NOT verified'})`;
+    const page = args.codePage ?? DEFAULT_CODE_PAGE;
+    return aboutText(versionText('gui', process.versions), {
+      model: args.model ?? '(default)',
+      colorMode: '3279 color',
+      codePage: { name: page.name, cgcsgid: page.cgcsgid },
+      font: '3270 font atlas (built in)',
+      scheme: args.scheme === undefined ? 'default' : 'set by -scheme',
+      keymap: 'built in',
+    }, session.connectionInfo(), tls);
+  };
+  const pushAbout = (): void => {
+    if (aboutWin !== undefined && !aboutWin.isDestroyed()) aboutWin.webContents.send('about:text', aboutNow());
+  };
+  ipcMain.on('about:copy', (e) => {
+    if (aboutWin === undefined || aboutWin.isDestroyed() || e.sender !== aboutWin.webContents) return;
+    clipboard.writeText(aboutNow()).catch((err: unknown) => {
+      process.stdout.write(`about: copy failed: ${explain(err)}\n`);
+    });
+  });
+  const openAboutWindow = async (): Promise<void> => {
+    if (aboutWin !== undefined && !aboutWin.isDestroyed()) {
+      aboutWin.show();
+      aboutWin.focus();
+      return;
+    }
+    const aw = new BrowserWindow({
+      icon: layout.icon,
+      width: 560,
+      height: 460,
+      useContentSize: true,
+      title: 'About TN3270',
+      parent: win,
+      modal: false,
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        preload: layout.preload('aboutPreload.cjs'),
+      },
+    });
+    aboutWin = aw;
+    const timer = setInterval(pushAbout, 1000);
+    aw.on('closed', () => { clearInterval(timer); aboutWin = undefined; });
+    aw.webContents.on('did-finish-load', pushAbout);
+    await aw.loadFile(layout.document('about.html'));
+    // REPORT WHAT THE WINDOW SHOWS, read back from its own DOM rather than what main sent, as the
+    // Keypad window's load report does: a preload or boot failure leaves the <pre> empty.
+    await new Promise((r) => setTimeout(r, 500));
+    if (aw.isDestroyed()) return;
+    const shown = String(await aw.webContents.executeJavaScript(
+      "document.getElementById('about-text')?.textContent ?? ''"));
+    process.stdout.write(`about: window shows ${shown.length} chars\n${shown}\n`);
+  };
+
+  /**
    * The FULL-KEYBOARD window, `Ctrl-B`, a second surface beside the keypad.
    *
    * ## THE SAME SHAPE AS `openKeypadWindow` ABOVE, DELIBERATELY AND ALMOST LINE FOR LINE
@@ -1346,6 +1426,15 @@ async function startSession(
   session.on('screen', send);
   session.on('connect', send);
   session.on('disconnect', send);
+  const retitle = (): void => {
+    if (win.isDestroyed()) return;
+    win.setTitle(windowTitle(session.connectionInfo()));
+    // Read back from the window, so the log shows what the title bar holds, not what was asked.
+    process.stdout.write(`title: ${win.getTitle()}\n`);
+  };
+  session.on('connection', retitle);
+  retitle();
+  session.on('connection', pushAbout);
 
   // THE HOST'S ALARM (WCC bit; core emits 'alarm'), rung as x3270's ring_bell does: the system
   // beep, or with -visualbell a flash of the window instead (x3270/screen.c:5457).
@@ -1498,6 +1587,11 @@ async function startSession(
        * forward rather than stacking one. Rejection CAUGHT for the measured reason given at the
        * `toggleKeypad` intercept: `void` on a rejecting promise is what creates an unhandled one.
        */
+      onAbout: ifLive(() => {
+        openAboutWindow().catch((err: unknown) => {
+          process.stdout.write(`about window failed to open: ${explain(err)}\n`);
+        });
+      }),
       onKeypad: ifLive(() => {
         openKeypadWindow().catch((err: unknown) => {
           process.stdout.write(`keypad window failed to open: ${explain(err)}\n`);
@@ -2097,10 +2191,22 @@ async function maybeSendKeys(
    */
   type Step =
     | { readonly kind: 'chord'; readonly spec: KeySpec; readonly toKeyboard: boolean }
-    | { readonly kind: 'wait'; readonly text: string };
+    | { readonly kind: 'wait'; readonly text: string }
+    /**
+     * `menu:ID` clicks the application menu item with that id (e.g. `menu:about`), the same
+     * `click` a person's click calls. Added 2026-11-24 for the About window's live witness; there
+     * was no other way to reach a menu item from a harness. An unknown id is refused at run time
+     * with its name, not skipped.
+     */
+    | { readonly kind: 'menu'; readonly id: string };
   let steps: Step[];
   try {
     steps = SEAM.keys.split(',').map((spec): Step => {
+      if (spec.startsWith('menu:')) {
+        const id = spec.slice('menu:'.length);
+        if (id.trim() === '') throw new Error(`empty menu: id in ${JSON.stringify(spec)}`);
+        return { kind: 'menu', id };
+      }
       if (spec.startsWith(KBD_PREFIX)) {
         const chord = spec.slice(KBD_PREFIX.length);
         // REFUSED RATHER THAN TREATED AS A BARE `kbd:`, for the reason the empty wait is: a step
@@ -2159,6 +2265,17 @@ async function maybeSendKeys(
   const settleMs = SEAM.shot !== '' ? Math.max(SEAM.keysMs, SEAM.shotMs) : SEAM.keysMs;
   await new Promise((r) => setTimeout(r, settleMs));
   for (const step of steps) {
+    if (step.kind === 'menu') {
+      const item = Menu.getApplicationMenu()?.getMenuItemById(step.id);
+      if (item === null || item === undefined) {
+        process.stdout.write(`keys: NO MENU ITEM ${JSON.stringify(step.id)}\n`);
+        return;
+      }
+      item.click();
+      process.stdout.write(`keys: clicked menu ${step.id}\n`);
+      await new Promise((r) => setTimeout(r, 1500));
+      continue;
+    }
     if (step.kind === 'wait') {
       const hit = await waitForScreen(session!, step.text);
       if (hit === undefined) {

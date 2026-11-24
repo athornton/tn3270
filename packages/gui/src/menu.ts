@@ -41,7 +41,7 @@ export type Platform = 'darwin' | 'linux' | 'win32' | string;
  * cast in main. Naming only the role we actually use keeps that honest AND documents the
  * dependency; adding a role here is a one-word change.
  */
-export type MenuRole = 'appMenu' | 'quit';
+export type MenuRole = 'appMenu' | 'quit' | 'services' | 'hide' | 'hideOthers' | 'unhide';
 
 export interface MenuItemTemplate {
   readonly label?: string;
@@ -151,6 +151,12 @@ export interface MenuHandlers {
    * that a disconnect would free.
    */
   readonly onDisconnect?: () => void;
+  /**
+   * Help -> About TN3270 (and, on macOS, the app menu's About). PRESENT ONLY WITH THIS HANDLER:
+   * without it the template keeps Electron's stock `appMenu` role on macOS and has no Help menu,
+   * which is what every caller had before the About window existed.
+   */
+  readonly onAbout?: () => void;
 }
 
 /**
@@ -421,5 +427,19 @@ export function buildMenuTemplate(
   // before-input-event, which covers the Connect dialog (shown before this menu is installed) and
   // is what the key harness can drive; this item is what a user sees.
   const file: MenuItemTemplate = { label: 'File', submenu: [{ label: 'Quit', id: 'quit', role: 'quit', accelerator: 'Ctrl+Q' }] };
-  return platform === 'darwin' ? [{ role: 'appMenu' }, ...menus] : [file, ...menus];
+  const onAbout = handlers?.onAbout;
+  if (onAbout === undefined) return platform === 'darwin' ? [{ role: 'appMenu' }, ...menus] : [file, ...menus];
+  const about: MenuItemTemplate = { label: 'About TN3270', id: 'about', click: onAbout };
+  if (platform === 'darwin') {
+    // The appMenu role's own items, spelled out so its About can be ours rather than Electron's
+    // stock panel (which shows no licence and no configuration).
+    const app: MenuItemTemplate = {
+      label: 'TN3270',
+      submenu: [about, { type: 'separator' }, { role: 'services' }, { type: 'separator' },
+        { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' },
+        { role: 'quit' }],
+    };
+    return [app, ...menus];
+  }
+  return [file, ...menus, { label: 'Help', submenu: [about] }];
 }

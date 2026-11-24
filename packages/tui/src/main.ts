@@ -10,7 +10,7 @@ import type { Readable, Writable } from 'node:stream';
 import {
   resolveTerminalType, resolveAlternateSize, TerminalTypeError, type Session,
 } from '@tn3270/core';
-import { defaultSession, OVERSIZE_USAGE, TLS_USAGE } from '@tn3270/frontend';
+import { answerInfoFlag, defaultSession, OVERSIZE_USAGE, TLS_USAGE } from '@tn3270/frontend';
 import { nodeTransferFiles, isMain } from '@tn3270/node-files';
 import { App, type HostProcess } from './app.js';
 import { layout, measureTerminal, type Geometry } from './render.js';
@@ -112,6 +112,11 @@ export async function connectFirst(
  *
  * Resolves 1 (after `host.exit(1)`) when the user quits the prompt: nothing was connected.
  */
+/** The TUI's usage line: every flag `parseArgs` accepts (a test checks it). */
+export const USAGE = `usage: tn3270 [-model M] [--terminal-type T] [--colors N] [-scheme S] `
+  + `[-tn3270e on|off] [-bind-image on|off] [-bind-limit on|off] [-ddm on|off] [-devname NAME] `
+  + `[-codepage|-charset NAME] [-visualbell] ${OVERSIZE_USAGE} ${TLS_USAGE} [prefix:][LU,LU@]host[:port]`;
+
 export async function run(
   argv: readonly string[], host: HostProcess, interactive?: { input: Readable; output: Writable },
 ): Promise<number> {
@@ -119,11 +124,7 @@ export async function run(
   let session: Session;
   if (args.host === undefined) {
     if (interactive === undefined) {
-      throw new UsageError(
-        `usage: tn3270 [-model M] [--terminal-type T] [--colors N] [-scheme S] `
-        + `[-tn3270e on|off] [-bind-image on|off] [-bind-limit on|off] [-ddm on|off] [-devname NAME] [-codepage NAME] `
-        + `[-visualbell] ${OVERSIZE_USAGE} ${TLS_USAGE} [prefix:][LU,LU@]host[:port]`,
-      );
+      throw new UsageError(USAGE);
     }
     // The prompt closes its readline before resolving, which pauses stdin and takes it out of raw
     // mode; `App.start()` below sets raw mode and resumes stdin itself, so nothing is needed here.
@@ -183,6 +184,8 @@ if (isMain(import.meta.url)) {
   // Prompt for a host only at a terminal, BOTH ends: a pipe on either side is a script.
   const interactive = process.stdin.isTTY && process.stdout.isTTY
     ? { input: process.stdin, output: process.stdout } : undefined;
+  const infoExit = answerInfoFlag(process.argv.slice(2), 'tui', USAGE, (s) => { process.stdout.write(s); });
+  if (infoExit !== undefined) process.exit(infoExit);
   run(process.argv.slice(2), realHost, interactive).catch((err: unknown) => {
     // A bad command line is the operator's mistake, not a crash: print the
     // message alone. Exit 2 is the conventional usage-error status, matching the

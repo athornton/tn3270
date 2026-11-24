@@ -197,11 +197,35 @@ export interface ConnectOptions {
  */
 export type SessionEvent =
   | 'screen' | 'connect' | 'disconnect' | 'alarm' | 'transferEnd' | 'transferProgress'
-  | 'geometry' | 'connectSettled';
+  | 'geometry' | 'connectSettled'
+  /** `connectionInfo()` changed, other than its counters: connect, TN3270E up or down, disconnect. */
+  | 'connection';
 
 /** Program check codes. x3270 shows a number after "X PROG". */
 const PROG_INVALID_COMMAND = 754;
 const PROG_INVALID_ADDRESS = 755;
+
+/**
+ * What the About window and the window title show (`Session.connectionInfo()`). TLS is NOT here:
+ * the connection is opened by the front end's `connect` (frontend's `tcpConnect`), so only the
+ * front end knows it. Counters reset on each connect and keep their last values after a
+ * disconnect, so a status display can still show what the last connection did.
+ */
+export interface ConnectionInfo {
+  readonly connected: boolean;
+  readonly host: string | undefined;
+  readonly port: number | undefined;
+  /** The LU a TN3270E host connected us to, when it named one. */
+  readonly lu: string | undefined;
+  /** TN3270E negotiated on this connection (not merely offered). */
+  readonly tn3270e: boolean;
+  readonly terminalType: string | undefined;
+  readonly since: Date | undefined;
+  readonly bytesIn: number;
+  readonly bytesOut: number;
+  /** Host records applied since this connection began. */
+  readonly recordsIn: number;
+}
 
 export class Session {
   readonly screen: Screen;
@@ -368,6 +392,12 @@ export class Session {
    * NOT the resolved socket, and NOT a TLS decision: see `reconnect()` for why that matters.
    */
   private target: { host: string; port: number; per: ConnectOptions } | undefined;
+  /** `connectionInfo()`'s counters and start time; reset in `connect()`. */
+  private bytesIn = 0;
+  private bytesOut = 0;
+  private recordsAtConnect = 0;
+  private since: Date | undefined;
+  private tn3270eUp = false;
   /**
    * A `reconnect()` between its call and its socket. See that method: this is the half of
    * x3270's `PCONNECTED` that `isConnected()` does not cover, and it is what stops two quick
@@ -882,6 +912,11 @@ export class Session {
     // The OIA carries the same fact so the STATUS LINE can offer the key, and it is set here for
     // the same reason: see `Oia.reconnectable`.
     this.target = { host, port, per: { ...per } };
+    this.bytesIn = 0;
+    this.bytesOut = 0;
+    this.recordsAtConnect = this.records;
+    this.since = new Date();
+    this.tn3270eUp = false;
     this.oia.reconnectable = true;
 
     const conn = await this.opts.connect(host, port);
@@ -905,7 +940,7 @@ export class Session {
     // `opts.terminalType` is read exactly as before.
     const terminalType = this.ttype ?? this.opts.terminalType;
     this.telnet = new TelnetLayer({
-      write: (b) => conn.write(b),
+      write: (b) => { this.bytesOut += b.length; conn.write(b); },
       onRecord: (r) => this.handleRecord(r),
       trace: this.trace,
       // Spread conditionally: with exactOptionalPropertyTypes an explicit
@@ -932,6 +967,7 @@ export class Session {
     // connection via handleClose().
     conn.onData = (bytes) => {
       if (this.conn !== conn) return;
+      this.bytesIn += bytes.length;
       this.telnet?.receive(bytes);
       this.oia.tn3270Mode = this.is3270Mode();
     };
@@ -944,6 +980,7 @@ export class Session {
     };
 
     this.emit('connect');
+    this.emit('connection');
   }
 
   disconnect(): void {
@@ -1119,6 +1156,7 @@ export class Session {
     // has already run — clearing them would make the feature unreachable rather than clean. See
     // the field's own comment.
     this.emit('disconnect');
+    this.emit('connection');
   }
 
   /**
@@ -1128,6 +1166,22 @@ export class Session {
    * is what real hardware does, and a client that dies on a malformed record is
    * useless against real hosts.
    */
+  /** See `ConnectionInfo`. */
+  connectionInfo(): ConnectionInfo {
+    return {
+      connected: this.isConnected(),
+      host: this.target?.host,
+      port: this.target?.port,
+      lu: this.tn3270eUp ? this.e?.lu : undefined,
+      tn3270e: this.tn3270eUp,
+      terminalType: this.ttype ?? this.opts.terminalType,
+      since: this.since,
+      bytesIn: this.bytesIn,
+      bytesOut: this.bytesOut,
+      recordsIn: this.records - this.recordsAtConnect,
+    };
+  }
+
   /** Count of host records applied. Monotonic. */
   recordCount(): number {
     return this.records;
@@ -1383,10 +1437,12 @@ export class Session {
     if (r.effect?.kind === 'complete') {
       this.eSeq = 0;
       layer?.setTn3270eNegotiated(true);
+      this.tn3270eUp = true;
       this.trace.note(
         `TN3270E negotiated, device ${this.e.deviceType ?? '?'}`
         + `${this.e.lu === undefined ? '' : ` LU ${this.e.lu}`}`
         + `, functions: ${r.effect.agreed.join(',') || '(none: basic TN3270E)'}`);
+      this.emit('connection');
     } else if (r.effect?.kind === 'backoff') {
       // Tell the host no and forget the option, so the classic BINARY/EOR route is
       // still reachable on this same connection. x3270's backoff_tn3270e().
@@ -1398,6 +1454,7 @@ export class Session {
       this.trace.note(`TN3270E abandoned: ${r.effect.why}`);
       this.forgetTn3270e();
       layer?.refuseTn3270e();
+      this.emit('connection');
     }
   }
 
@@ -1432,6 +1489,7 @@ export class Session {
    */
   private forgetTn3270e(): void {
     this.e = undefined;
+    this.tn3270eUp = false;
     this.eSeq = 0;
     this.bound = false;
     this.pendingBindRecord = undefined;
@@ -1473,7 +1531,9 @@ export class Session {
     if (this.e !== undefined) {
       this.trace.note('TN3270E turned off; negotiation state discarded');
     }
+    const was = this.tn3270eUp;
     this.forgetTn3270e();
+    if (was) this.emit('connection');
   }
 
   /** True once TN3270E negotiation completed, i.e. records carry a header. */

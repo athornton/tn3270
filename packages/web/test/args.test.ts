@@ -283,3 +283,15 @@ describe('-codepage', () => {
     expect(session.screen.snapshot().codePage).toBe('cp037');
   });
 });
+
+describe('usage covers every flag', () => {
+  it('every case label in the parser appears in USAGE', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    const src = readFileSync(fileURLToPath(new URL('../src/args.ts', import.meta.url)), 'utf8');
+    const flags = [...src.matchAll(/case '(-[^']+)':/g)].map((m) => m[1]!);
+    expect(flags.length).toBeGreaterThan(5);
+    const { USAGE } = await import('../src/args.js');
+    expect(flags.filter((f) => !(USAGE as string).includes(f))).toEqual([]);
+  });
+});

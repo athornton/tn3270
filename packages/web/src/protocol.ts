@@ -29,7 +29,8 @@ export type ServerMessage =
   | { kind: 'atlas'; geometry: AtlasGeometry; coverage: Uint8Array; blank: readonly number[] }
   | { kind: 'frame'; list: DrawList }
   | { kind: 'error'; message: string }
-  | { kind: 'session'; id: string }
+  /** `title` is the first window title (see the `title` kind below); later ones come as `title`. */
+  | { kind: 'session'; id: string; title?: string }
   // Transfer progress and completion. `ServerMessage` was `frame | error | session | atlas`
   // until now; web copy will be the next thing to widen it, as the handoff records.
   | { kind: 'transferProgress'; text: string }
@@ -118,7 +119,9 @@ export type ServerMessage =
     checks `visual` the same way it already treats `selectionText`'s `seq` and `copyText`'s
     `text`, and drops a malformed one rather than throwing.
   */
-  | { kind: 'alarm'; visual: boolean };
+  | { kind: 'alarm'; visual: boolean }
+  /** The window title, `frontend`'s `windowTitle`: sent on hello and on each `'connection'` event. */
+  | { kind: 'title'; text: string };
 
 /** A browser viewport in CSS pixels, for `-oversize auto`. See `checkViewport`. */
 export interface Viewport { readonly width: number; readonly height: number }
