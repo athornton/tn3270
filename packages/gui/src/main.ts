@@ -4,13 +4,13 @@ import {
 import { fileURLToPath } from 'node:url';
 import { writeFileSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import {
   resolve, OversizeError, TerminalTypeError, KNOWN_MODELS, DEFAULT_CODE_PAGE,
   type GeometrySetting, type Session, type Size,
 } from '@tn3270/core';
 import {
-  answerInfoFlag, versionText, windowTitle,
+  answerInfoFlag, versionText, windowTitle, nodePrefsFs, savePrefs, GUI_PREF_KEYS,
   applyAction, applyGeometryChoice, applyPaste, describeConnectError, describeTlsError, resolveScheme,
   startTransfer, transferCommand, DEFAULT_TLS,
   type Action, type ConnectForm, type GeometryChoice, type TlsRemedy,
@@ -27,6 +27,7 @@ import { createTransferController, saveDialogOptions, suggestedNameFrom } from '
 import { layoutFor } from './appRoot.js';
 import { userArgv } from './electronSwitches.js';
 import { aboutText } from './about.js';
+import { guiEffectiveArgv, guiPrefsToSave, startupModel } from './guiPrefs.js';
 import { quitOnChord } from './quitChord.js';
 import { probeLine } from './probe.js';
 import { describeFileError } from './seamFile.js';
@@ -418,6 +419,15 @@ function explain(err: unknown, target?: ConnectTarget): string {
  * as x3270 answers it before contacting a server (x3270/x3270.c:497-506). `userArgv` gives the
  * same argv the startup plan sees, packaged or not (`a5aa71e`).
  */
+/**
+ * THE PREFERENCES FILE (spec 2026-11-24-preferences-store-design.md): `preferences.json` in
+ * Electron's per-app data directory, the one place the Store (MSIX) build writes without
+ * redirection. `startupArgv` is the file's tokens then the typed ones, set once at startup; File ->
+ * Save Changed Options saves from it plus the Model menu's choice.
+ */
+const prefsPath = (): string => join(app.getPath('userData'), 'preferences.json');
+let startupArgv: readonly string[] = [];
+
 const infoExit = answerInfoFlag(userArgv(process.argv, process.defaultApp), 'gui', USAGE,
   (s) => { process.stdout.write(s); });
 if (infoExit !== undefined) app.exit(infoExit);
@@ -529,7 +539,18 @@ app.whenReady().then(async () => {
     if (!win.isDestroyed()) win.webContents.send('error-message', message);
   };
 
-  const argv = userArgv(process.argv, process.defaultApp);
+  // `answerInfoFlag` above saw the TYPED argv: `--help` must be the lone argument a person typed,
+  // whatever the preferences file holds. Everything from here sees the file's settings too.
+  let argv: string[];
+  try {
+    argv = guiEffectiveArgv(userArgv(process.argv, process.defaultApp), prefsPath(), nodePrefsFs,
+      (w) => { process.stdout.write(`${w}\n`); });
+  } catch (err) {
+    fail(explain(err));
+    await maybeCapture(win, 1);
+    return;
+  }
+  startupArgv = argv;
   const plan = planStartup(argv, SEAM);
   if (plan.kind === 'fail') {
     fail(explain(plan.err));
@@ -642,7 +663,7 @@ async function openConnectDialog(
     app.quit();
   });
 
-  ipcMain.handle('connect:models', () => connectModels());
+  ipcMain.handle('connect:models', () => connectModels(startupModel(commandLine)));
   ipcMain.handle('connect:submit', async (_e, form: unknown) => {
     if (handedOver) return { error: 'already connected' };
     if (startFailed) return { error: 'the session could not start; see stderr -- quit and relaunch' };
@@ -1587,6 +1608,18 @@ async function startSession(
        * forward rather than stacking one. Rejection CAUGHT for the measured reason given at the
        * `toggleKeypad` intercept: `void` on a rejecting promise is what creates an unhandled one.
        */
+      onSaveOptions: ifLive(() => {
+        const path = prefsPath();
+        try {
+          const n = savePrefs(path, guiPrefsToSave(startupArgv, session.geometrySetting), GUI_PREF_KEYS, nodePrefsFs);
+          const msg = `saved ${n} setting${n === 1 ? '' : 's'} to ${path}`;
+          process.stdout.write(`prefs: ${msg}\n`);
+          fail(msg);
+        } catch (err) {
+          process.stdout.write(`prefs: could not save ${path}: ${explain(err)}\n`);
+          fail(`could not save ${path}: ${explain(err)}`);
+        }
+      }),
       onAbout: ifLive(() => {
         openAboutWindow().catch((err: unknown) => {
           process.stdout.write(`about window failed to open: ${explain(err)}\n`);

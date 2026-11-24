@@ -1,11 +1,30 @@
-# Handoff — state as of 2026-11-24 (README *STAGING* 15b SUB-PROJECT A, IDENTITY AND HELP, BUILT on branch `identity-and-help`; gate 102 blocking; next: 15b B, brainstorm first; README *STAGING* 15a LAST ITEM, THE `bracket` DEFAULT CODE PAGE + `-codepage`, BUILT on branch `bracket-codepage` (MERGED a3b836d; witnessed on VM/370 from the CLI and the GUI); README *STAGING* 15a PART 3, KEYBOARD SEMANTICS, MERGED (`d0d8395`): typeahead, oerrLock, Reset's half reset, insert-mode resets, the erase keys, numericLock off, Attn on TN3270E, GUI-witnessed on VM, gate FAIL 107 blocking; next: 15a's remaining item, x3270's default code page `bracket` (then 15b); README *STAGING* 15a PART 2, BLINK/INTENSIFY/THE BELL, MERGED (`86a9999`): canvas blink and intensify drawn, the host's alarm rings in the GUI, the browser and the TUI, `-visualbell` flashes instead, gate still FAIL 113 blocking; 15a PART 1, ASCII LINE ENDS, MERGED (`13e41b2`); PARITY TRIAGED, gate 113 blocking; ROADMAP = README item 15a-15h; x3270 PARITY CHECKLIST MERGED (`df62e6f`); THE PACKAGED GUI'S DROPPED FIRST ARGUMENT AND SYSTEM-WIDE Ctrl-] FIXED (`gui-argv-and-quit`): 413 x3270 names, 158 checklist rows, `parity.mjs gate` FAIL 157 blocking; 0.1.4 RELEASED: npm by the tag workflow with provenance, and the first GitHub release with the seven installers, SHA256SUMS and scriv notes; macOS CODE SIGNING MERGED (`db5a93d`; released installers up to 0.1.4 are UNSIGNED), Windows CI signing DROPPED for the Microsoft Store; STORE PROBE MERGED (`559ea78`); README AUDIT + FIXES MERGED (`ae8724f`); WEB RECEIVE DOWNLOADS ON COMPLETION (`4a940fe`, live-verified); `Exist` PER DIRECTION (`f533bff`); next: README *Staging* 15a part 3, the keyboard semantics (typeahead and keyboard lock, insert-mode reset, x3270's erase rules, oerr-lock))
+# Handoff — state as of 2026-11-24 (15b B1, THE PREFERENCES STORE, BUILT on branch `prefs-store`; gate 101; next: B2, brainstorm first; README *STAGING* 15b SUB-PROJECT A, IDENTITY AND HELP, BUILT on branch `identity-and-help`; gate 102 blocking; next: 15b B, brainstorm first; README *STAGING* 15a LAST ITEM, THE `bracket` DEFAULT CODE PAGE + `-codepage`, BUILT on branch `bracket-codepage` (MERGED a3b836d; witnessed on VM/370 from the CLI and the GUI); README *STAGING* 15a PART 3, KEYBOARD SEMANTICS, MERGED (`d0d8395`): typeahead, oerrLock, Reset's half reset, insert-mode resets, the erase keys, numericLock off, Attn on TN3270E, GUI-witnessed on VM, gate FAIL 107 blocking; next: 15a's remaining item, x3270's default code page `bracket` (then 15b); README *STAGING* 15a PART 2, BLINK/INTENSIFY/THE BELL, MERGED (`86a9999`): canvas blink and intensify drawn, the host's alarm rings in the GUI, the browser and the TUI, `-visualbell` flashes instead, gate still FAIL 113 blocking; 15a PART 1, ASCII LINE ENDS, MERGED (`13e41b2`); PARITY TRIAGED, gate 113 blocking; ROADMAP = README item 15a-15h; x3270 PARITY CHECKLIST MERGED (`df62e6f`); THE PACKAGED GUI'S DROPPED FIRST ARGUMENT AND SYSTEM-WIDE Ctrl-] FIXED (`gui-argv-and-quit`): 413 x3270 names, 158 checklist rows, `parity.mjs gate` FAIL 157 blocking; 0.1.4 RELEASED: npm by the tag workflow with provenance, and the first GitHub release with the seven installers, SHA256SUMS and scriv notes; macOS CODE SIGNING MERGED (`db5a93d`; released installers up to 0.1.4 are UNSIGNED), Windows CI signing DROPPED for the Microsoft Store; STORE PROBE MERGED (`559ea78`); README AUDIT + FIXES MERGED (`ae8724f`); WEB RECEIVE DOWNLOADS ON COMPLETION (`4a940fe`, live-verified); `Exist` PER DIRECTION (`f533bff`); next: README *Staging* 15a part 3, the keyboard semantics (typeahead and keyboard lock, insert-mode reset, x3270's erase rules, oerr-lock))
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log). For the most recent work, read the spec and plan the
 latest START HERE entry names. Each finished feature has its own pair under `docs/superpowers/`.
 
-## START HERE — LATEST FIRST; NEXT: 15b SUB-PROJECT B, PREFERENCES AND APPEARANCE (BRAINSTORM FIRST)
+## START HERE — LATEST FIRST; NEXT: 15b B2, APPEARANCE CHANGED WHILE RUNNING (BRAINSTORM FIRST)
+
+**2026-11-24, LATEST: 15b SUB-PROJECT B1, THE PREFERENCES STORE, BUILT** on branch `prefs-store`. B was
+split into B1 (the store), B2 (scheme menu, 3278/3279 color mode and `-mono`, highlight-bold, cursor
+color, font stepping and Snap, light and dark modes) and B3 (other fonts, probably deferred). Spec
+`docs/superpowers/specs/2026-11-24-preferences-store-design.md` (amended), plan
+`docs/superpowers/plans/2026-11-24-preferences-store.md`, run inline. 4112 tests, build and typecheck clean.
+- **What changed:** `frontend/src/prefs.ts` (keys, `prefsToArgv`/`argvToPrefs`, atomic save
+  preserving unknown keys); the GUI's `preferences.json` in userData with File → Save Changed
+  Options; the TUI's `tui.json` with `-save` (`run()` reads a file only when handed one, so tests
+  never read a developer's own). The file's tokens go before the typed ones, so the flags' own
+  parsers check them; last-one-wins held for every stored flag (Task 2's test). The Connect
+  dialog's default model now follows the startup argv (it always used the built-in default).
+- **Mutation:** 10, 1 survivor (a non-stored flag's value not skipped), killed by a new test.
+- **Live:** `docs/live-testing.md`, *The preferences store, from the GUI and the TUI*: Model menu →
+  save → relaunch came up 3278-3-E; TUI `-save` left `-insecure` out.
+- **Gap:** the store probe passes `--user-data-dir`, so the default userData under each sandbox is
+  untested; a probe launch without it, on the macOS and Windows runners, would close that.
+- **Parity:** `save-options` `ours`; gate 102 -> 101 blocking.
+
 
 **2026-11-24, LATEST: 15b SUB-PROJECT A, IDENTITY AND HELP, BUILT** on branch `identity-and-help`.
 15b was split with the user into A (identity and help), B (preferences and appearance) and C

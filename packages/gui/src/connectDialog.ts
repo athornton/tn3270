@@ -14,8 +14,14 @@ import { dialogToArgv, type ConnectForm } from '@tn3270/frontend';
 export const CONNECT_DEFAULT_MODEL = '3278-2-E';
 
 /** What the dialog's dropdown lists, sent to the renderer by main -- the page imports no core. */
-export function connectModels(): { readonly models: readonly string[]; readonly default: string } {
-  return { models: Object.keys(KNOWN_MODELS), default: CONNECT_DEFAULT_MODEL };
+/**
+ * The dialog's models and its default. `preferred`, the model the startup argv names (a flag or the
+ * preferences file), is the default when it is one of the dialog's models: before 2026-11-24 the
+ * default was always CONNECT_DEFAULT_MODEL, which dropped a `-model` given without a host.
+ */
+export function connectModels(preferred?: string): { readonly models: readonly string[]; readonly default: string } {
+  const models = Object.keys(KNOWN_MODELS);
+  return { models, default: preferred !== undefined && models.includes(preferred) ? preferred : CONNECT_DEFAULT_MODEL };
 }
 
 /** What startup does with the command line it was given. */

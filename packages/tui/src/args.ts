@@ -70,6 +70,8 @@ export interface TuiArgs {
    * one flag across every front end. Absent means the default, which is BEL.
    */
   visualBell?: boolean;
+  /** `-save`: write this run's stored settings (file and flags) to `tui.json`. Not itself stored. */
+  save?: boolean;
 }
 
 /**
@@ -206,6 +208,9 @@ export function parseArgs(argv: readonly string[]): TuiArgs {
       // unlike the mainframe-client flags just above.
       case '-visualbell':
         args.visualBell = true;
+        break;
+      case '-save':
+        args.save = true;
         break;
       default:
         if (flag.startsWith('-')) {

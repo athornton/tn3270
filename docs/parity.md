@@ -8,15 +8,15 @@ Design: `docs/superpowers/specs/2026-11-17-x3270-parity-checklist-design.md`.
 
 | status | rows |
 |---|---|
-| ours | 21 |
+| ours | 22 |
 | partial | 31 |
-| missing | 65 |
+| missing | 64 |
 | proposed-deferred | 0 |
 | proposed-skipped | 0 |
 | deferred | 16 |
 | skipped | 25 |
 
-Passing the gate: 56 of 158 rows
+Passing the gate: 57 of 158 rows
 
 ## connection
 
@@ -147,7 +147,7 @@ Passing the gate: 56 of 158 rows
 | print-window | missing |  | Print the window as a bitmap | none. Store: the x3270 route pipes through other processes, which needs a store-probe check (docs/releasing.md:808) | File → Print Window Bitmap (x3270/menubar.c:1194), a dialog for the command; PrintWindow() action (x3270/print_window.c:215), Alt-B; printWindowCommand, default xwd -id %d \| xpr \| lpr (x3270/fb-x3270:179); doConfirms, default true (x3270/resources.c:334-335), pops up "Bitmap printed." when it finishes (x3270/print_window.c:84), its only use on Unix (its other reader, Common/print_screen.c:585, is under _WIN32) |
 | printer-session | deferred | Printer sessions are planned as README *Staging* item 18 (a printer-LU session with SCS and LU3, to a file, a PDF or the print dialog, after pr3287), and there is no SCS decoder yet (README *What is not implemented*); x3270's route starts pr3287 as a child process, so that item will need a store-probe check (docs/releasing.md:808). | Printer session (pr3287) associated with the display LU or a named LU | none | File → Printer Session → Start, associate with current LU (TN3270E only) / Start, specific LU… / Stop Printer (x3270/menubar.c:1139-1163); Printer(Start[,lu]\|Stop) (Common/task.c:4248); -printerlu; printer.assocCommandLine, printer.luCommandLine, printer.command and printer.options build the pr3287 command line (Common/pr3287_session.c:153-163, :553-592) |
 | printer-windows-resources | skipped | x3270 on Unix never reads printer.name or printer.codepage (they are wc3270's, under _WIN32 only), and ours has no printer session for them to configure. | Windows printer name and printer code page | n/a | printer.name and printer.codepage are registered and read only under _WIN32 (Common/pr3287_session.c:158-163, :174-179, :561-582; also Common/print_screen.c:374-376 and Common/glue.c:1182-1197), so x3270 itself never uses them |
-| save-options | missing |  | Save changed options to a profile or session file | none: there is no preferences store (README *Using the GUI*, *Staging* item 15b). Store: a profile outside the app's data would need a store-probe check (docs/releasing.md:808) | File → Save Changed Options, a dialog for the profile/session file name (x3270/menubar.c:1203, x3270/fb-x3270:875-876) |
+| save-options | ours |  | Save changed options to a profile or session file | File → Save Changed Options (the app menu on macOS) writes preferences.json in Electron's userData: our own JSON keyed by our flag names, not an x3270 profile, by the user's choice 2026-11-24. Loaded at startup as flags before the typed ones (defaults < file < flags). The TUI has the same as tui.json and -save. TLS weakenings, the host and -devname are never stored. Store builds: the probe (docs/releasing.md:661-668) launches with an explicit --user-data-dir, so the default userData under each sandbox is not yet exercised | File → Save Changed Options, a dialog for the profile/session file name (x3270/menubar.c:1203, x3270/fb-x3270:875-876) |
 | save-restore-input | missing |  | Save and restore the input fields | none | File → Save Input Fields / Restore Input Fields, enabled in 3270 mode (x3270/menubar.c:1219-1228); SaveInput([name]) and RestoreInput([name]) actions (Common/save_restore.c:241-242) |
 | screen-trace | missing |  | Save screen contents, once or continuously, to a file or a printer | none. Store: writing outside the app's data or piping to a print command would need a store-probe check (docs/releasing.md:808) | File → Save Screen Contents dialog: once or continuously, to file or printer, as text, HTML or RichText (x3270/menubar.c:1180, x3270/fb-x3270:865-874); ScreenTrace() action (Common/screentrace.c:864); screenTrace toggle; screenTraceFile, screenTraceTarget, screenTraceType |
 | trace | missing |  | Trace the data stream and events to a file | none: no trace flag, menu item or file. Store: a trace file outside the app's data, and a tail -f monitor process, would each need a store-probe check (docs/releasing.md:808) | File → Trace Data and Events toggle, shown when debugTracing is on, its default (x3270/menubar.c:1176-1178, x3270/resources.c:343); Trace() action (Common/trace.c:1040); -trace, -tracefile, -tracefilesize (x3270/x3270.c:164, :205-206); traceDir, default /tmp (x3270/resources.c:87-88); traceMonitor, on by default, opens a window running tail -f on the file (x3270/resources.c:350-351, Common/trace.c:732, :832) |

@@ -927,6 +927,27 @@ and the Recording log says what happened when they were run.
   we hardcode.** Not a TN3270E problem — `IBM-3278-2-E` reaches TSO with the TN3270E
   option never negotiated. See the Recording log. `record-mvs.txt` remains a draft.
 
+## The preferences store, from the GUI and the TUI — 2026-11-24
+
+**15b sub-project B1, witnessed.** Branch `prefs-store`.
+
+- **GUI, against VM/370 CE (`127.0.0.1:3270`), Xvfb, a fresh `--user-data-dir`:** launched with only
+  `-insecure 127.0.0.1:3270`, connected at the default (`title: 127.0.0.1:3270 — TN3270 3278-2-E`).
+  Then, through the keys seam, `menu:model-disconnect`, `menu:model:3278-3-E` and
+  `menu:save-options`. The log said `prefs: saved 1 setting to …/preferences.json`, and the file
+  held `{"model": "3278-3-E"}`. **Relaunched with the same data directory and the same two
+  arguments: `title: 127.0.0.1:3270 — TN3270 3278-3-E`.**
+- **TUI, the real filesystem, `XDG_CONFIG_HOME` pointed at a temporary directory:**
+  `-model 3278-4-E -scheme green -insecure -save` printed `saved 2 settings to …/tn3270/tui.json`.
+  The file held the model and the scheme, **and not `-insecure`**. A file with
+  `{"scheme":"nope"}` then stopped a plain run with `tui.json: unknown color scheme "nope"; use one
+  of …`, exit 2. A TUI *connect* from saved settings is tests only (it needs a terminal).
+
+**Not witnessed:** the Store builds. `scripts/store-probe.mjs` launches its sandboxed stand-ins with
+an explicit `--user-data-dir` inside the container, so a save there wouldn't test where the
+default `userData` lands under the sandbox. That needs a probe launch without `--user-data-dir`,
+on the macOS and Windows runners.
+
 ## Identity and help, from the GUI and the CLI, TUI and web binaries — 2026-11-24
 
 **15b sub-project A, witnessed.** Branch `identity-and-help`. Electron GUI under Xvfb (the rebuilt
