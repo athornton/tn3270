@@ -717,7 +717,7 @@
   x3270: "Options → Toggles → 3278 (mono) / 3279 (color) radio, disabled while connected (x3270/menubar.c:2310-2328); -mono (no color at all, and those items hidden); 3278 mode draws in normalColor/inputColor/boldColor, green by default (x3270/resources.c:234-239), and reports no colors in Query Reply (Common/sf.c:747-753)"
   gui: "the model's prefix is the mode, as x3270 (Common/model.c:155): 3279 or bare is color, 3278 mono, drawn in green; -mono makes any model mono, in every front end; a color model 2 or 3 advertises IBM-3279-N (telnet.c create_3270_termtype). No Options menu toggle yet (B2 Part 2)"
   status: partial
-  gap: "no 3278/3279 menu item (B2 Part 2); 3278 mode draws x3270's green but has no normalColor/inputColor/boldColor resources"
+  gap: "the GUI's Options → Color Mode menu is built but not yet witnessed against a host (disabled while connected, then the 3278 type advertised at reconnect); 3278 mode draws x3270's green but has no normalColor/inputColor/boldColor resources"
   browser: "-mono on the gateway, for every session"
   evidence:
     code: [packages/core/src/termtype.ts, packages/core/src/session.ts, packages/core/src/render.ts]
@@ -728,9 +728,9 @@
   title: Color scheme
   covers: [option:-scheme, menu:colorsOption, resource:schemeList]
   x3270: "Options → Color Scheme menu, switching live (enabled only in 3279 mode, x3270/menubar.c:2466-2498), listing schemeList's Default 3279 and Reverse (x3270/fb-x3270:104-105); -scheme takes any colorScheme.<name> resource, including bright, cpe, GreenScreen and the old-* set (x3270/fb-x3270:49-103)"
-  gui: "flag: -scheme default|3279|x3270|green (greenscreen accepted). Live: all three of default, 3279 and green drawn by the GUI connected to VM"
+  gui: "flag: -scheme default|3279|x3270|green (greenscreen accepted); GUI Options → Color Scheme radios, switching live, enabled only in 3279 mode (gui/src/menu.ts), saved by Save Changed Options. Live: all three of default, 3279 and green drawn by the GUI connected to VM"
   status: partial
-  gap: "flag only, no menu, so the scheme cannot change while running; no reverse, cpe or user-defined (colorScheme.<name>, schemeList) schemes; our 'default' is not x3270's, and our 'x3270' is c3270's rgbmap, which differs from x3270's colorScheme.default (x3270/fb-x3270:49-54) at F4 (limegreen against X11 lime)"
+  gap: "no reverse, cpe or user-defined (colorScheme.<name>, schemeList) schemes; our 'default' is not x3270's, and our 'x3270' is c3270's rgbmap, which differs from x3270's colorScheme.default (x3270/fb-x3270:49-54) at F4 (limegreen against X11 lime)"
   evidence:
     code: [packages/gui/src/args.ts:122, packages/frontend/src/palette.ts:184, packages/canvas/src/drawlist.ts:103]
     tests: [packages/gui/test/args.test.ts, packages/frontend/test/palette.test.ts, packages/canvas/test/drawlist.test.ts]
@@ -750,13 +750,13 @@
   title: Draw intensified text bold (highlightBold)
   covers: [resource:highlightBold]
   x3270: "highlightBold resource, off by default (x3270/resources.c:346-347): in 3279 mode intensified fields are bold only if set; in 3278 mode always (x3270/screen.c:706-712)"
-  gui: "an intensified cell's glyph is drawn again one source pixel to the right, the overstrike x3270 always does for the extended Intensify highlight (SA/SFE) whatever highlightBold says (x3270/screen.c:2917-2921); an intensified FIELD is drawn in its color (red or white) and never bold, which is x3270's 3279 default"
-  status: partial
-  gap: "matches x3270's 3279-mode default for intensified FIELDS (not bold), but has no highlightBold flag to turn bold on"
+  gui: "-highlightbold and Options → Highlight Bold, off by default, saved: core resolve's bold draws an intensified field (FA_IS_HIGH, an equality, so never a hidden one) with the overstrike in 3279 mode only when set, and always in mono; the extended Intensify highlight is always drawn so (x3270/screen.c:2917-2921, :3178). The TUI draws it as SGR bold"
+  status: ours
   evidence:
-    code: [packages/core/src/render.ts:188, packages/canvas/src/drawlist.ts:115, packages/canvas/src/blit.ts:141]
-    tests: [packages/core/test/render.test.ts, packages/canvas/test/blit.test.ts]
-  browser: "the same canvas"
+    code: [packages/core/src/render.ts, packages/canvas/src/drawlist.ts, packages/canvas/src/blit.ts, packages/tui/src/render.ts]
+    tests: [packages/core/test/render.test.ts, packages/canvas/test/drawlist.test.ts, packages/tui/test/render.test.ts, packages/tui/test/app.test.ts]
+    live: "The Options menu, under Xvfb with replayed host traces — 2026-11-25"
+  browser: "-highlightbold on the gateway, for every session"
 - id: field-highlight-colors
   area: display
   title: Color modified fields and light-pen-selectable fields
@@ -843,13 +843,13 @@
   title: Fixed cursor color
   covers: [resource:cursorColor, resource:useCursorColor]
   x3270: "useCursorColor (off by default) draws the cursor in cursorColor (red) (x3270/resources.c:240-241, :258-259); otherwise it takes the cell's own color"
-  gui: "none: the cursor bar is the cell's foreground color, x3270's default"
-  status: partial
-  gap: "matches x3270's default (the cell's color), but there is no flag or preference for a fixed cursor color"
+  gui: "-cursorcolor and Options → Fixed Cursor Color, off by default, saved: the cursor bar in X11 red (canvas FIXED_CURSOR_RGB); otherwise the cell's foreground color, x3270's default. The TUI has none: a terminal draws its own cursor"
+  status: ours
   evidence:
-    code: [packages/canvas/src/blit.ts:145]
-    tests: [packages/canvas/test/blit.test.ts]
-  browser: "the same canvas"
+    code: [packages/canvas/src/drawlist.ts, packages/canvas/src/blit.ts, packages/gui/src/menu.ts]
+    tests: [packages/canvas/test/blit.test.ts, packages/canvas/test/drawlist.test.ts, packages/gui/test/menu.test.ts]
+    live: "The Options menu, under Xvfb with replayed host traces — 2026-11-25"
+  browser: "-cursorcolor on the gateway, for every session"
 - id: crosshair
   area: display
   title: Crosshair cursor
