@@ -11,7 +11,7 @@ import {
   resolveTerminalType, resolveAlternateSize, TerminalTypeError, type Session,
 } from '@tn3270/core';
 import {
-  answerInfoFlag, argvToPrefs, defaultSession, loadPrefs, nodePrefsFs, savePrefs, OVERSIZE_USAGE,
+  answerInfoFlag, argvToPrefs, monoModelNotice, defaultSession, loadPrefs, nodePrefsFs, savePrefs, OVERSIZE_USAGE,
   TLS_USAGE, TUI_PREF_KEYS, type PrefsFs,
 } from '@tn3270/frontend';
 import { homedir } from 'node:os';
@@ -177,6 +177,8 @@ export async function run(
 ): Promise<number> {
   const argv = effectiveArgv(typed, host.stderr, prefs);
   const args = parseArgs(argv);
+  const modelNote = monoModelNotice(args.model);
+  if (modelNote !== undefined) host.stderr.write(`${modelNote}\n`);
   if (args.save === true && prefs !== undefined) {
     try {
       const n = savePrefs(prefs.path, argvToPrefs(argv, TUI_PREF_KEYS), TUI_PREF_KEYS, prefs.fs);

@@ -11,7 +11,7 @@ import { dialogToArgv, type ConnectForm } from '@tn3270/frontend';
  */
 
 /** The model the dialog's dropdown starts on: the GUI's own flagless default. */
-export const CONNECT_DEFAULT_MODEL = '3278-2-E';
+export const CONNECT_DEFAULT_MODEL = '3279-2-E';
 
 /** What the dialog's dropdown lists, sent to the renderer by main -- the page imports no core. */
 /**

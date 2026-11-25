@@ -118,10 +118,11 @@ describe('connectModels', () => {
     expect(connectModels().models).toEqual(Object.keys(KNOWN_MODELS));
   });
 
-  it('defaults to 3278-2-E, which is one of them', () => {
-    expect(CONNECT_DEFAULT_MODEL).toBe('3278-2-E');
-    expect(connectModels()).toMatchObject({ default: '3278-2-E' });
+  it('defaults to 3279-2-E (x3270 color model 2), which is one of them, listed first', () => {
+    expect(CONNECT_DEFAULT_MODEL).toBe('3279-2-E');
+    expect(connectModels()).toMatchObject({ default: '3279-2-E' });
     expect(connectModels().models).toContain(CONNECT_DEFAULT_MODEL);
+    expect(connectModels().models[0]).toBe('3279-2');
   });
 });
 

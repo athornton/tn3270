@@ -7,7 +7,7 @@ import {
 } from '@tn3270/core';
 import { Runner } from './runner.js';
 import {
-  answerInfoFlag, codePageFlag, takeTlsFlag, takeOversizeFlag, resolveTls, defaultSession,
+  answerInfoFlag, codePageFlag, monoModelNotice, takeTlsFlag, takeOversizeFlag, resolveTls, defaultSession,
   OVERSIZE_USAGE, TLS_USAGE,
   type TlsFlags, type TlsOptions,
 } from '@tn3270/frontend';
@@ -240,6 +240,8 @@ async function main(): Promise<void> {
   if (infoExit !== undefined) process.exit(infoExit);
   const args = parseArgs(process.argv.slice(2));
   const session = buildSession(args);
+  const modelNote = monoModelNotice(args.model);
+  if (modelNote !== undefined) process.stderr.write(`${modelNote}\n`);
   const runner = new Runner(session, {
     files: nodeTransferFiles,
     tlsEnabled: args.tls?.kind !== 'plaintext',
