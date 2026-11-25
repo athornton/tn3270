@@ -452,7 +452,7 @@ describe('setGeometry', () => {
       [{ model: { name: '3278-4-E' } }, /model must be a string/],               // extra nesting
       [{ model: null }, /model must be a string/],
       [{ model: 42 }, /model must be a string/],
-      [{ model: '3278-9' }, /model must be one of 3278-2, /],
+      [{ model: '3278-9' }, /model must be one of 3279-2, /],
       [{ model: 'IBM-3278-4-E' }, /model must be one of /],
       [{ model: 'constructor' }, /model must be one of /],
       [{ oversize: '160x62' }, /oversize must be none, auto or startup/],

@@ -78,6 +78,8 @@ export function defaultSession(
    * default, x3270's `bracket`.
    */
   codePage?: CodePage,
+  /** x3270's `-mono`: every model is a mono 3278, advertised and drawn. */
+  mono?: boolean,
 ): Session {
   return new Session({
     connect: (h, p) => tcpConnect(h, p, typeof tls === 'function' ? tls() : tls),
@@ -91,6 +93,7 @@ export function defaultSession(
     ...(devname === undefined ? {} : { devname }),
     ...(ddm === undefined ? {} : { ddm }),
     ...(codePage === undefined ? {} : { codePage }),
+    ...(mono === true ? { mono } : {}),
     ...(geometry !== undefined ? { geometry: geometry.setting } : {}),
     ...(geometry?.measure !== undefined ? { measure: geometry.measure } : {}),
   });

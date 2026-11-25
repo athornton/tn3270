@@ -6,6 +6,7 @@ import { Session } from '../src/session.js';
 import { resolve } from '../src/render.js';
 import { cp037 } from '../src/codepage.js';
 import { FA } from '../src/constants.js';
+import { Color } from '../src/palette.js';
 
 // x3270's default code page is 'bracket' (Common/codepage.c:358): [ and ] are 0xAD/0xBD there,
 // 0xBA/0xBB in cp037. Each default site is tested on its own, so reverting any one fails here.
@@ -80,5 +81,46 @@ describe('resolve() decodes with the snapshot\'s page', () => {
     const { codePage: _omit, ...bare } = s.snapshot();
     const snap: ScreenSnapshot = bare;
     expect(resolve(snap)[0]!.text).toBe('[');
+  });
+});
+
+describe('the session\'s color mode (x3270 mode3279), carried by the snapshot', () => {
+  const geo = (model?: string) => ({ ...(model !== undefined ? { model } : {}), oversize: { kind: 'none' as const } });
+  const mk = (geometry: ReturnType<typeof geo> | undefined, mono?: boolean) => new Session({
+    connect: () => { throw new Error('no connect'); },
+    ...(geometry !== undefined ? { geometry } : {}),
+    ...(mono !== undefined ? { mono } : {}),
+  });
+  it('color by default, for 3279 and bare names; mono for 3278 and with -mono', () => {
+    expect([mk(geo()).colorMode(), mk(geo('3279-4-E')).colorMode(), mk(geo('4')).colorMode(),
+      mk(geo('3278-4-E')).colorMode(), mk(geo('3279-4-E'), true).colorMode(), mk(undefined).colorMode(),
+      mk(undefined, true).colorMode()]).toEqual([true, true, true, false, false, true, false]);
+  });
+  it('the snapshot carries it', () => {
+    expect(mk(geo('3278-2-E')).screen.snapshot().mode3279).toBe(false);
+    expect(mk(geo('3279-2-E')).screen.snapshot().mode3279).toBe(true);
+  });
+  it('a model change (the Model menu) updates it', () => {
+    const s = mk(geo('3279-2-E'));
+    s.setGeometry(geo('3278-2-E'));
+    expect(s.screen.snapshot().mode3279).toBe(false);
+  });
+  it('-mono survives a model change', () => {
+    const s = mk(geo('3279-2-E'), true);
+    s.setGeometry(geo('3279-4-E'));
+    expect(s.colorMode()).toBe(false);
+  });
+  it('-mono advertises 3278', () => {
+    const s = mk(geo('3279-2-E'), true);
+    expect(s.connectionInfo().terminalType).toBe('IBM-3278-2-E');
+  });
+  it('resolve() draws a mono snapshot green with no options, and a bare snapshot in color', () => {
+    const s = new Screen();
+    s.setFieldAttribute(0, FA.PROTECT | 0x08);   // intensified protected: red in 3279, green in 3278
+    s.setChar(1, 0xc1);
+    s.mode3279 = false;
+    expect(resolve(s.snapshot())[1]!.fg).toBe(Color.GREEN);
+    const { mode3279: _m, ...bare } = s.snapshot();
+    expect(resolve(bare)[1]!.fg).not.toBe(Color.GREEN);
   });
 });

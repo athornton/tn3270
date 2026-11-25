@@ -209,20 +209,21 @@ describe('the Model menu', () => {
       view]);
   });
 
-  it('lists the eight models, a separator, then an Oversize submenu of None and Auto', () => {
+  it('lists the sixteen models (3279 color first, then 3278 mono), a separator, then an Oversize submenu', () => {
     const m = modelMenu(buildMenuTemplate('linux', undefined, { ...base, current: { oversize: none } }));
     expect(m.label).toBe('Model');
     // AFTER Disconnect and its separator (2026-11-05), pinned in their own case below.
     const sub = m.submenu!.slice(2);
-    expect(sub.slice(0, 8).map((i) => [i.type, i.label, i.id])).toEqual(
+    expect(sub.slice(0, 16).map((i) => [i.type, i.label, i.id])).toEqual(
       MODELS.map((k) => ['radio', `${k} (${describeSize(KNOWN_MODELS[k]!.alternate)})`, `model:${k}`]));
-    expect(sub[6]!.label).toBe('3278-5 (27 rows by 132 columns)');
-    expect(MODELS).toHaveLength(8);
-    expect(sub[8]!.type).toBe('separator');
-    expect(sub[9]!.label).toBe('Oversize');
-    expect(sub[9]!.id).toBe('oversize');
-    expect(sub).toHaveLength(10);
-    expect(sub[9]!.submenu!.map((i) => [i.type, i.label, i.id])).toEqual([
+    expect(sub[6]!.label).toBe('3279-5 (27 rows by 132 columns)');
+    expect(sub[14]!.label).toBe('3278-5 (27 rows by 132 columns)');
+    expect(MODELS).toHaveLength(16);
+    expect(sub[16]!.type).toBe('separator');
+    expect(sub[17]!.label).toBe('Oversize');
+    expect(sub[17]!.id).toBe('oversize');
+    expect(sub).toHaveLength(18);
+    expect(sub[17]!.submenu!.map((i) => [i.type, i.label, i.id])).toEqual([
       ['radio', 'None', 'oversize:none'],
       ['radio', 'Auto', 'oversize:auto'],
     ]);
@@ -268,15 +269,15 @@ describe('the Model menu', () => {
       ...base, current: { oversize: { kind: 'fixed', rows: 30, cols: 100 } },
       startupFixed: { rows: 62, cols: 160 },
     }));
-    expect(choices(m).filter((i) => i.checked === true).map((i) => i.id)).toEqual(['model:3278-2-E']);
+    expect(choices(m).filter((i) => i.checked === true).map((i) => i.id)).toEqual(['model:3279-2-E']);
   });
 
-  it('checks the product default, 3278-2-E, when no model was named', () => {
+  it('checks the product default, 3279-2-E, when no model was named', () => {
     // From core's TERMINAL_TYPE, not a literal in menu.ts.
-    expect(TERMINAL_TYPE).toBe('IBM-3278-2-E');
+    expect(TERMINAL_TYPE).toBe('IBM-3279-2-E');
     const m = modelMenu(buildMenuTemplate('linux', undefined, { ...base, current: { oversize: none } }));
     expect(choices(m).filter((i) => i.checked === true).map((i) => i.id))
-      .toEqual(['model:3278-2-E', 'oversize:none']);
+      .toEqual(['model:3279-2-E', 'oversize:none']);
   });
 
   it('checks a model given in another spelling, as core would resolve it', () => {
@@ -290,10 +291,10 @@ describe('the Model menu', () => {
   it('enables every choice while disconnected and disables every one while connected', () => {
     const geom = { ...base, current: { oversize: none }, startupFixed: { rows: 62, cols: 160 } };
     const off = choices(modelMenu(buildMenuTemplate('linux', undefined, geom)));
-    expect(off).toHaveLength(11);
+    expect(off).toHaveLength(19);
     expect(off.every((i) => i.enabled === true)).toBe(true);
     const on = choices(modelMenu(buildMenuTemplate('linux', undefined, { ...geom, connected: true })));
-    expect(on).toHaveLength(11);
+    expect(on).toHaveLength(19);
     expect(on.every((i) => i.enabled === false)).toBe(true);
   });
 
@@ -343,7 +344,7 @@ describe('the Model menu', () => {
     expect(sub[0]!.type).toBeUndefined();
     expect('checked' in sub[0]!).toBe(false);
     expect(sub[1]!.type).toBe('separator');
-    expect(sub[2]!.id).toBe('model:3278-2');
+    expect(sub[2]!.id).toBe('model:3279-2');
   });
 
   it('enables Disconnect ONLY while actually connected: not connecting, not free', () => {

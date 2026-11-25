@@ -1332,14 +1332,14 @@ describe('terminal type negotiation', () => {
     expect(negotiatedName(conn)).toBe('IBM-3278-2-E');
   });
 
-  it('negotiates IBM-3278-2-E when no terminal type is given', async () => {
+  it('negotiates IBM-3279-2-E when no terminal type is given', async () => {
     // Must not change casually. The goldens do NOT enforce this -- they replay
     // recorded bytes; this assertion and telnet.test.ts are the real enforcement.
     const { session, conn } = newSession();
     await session.connect('localhost', 3270);
     conn.host(T.IAC, T.DO, O.TERMINAL_TYPE);
     conn.host(T.IAC, T.SB, O.TERMINAL_TYPE, S.SEND, T.IAC, T.SE);
-    expect(negotiatedName(conn)).toBe('IBM-3278-2-E');
+    expect(negotiatedName(conn)).toBe('IBM-3279-2-E');
   });
 });
 

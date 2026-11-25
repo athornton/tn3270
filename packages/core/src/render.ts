@@ -335,7 +335,7 @@ function usableHighlight(code: number | undefined): number | undefined {
 }
 
 export function resolve(snap: ScreenSnapshot, opts: ResolveOptions = {}): ResolvedCell[] {
-  const mode3279 = opts.mode3279 ?? true;
+  const mode3279 = opts.mode3279 ?? snap.mode3279 ?? true;
   const codePage = opts.codePage
     ?? (snap.codePage !== undefined ? CODE_PAGES.get(snap.codePage) : undefined)
     ?? DEFAULT_CODE_PAGE;

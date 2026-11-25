@@ -37,6 +37,7 @@ export type { TlsFlags, TlsOptions, TlsRemedy } from './tls.js';
 // `-oversize`, the same way: one parser so the front ends cannot drift on it either.
 export { takeOversizeFlag, OVERSIZE_USAGE } from './oversizeFlag.js';
 export { codePageFlag } from './codepageFlag.js';
+export { monoModelNotice, resetMonoModelNotice } from './modelNotice.js';
 export {
   GUI_PREF_KEYS, TUI_PREF_KEYS, prefsToArgv, argvToPrefs, parsePrefsJson, oversizeFlagValue, loadPrefs,
   savePrefs, nodePrefsFs,

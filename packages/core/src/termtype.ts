@@ -45,16 +45,47 @@ export interface Model {
  *
  * Keys are uppercase because lookups are case-folded; see resolveTerminalType.
  */
-export const KNOWN_MODELS: Readonly<Record<string, Model>> = {
-  '3278-2': { ttype: 'IBM-3278-2', alternate: MODEL_2 },
-  '3278-2-E': { ttype: 'IBM-3278-2-E', alternate: MODEL_2 },
-  '3278-3': { ttype: 'IBM-3278-3', alternate: MODEL_3 },
-  '3278-3-E': { ttype: 'IBM-3278-3-E', alternate: MODEL_3 },
-  '3278-4': { ttype: 'IBM-3278-4', alternate: MODEL_4 },
-  '3278-4-E': { ttype: 'IBM-3278-4-E', alternate: MODEL_4 },
-  '3278-5': { ttype: 'IBM-3278-5', alternate: MODEL_5 },
-  '3278-5-E': { ttype: 'IBM-3278-5-E', alternate: MODEL_5 },
-};
+/**
+ * x3270's model names (`Common/model.c:68-101`, `canonical_model_x`): after an optional `IBM-`, a
+ * bare `2`-`5` or `327[89]-[2345]`, optionally `-E` (a bare N takes no -E). `3279` and a bare
+ * number are COLOR, `3278` is MONO (`*is_color = (*colorp == '9')`, default `'9'`). Unlike x3270,
+ * which ignores a name's `-E` (its extended data stream is the `extendedDataStream` resource),
+ * ours selects it, as it always has.
+ */
+export interface ParsedModel {
+  readonly number: 2 | 3 | 4 | 5;
+  readonly color: boolean;
+  readonly extended: boolean;
+}
+
+export function parseModel(name: string): ParsedModel | undefined {
+  const folded = name.toUpperCase();
+  const bare = folded.startsWith('IBM-') ? folded.slice(4) : folded;
+  const m = /^(?:327([89])-)?([2-5])(-E)?$/.exec(bare);
+  if (m === null) return undefined;
+  if (m[1] === undefined && m[3] !== undefined) return undefined;
+  return { number: Number(m[2]) as 2 | 3 | 4 | 5, color: m[1] !== '8', extended: m[3] !== undefined };
+}
+
+const ALTERNATE = { 2: MODEL_2, 3: MODEL_3, 4: MODEL_4, 5: MODEL_5 } as const;
+
+/**
+ * The advertised type, `create_3270_termtype` (`Common/telnet.c:2095-2108`): `IBM-3279-N` only for
+ * a COLOR model 2 or 3, else `IBM-3278-N`; `-E` when extended. (`IBM-DYNAMIC` for oversize is
+ * `geometry.ts`'s.) `mono` is x3270's `-mono`, which makes every model mono (`model.c:155`).
+ */
+export function advertisedType(p: ParsedModel, mono = false): string {
+  const color = p.color && !mono;
+  return `IBM-327${color && p.number < 4 ? '9' : '8'}-${p.number}${p.extended ? '-E' : ''}`;
+}
+
+/** The canonical names, 3279 (color) first, then 3278 (mono): what the dialog and menu list. */
+export const KNOWN_MODELS: Readonly<Record<string, Model>> = Object.fromEntries(
+  (['9', '8'] as const).flatMap((c) => ([2, 3, 4, 5] as const).flatMap((n) => ['', '-E'].map((e) => {
+    const name = `327${c}-${n}${e}`;
+    return [name, { ttype: advertisedType(parseModel(name)!), alternate: ALTERNATE[n] }] as const;
+  }))),
+);
 
 /**
  * The model a request names, or undefined for "no model asked for".
@@ -65,26 +96,17 @@ export const KNOWN_MODELS: Readonly<Record<string, Model>> = {
  */
 function lookUpModel(opts: TerminalTypeOptions): Model | undefined {
   if (opts.model === undefined) return undefined;
-  // Accept `3278-2-E`, `IBM-3278-2-E`, and any casing of either. x3270 matches
-  // the prefix with strncasecmp("IBM-", res, 4) and the suffix with
-  // strchr("Ee", res[7]) in Common/model.c canonical_model_x(), so a model
-  // string s3270 accepts is accepted here too. Case folding cannot invent a
-  // model: an unknown number still misses the table and throws.
-  const folded = opts.model.toUpperCase();
-  const bare = folded.startsWith('IBM-') ? folded.slice(4) : folded;
-  // Own-property check, not a bare index: KNOWN_MODELS is a plain object, so
-  // `KNOWN_MODELS['CONSTRUCTOR']`-style lookups would otherwise walk up to
-  // Object.prototype and return a function that the `undefined` guard below
-  // would wave through as if it were a model.
-  const found = Object.hasOwn(KNOWN_MODELS, bare) ? KNOWN_MODELS[bare] : undefined;
-  if (found === undefined) {
+  // Every x3270 form (`parseModel`): an optional IBM- in any case, 3279-N or 3278-N or a bare N,
+  // an optional -E or -e. A regex over the folded name, so no lookup can reach Object.prototype.
+  const p = parseModel(opts.model);
+  if (p === undefined) {
     throw new TerminalTypeError(
-      `unknown model ${JSON.stringify(opts.model)}; known models are `
-      + `${Object.keys(KNOWN_MODELS).join(', ')}. `
+      `unknown model ${JSON.stringify(opts.model)}; use 3279-N or 3278-N (N is 2 to 5), `
+      + 'optionally with -E, or a bare N: e.g. 3279-2-E. '
       + 'Use --terminal-type to send an arbitrary string.',
     );
   }
-  return found;
+  return { ttype: advertisedType(p, opts.mono === true), alternate: ALTERNATE[p.number] };
 }
 
 /**
@@ -110,6 +132,18 @@ export interface TerminalTypeOptions {
   model?: string;
   /** A complete ttype string, used verbatim. Wins over `model`. */
   terminalType?: string;
+  /** x3270's `-mono`: every model is a mono 3278 (`model.c:155`). */
+  mono?: boolean;
+}
+
+/**
+ * The color mode, x3270's `mode3279` (`model.c:155`): the model's prefix (3279 or bare is color,
+ * 3278 mono), forced off by `mono`. No model means the default, `3279-2-E`: color.
+ */
+export function isColorModel(opts: TerminalTypeOptions): boolean {
+  if (opts.mono === true) return false;
+  if (opts.model === undefined) return true;
+  return parseModel(opts.model)?.color ?? true;
 }
 
 export function resolveTerminalType(opts: TerminalTypeOptions): string {
@@ -143,6 +177,6 @@ export function resolveTerminalType(opts: TerminalTypeOptions): string {
   // that gap was the one place the audit for this change first missed and then had to fix, by
   // adding `-model 3278-2` to our line too. Both invocations now name model 2 explicitly, so
   // neither depends on this constant.
-  if (opts.model === undefined) return TERMINAL_TYPE;
+  if (opts.model === undefined) return opts.mono === true ? 'IBM-3278-2-E' : TERMINAL_TYPE;
   return lookUpModel(opts)!.ttype;
 }

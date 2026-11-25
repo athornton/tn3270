@@ -383,7 +383,7 @@ describe('buildSession', () => {
       printGeometryNotices(session, { write: (t) => { errors.push(t); } });
       await session.connect('127.0.0.1', port);
       expect(errors).toEqual([
-        "oversize auto: window fits 20 rows by 80 columns, less than model 3278-2-E's 24 rows by 80 columns; using the model\n",
+        "oversize auto: window fits 20 rows by 80 columns, less than model 3279-2-E's 24 rows by 80 columns; using the model\n",
       ]);
       fits = { rows: 50, cols: 132 };                  // a fit: no notice, nothing printed
       await session.connect('127.0.0.1', port);
@@ -459,5 +459,15 @@ describe('a flag beats the preferences file, for every stored key', () => {
   }
   it('visualbell from the file (there is no flag to turn it off)', () => {
     expect(parseGuiArgs([...prefsToArgv({ visualbell: true }, GUI_PREF_KEYS).argv, 'vm']).visualBell).toBe(true);
+  });
+});
+
+describe('-mono', () => {
+  it('makes the session a mono 3278, advertised and drawn', () => {
+    const none = (): undefined => undefined;
+    const s = buildSession(parseGuiArgs(['-mono', 'vm']), none);
+    expect(s.colorMode()).toBe(false);
+    expect(s.connectionInfo().terminalType).toBe('IBM-3278-2-E');
+    expect(buildSession(parseGuiArgs(['vm']), none).colorMode()).toBe(true);
   });
 });

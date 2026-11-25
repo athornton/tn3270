@@ -1,3 +1,4 @@
+import { KNOWN_MODELS } from '@tn3270/core';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { inflateSync } from 'node:zlib';
 import { connect, createServer, type Socket } from 'node:net';
@@ -1742,7 +1743,7 @@ describe('-oversize auto, from the browser viewport', () => {
       const id = got[0]!['id'] as string;
       const session = registry.peek(id)!;
       await until(() => session.resolvedGeometry !== undefined);
-      expect(session.resolvedGeometry?.terminalType).toBe('IBM-3278-2-E');
+      expect(session.resolvedGeometry?.terminalType).toBe('IBM-3279-2-E');
       expect(session.resolvedGeometry?.alternate).toEqual({ rows: 24, cols: 80 });
       const line = written.find((w) => w.includes('no window size known'));
       expect(line, 'the auto fallback must be reported on stderr').toBeDefined();
@@ -1791,7 +1792,7 @@ describe('-oversize auto, from the browser viewport', () => {
     expect(written.filter((w) => w.includes('disconnect first'))).toEqual([]);
     expect(refused['kind']).toBe('geometryChoices');
     expect(String(refused['notice'])).toMatch(/^disconnect first; /);
-    expect(refused['current']).toEqual({ model: '3278-2-E', oversize: 'auto' });
+    expect(refused['current']).toEqual({ model: '3279-2-E', oversize: 'auto' });
     await io.settle();
     registry.peek(id)!.disconnect();
     let freed: Record<string, unknown> | undefined;
@@ -2001,18 +2002,18 @@ describe('the model/oversize picker', () => {
     return { written, restore: () => { spy.mockRestore(); } };
   }
 
-  const MODELS = ['3278-2', '3278-2-E', '3278-3', '3278-3-E', '3278-4', '3278-4-E', '3278-5', '3278-5-E'];
+  const MODELS = Object.keys(KNOWN_MODELS);   // 3279 (color) first, then 3278 (mono): core's list, in its order
 
   it('sends geometryChoices after atlas on hello: eight models, disconnected, the current setting', async () => {
     const { ws, kinds, choices } = await picker();
     expect(kinds).toEqual(['session', 'atlas', 'geometryChoices', 'frame']);
     const models = choices['models'] as Array<{ name: string; label: string }>;
     expect(models.map((m) => m.name)).toEqual(MODELS);
-    expect(models[4]!.label).toBe('3278-4 (43 rows by 80 columns)');
+    expect(models[4]!.label).toBe('3279-4 (43 rows by 80 columns)');
     expect(choices['oversizes']).toEqual([{ name: 'none', label: 'None' }, { name: 'auto', label: 'Auto' }]);
     expect(choices['connected']).toBe(false);
     // The product default, as a connect would advertise it: `TERMINAL_TYPE` with `IBM-` stripped.
-    expect(choices['current']).toEqual({ model: '3278-2-E', oversize: 'none' });
+    expect(choices['current']).toEqual({ model: '3279-2-E', oversize: 'none' });
     expect('notice' in choices).toBe(false);
     ws.close();
   });
@@ -2036,7 +2037,7 @@ describe('the model/oversize picker', () => {
     ws.send(JSON.stringify({ kind: 'setGeometry', model: '3278-9' }));
     const reply = await io.next('the bad setGeometry');
     expect(reply['kind']).toBe('error');
-    expect(String(reply['message'])).toMatch(/setGeometry model must be one of 3278-2/);
+    expect(String(reply['message'])).toMatch(/setGeometry model must be one of 3279-2/);
     await io.settle();
     ws.send(JSON.stringify({ kind: 'action', action: { kind: 'tab' } }));
     expect((await io.next('a tab after a bad setGeometry'))['kind']).toBe('frame');
@@ -2052,7 +2053,7 @@ describe('the model/oversize picker', () => {
       expect(reply['kind']).toBe('geometryChoices');
       expect(reply['notice']).toBe(
         'no startup size to return to; this gateway was started without -oversize <cols>x<rows>');
-      expect(reply['current']).toEqual({ model: '3278-2-E', oversize: 'none' });
+      expect(reply['current']).toEqual({ model: '3279-2-E', oversize: 'none' });
       ws.close();
     } finally {
       err.restore();
@@ -2065,13 +2066,13 @@ describe('the model/oversize picker', () => {
       { name: 'none', label: 'None' }, { name: 'auto', label: 'Auto' },
       { name: 'startup', label: '160x62 (62 rows by 160 columns)' },
     ]);
-    expect(choices['current']).toEqual({ model: '3278-2-E', oversize: 'startup' });
+    expect(choices['current']).toEqual({ model: '3279-2-E', oversize: 'startup' });
     ws.send(JSON.stringify({ kind: 'setGeometry', oversize: 'none' }));
-    expect((await io.next('none'))['current']).toEqual({ model: '3278-2-E', oversize: 'none' });
+    expect((await io.next('none'))['current']).toEqual({ model: '3279-2-E', oversize: 'none' });
     await io.settle();
     ws.send(JSON.stringify({ kind: 'setGeometry', oversize: 'startup' }));
     const back = await io.next('startup');
-    expect(back['current']).toEqual({ model: '3278-2-E', oversize: 'startup' });
+    expect(back['current']).toEqual({ model: '3279-2-E', oversize: 'startup' });
     expect('notice' in back).toBe(false);
     ws.close();
   });
@@ -2110,7 +2111,7 @@ describe('the model/oversize picker', () => {
       if (m['kind'] === 'geometryChoices') current = m['current'];
     }
     expect(kinds).toEqual(['session', 'atlas', 'geometryChoices', 'frame']);
-    expect(current).toEqual({ model: '3278-2-E', oversize: 'none' });
+    expect(current).toEqual({ model: '3279-2-E', oversize: 'none' });
     ws.close();
   });
 });

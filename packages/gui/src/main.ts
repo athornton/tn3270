@@ -10,7 +10,7 @@ import {
   type GeometrySetting, type Session, type Size,
 } from '@tn3270/core';
 import {
-  answerInfoFlag, versionText, windowTitle, nodePrefsFs, savePrefs, GUI_PREF_KEYS,
+  answerInfoFlag, monoModelNotice, versionText, windowTitle, nodePrefsFs, savePrefs, GUI_PREF_KEYS,
   applyAction, applyGeometryChoice, applyPaste, describeConnectError, describeTlsError, resolveScheme,
   startTransfer, transferCommand, DEFAULT_TLS,
   type Action, type ConnectForm, type GeometryChoice, type TlsRemedy,
@@ -860,6 +860,8 @@ async function startSession(
   }
   // Before any connect, so the first connect's notice is printed too -- see the function.
   printGeometryNotices(session, process.stderr);
+  const modelNote = monoModelNotice(args.model);
+  if (modelNote !== undefined) fail(modelNote);   // fail() also writes stderr
 
   /**
    * The atlas is read HERE and shipped over IPC, not fetched by the renderer.
@@ -1581,6 +1583,8 @@ async function startSession(
         try {
           const notice = applyGeometryChoice(current, choice, (next) => { session.setGeometry(next); });
           if (notice !== undefined) fail(notice);
+          const modelNote = 'model' in choice ? monoModelNotice(choice.model) : undefined;
+          if (modelNote !== undefined) fail(modelNote);
         } catch (err) {
           fail(explain(err));
         }

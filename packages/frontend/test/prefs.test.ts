@@ -96,3 +96,10 @@ describe('loadPrefs and savePrefs', () => {
     expect(JSON.parse(fs.files['/p.json']!)).toEqual({ future: 42, model: '3278-4-E' });
   });
 });
+
+describe('the mono key', () => {
+  it('is stored, bare, in both front ends, and round-trips', () => {
+    expect(prefsToArgv({ mono: true }, GUI_PREF_KEYS).argv).toEqual(['-mono']);
+    expect(argvToPrefs(['-mono', 'vm'], TUI_PREF_KEYS)).toEqual({ mono: true });
+  });
+});

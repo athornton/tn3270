@@ -927,6 +927,22 @@ and the Recording log says what happened when they were run.
   we hardcode.** Not a TN3270E problem — `IBM-3278-2-E` reaches TSO with the TN3270E
   option never negotiated. See the Recording log. `record-mvs.txt` remains a draft.
 
+## Color mode and IBM-3279-N, against TK5 and VM/370 — 2026-11-24
+
+**15b B2 Part 1's merge gate, passed.** Branch `color-mode`. CLI with `Trace(on)` and `TraceText`.
+
+| host | flags | advertised (trace) | result |
+|---|---|---|---|
+| TK5 `:3271` | `--terminal-type IBM-3278-2` (the control) | `IBM-3278-2` | `IKT00405I` (refused, as recorded on 2026-08-17) |
+| TK5 | default (new code) | `IBM-3279-2-E` | `IKJ56700A ENTER USERID` |
+| TK5 | `-model 3278-2-E` | `IBM-3278-2-E` | `IKJ56700A`, plus the once-per-run notice |
+| TK5 | `-mono` | `IBM-3278-2-E` | `IKJ56700A` |
+| VM/370 `:3270` | default | `IBM-3279-2-E` | logon, `IPL CMS`, `Ready;`, `LOGOFF` |
+
+The TK5 recipe: Enter to dismiss the all-protected greeting, then `tso`. **The GUI in mono:**
+`-model 3278-2-E` against VM drew `CP READ   VM370CE` in green, where color draws it blue, and its
+title read `127.0.0.1:3270 — TN3270 3278-2-E`.
+
 ## The preferences store, from the GUI and the TUI — 2026-11-24
 
 **15b sub-project B1, witnessed.** Branch `prefs-store`.

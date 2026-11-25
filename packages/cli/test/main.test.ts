@@ -254,3 +254,10 @@ describe('usage covers every flag', () => {
     expect(flags.filter((f) => !(USAGE as string).includes(f))).toEqual([]);
   });
 });
+
+describe('-mono', () => {
+  it('makes the session mono on both buildSession paths', () => {
+    expect(buildSession(parseArgs(['-mono'])).colorMode()).toBe(false);
+    expect(buildSession(parseArgs(['-mono', '-model', '3279-4-E'])).connectionInfo().terminalType).toBe('IBM-3278-4-E');
+  });
+});

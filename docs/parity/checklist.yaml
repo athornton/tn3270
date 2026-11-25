@@ -675,7 +675,7 @@
   x3270: "Options → Models → Model 2/3/4/5 (disabled while connected); -model [327{8,9}-]<n>; default model 3279-4, with -E from extendedDataStream (x3270/resources.c:63-64, Common/model.c:137)"
   gui: "flag: -model; the startup Connect dialog's model dropdown (the same eight models); menu: Model → the eight 3278-N and 3278-N-E radios (disabled while connected or connecting, applied at the next connect). Live: the GUI at -model 3278-4-E against VM drew 43 rows"
   status: partial
-  gap: "only 3278 names are accepted (3279-N and a bare N are refused, core/src/termtype.ts:48), so the IBM-3279-2/3 types x3270 sends in color mode cannot be advertised; and the default is 3278-2-E (24x80 alternate), where x3270's 3279-4 goes out as IBM-3278-4-E (43x80) (Common/telnet.c:2103-2104)"
+  gap: "the default is 3279-2-E (24x80), where x3270's default 3279-4 goes out as IBM-3278-4-E (43x80) (Common/model.c:149-153). Since 2026-11-24 3279-N and bare N are accepted and 3279 models 2 and 3 advertise IBM-3279-N (live: 'Color mode and IBM-3279-N, against TK5 and VM/370 — 2026-11-24')"
   evidence:
     code: [packages/gui/src/args.ts:117, packages/gui/src/connectDialog.ts:17, packages/gui/src/menu.ts:310, packages/core/src/termtype.ts:48]
     tests: [packages/gui/test/args.test.ts, packages/gui/test/connectDialog.test.ts, packages/gui/test/menu.test.ts, packages/core/test/termtype.test.ts]
@@ -715,10 +715,14 @@
   title: 3278 monochrome or 3279 color mode, and -mono
   covers: [menu:m3278Option, menu:m3279Option, option:-mono, resource:normalColor, resource:inputColor, resource:boldColor]
   x3270: "Options → Toggles → 3278 (mono) / 3279 (color) radio, disabled while connected (x3270/menubar.c:2310-2328); -mono (no color at all, and those items hidden); 3278 mode draws in normalColor/inputColor/boldColor, green by default (x3270/resources.c:234-239), and reports no colors in Query Reply (Common/sf.c:747-753)"
-  gui: "none: the canvas always draws a 3279 in color; -scheme green is a green palette, not 3278 mode. x3270's choice also changes the advertised terminal type for models 2 and 3 (IBM-3279-N, Common/telnet.c:2103-2104). Core's resolve has mode3279 (core/src/render.ts:161), which the TUI passes (tui/src/app.ts:583) and the GUI never does"
-  status: missing
-  browser: "none"
-  others: {tui: "--colors 0 draws monochrome"}
+  gui: "the model's prefix is the mode, as x3270 (Common/model.c:155): 3279 or bare is color, 3278 mono, drawn in green; -mono makes any model mono, in every front end; a color model 2 or 3 advertises IBM-3279-N (telnet.c create_3270_termtype). No Options menu toggle yet (B2 Part 2)"
+  status: partial
+  gap: "no 3278/3279 menu item (B2 Part 2); 3278 mode draws x3270's green but has no normalColor/inputColor/boldColor resources"
+  browser: "-mono on the gateway, for every session"
+  evidence:
+    code: [packages/core/src/termtype.ts, packages/core/src/session.ts, packages/core/src/render.ts]
+    tests: [packages/core/test/termtype.test.ts, packages/core/test/default-codepage.test.ts]
+    live: "Color mode and IBM-3279-N, against TK5 and VM/370 — 2026-11-24"
 - id: color-scheme
   area: display
   title: Color scheme

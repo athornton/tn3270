@@ -51,9 +51,9 @@ describe('resolveGeometry, none', () => {
     expect('notice' in g).toBe(false);
     expect('clamp' in g).toBe(false);
   });
-  it('with no model is the product default, IBM-3278-2-E at 24x80', () => {
+  it('with no model is the product default, IBM-3279-2-E at 24x80', () => {
     const g = resolveGeometry({ oversize: { kind: 'none' } });
-    expect(g.terminalType).toBe('IBM-3278-2-E');
+    expect(g.terminalType).toBe('IBM-3279-2-E');
     expect(g.alternate).toEqual({ rows: 24, cols: 80 });
   });
   it('passes a raw --terminal-type through and keeps 24x80, as resolveAlternateSize does', () => {

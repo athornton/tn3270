@@ -6,7 +6,7 @@ import type { Session } from '@tn3270/core';
 import { readAtlas, drawList, blankColumns, extractText } from '@tn3270/canvas';
 import { resolve } from '@tn3270/core';
 import {
-  answerInfoFlag, windowTitle, applyAction, applyPaste, resolveScheme, resolveTls, startTransfer,
+  answerInfoFlag, monoModelNotice, windowTitle, applyAction, applyPaste, resolveScheme, resolveTls, startTransfer,
 } from '@tn3270/frontend';
 import { isMain } from '@tn3270/node-files';
 import {
@@ -732,6 +732,8 @@ export function run(argv: readonly string[]): void {
   // an uncaught exception with a stack trace over a message that already says what to fix.
   try {
     args = parseWebArgs(argv);
+    const modelNote = monoModelNotice(args.model);
+    if (modelNote !== undefined) process.stderr.write(`${modelNote}\n`);
     built = buildServer(args);
   } catch (err) {
     process.stderr.write(`${err instanceof UsageError ? err.message : String(err)}\n`);
