@@ -968,9 +968,20 @@ of the recorded `vm370-logon-logoff.trace` and `mvs-tk5-tso-ispf.trace`, through
   The relaunch from that file, a run given `-scheme green -highlightbold -cursorcolor`, and the menu
   choices without saving produced the same image hash.
 
-**Not witnessed, owed to a host:** Color Mode disabled while connected, then 3278 mono chosen after
-Disconnect and advertised as `IBM-3278-2-E` on reconnect; the web gateway's and the TUI's flags
-against a host (both are tested: the web through its integration frame, the TUI through its paint).
+**Then against the hosts, the same day** (the user started VM/370 CE on `127.0.0.1:3270` and TK5 on
+`:3271`), the GUI under Xvfb, the gateway binary with a WebSocket client, the TUI under a pty:
+
+- **VM/370, Color Mode:** connected at the default (`IBM-3279-2-E` in About), `menu:colormode:3278`
+  was refused, `disconnect first; model and oversize apply at the next connect`, and left
+  `checked=false`. After `menu:model-disconnect` it was accepted (`checked=true`); Enter reconnected
+  and the title, built from the negotiated type, read `127.0.0.1:3270 — TN3270 3278-2-E`, drawn green.
+- **VM/370, web `-cursorcolor`:** the live frames carry `cursorColor [255,0,0]`, absent without it.
+  VM's logo has no intensified field, so no overstrike either way, in the GUI or the web.
+- **TK5, bold, its greeting panel:** the web gateway overstruck **0** cells plain, **1446** with
+  `-highlightbold`, **1446** with `-mono` alone. The GUI's Options → Highlight Bold thickened the
+  white `Terminal` label and the red art, and `-mono` drew them green and bold. The TUI
+  (`TERM=xterm-256color`, 100x30) emitted **0** bold SGRs plain, **63** with `-highlightbold`, **9**
+  with `-mono` (fewer, longer runs in one color).
 
 ## The preferences store, from the GUI and the TUI — 2026-11-24
 

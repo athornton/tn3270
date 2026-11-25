@@ -715,9 +715,9 @@
   title: 3278 monochrome or 3279 color mode, and -mono
   covers: [menu:m3278Option, menu:m3279Option, option:-mono, resource:normalColor, resource:inputColor, resource:boldColor]
   x3270: "Options → Toggles → 3278 (mono) / 3279 (color) radio, disabled while connected (x3270/menubar.c:2310-2328); -mono (no color at all, and those items hidden); 3278 mode draws in normalColor/inputColor/boldColor, green by default (x3270/resources.c:234-239), and reports no colors in Query Reply (Common/sf.c:747-753)"
-  gui: "the model's prefix is the mode, as x3270 (Common/model.c:155): 3279 or bare is color, 3278 mono, drawn in green; -mono makes any model mono, in every front end; a color model 2 or 3 advertises IBM-3279-N (telnet.c create_3270_termtype). No Options menu toggle yet (B2 Part 2)"
+  gui: "the model's prefix is the mode, as x3270 (Common/model.c:155): 3279 or bare is color, 3278 mono, drawn in green; -mono makes any model mono, in every front end; GUI Options → Color Mode (3279 color, 3278 mono) swaps the model's prefix at the next connect, disabled while connected and absent under -mono (live: 'The Options menu, under Xvfb with replayed host traces — 2026-11-25'); a color model 2 or 3 advertises IBM-3279-N (telnet.c create_3270_termtype). No Options menu toggle yet (B2 Part 2)"
   status: partial
-  gap: "the GUI's Options → Color Mode menu is built but not yet witnessed against a host (disabled while connected, then the 3278 type advertised at reconnect); 3278 mode draws x3270's green but has no normalColor/inputColor/boldColor resources"
+  gap: "3278 mode draws x3270's green but has no normalColor/inputColor/boldColor resources"
   browser: "-mono on the gateway, for every session"
   evidence:
     code: [packages/core/src/termtype.ts, packages/core/src/session.ts, packages/core/src/render.ts]
