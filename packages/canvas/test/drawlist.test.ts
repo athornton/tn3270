@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { Screen, resolve, Color, cp037, type ResolvedCell } from '@tn3270/core';
 import { SCHEMES, schemeRgb, type Scheme } from '@tn3270/frontend';
-import { drawList } from '../src/drawlist.js';
+import { drawList, FIXED_CURSOR_RGB } from '../src/drawlist.js';
 import type { AtlasGeometry } from '../src/geometry.js';
 import { ebcdicToCg, CG_BOXSOLID, column } from '../src/cg.js';
 
@@ -87,10 +87,31 @@ describe('drawList', () => {
     const s = screenWith([[0, 0xc1]]);
     const snap = s.snapshot();
     const flagged = resolve(snap).map((c, i): ResolvedCell =>
-      (i === 0 ? { ...c, blink: true, intensify: true, underscore: true } : c));
+      (i === 0 ? { ...c, blink: true, bold: true, underscore: true } : c));
     expect(drawList(snap, flagged, atlas, SCHEMES.default!).cells[0]).toMatchObject({
       blink: true, intensify: true, underline: true,
     });
+  });
+
+  it('carries a fixed cursor color only when asked: X11 red, x3270 cursorColor', () => {
+    const s = screenWith([[0, 0xc1]]);
+    const snap = s.snapshot();
+    expect(FIXED_CURSOR_RGB).toEqual([255, 0, 0]);
+    expect(drawList(snap, resolve(snap), atlas, SCHEMES.default!, undefined, { cursorColor: true }).cursorColor)
+      .toEqual([255, 0, 0]);
+    expect('cursorColor' in drawList(snap, resolve(snap), atlas, SCHEMES.default!)).toBe(false);
+    expect('cursorColor' in drawList(snap, resolve(snap), atlas, SCHEMES.default!, undefined, {})).toBe(false);
+  });
+
+  it("draws the overstrike from resolve's bold, not from the wire's intensify", () => {
+    // `bold` is x3270's drawing rule (an intensified field in mono, or with highlightBold);
+    // `intensify` is only the highlight byte, so drawing from it loses mono's bold fields.
+    const s = screenWith([[0, 0xc1], [1, 0xc2]]);
+    const snap = s.snapshot();
+    const cells = resolve(snap).map((c, i): ResolvedCell =>
+      (i === 0 ? { ...c, bold: true, intensify: false } : i === 1 ? { ...c, bold: false, intensify: true } : c));
+    const dl = drawList(snap, cells, atlas, SCHEMES.default!);
+    expect([dl.cells[0]!.intensify, dl.cells[1]!.intensify]).toEqual([true, false]);
   });
 
   it('falls back to boxsolid for a byte with no glyph, not to a neighbor', () => {

@@ -1,11 +1,33 @@
-# Handoff — state as of 2026-11-25 (15b B2 PART 1, COLOR MODE + IBM-3279-N, BUILT on branch `color-mode`; next: Part 2 plan; 15b B1, THE PREFERENCES STORE, BUILT on branch `prefs-store`; gate 101; next: B2, brainstorm first; README *STAGING* 15b SUB-PROJECT A, IDENTITY AND HELP, BUILT on branch `identity-and-help`; gate 102 blocking; next: 15b B, brainstorm first; README *STAGING* 15a LAST ITEM, THE `bracket` DEFAULT CODE PAGE + `-codepage`, BUILT on branch `bracket-codepage` (MERGED a3b836d; witnessed on VM/370 from the CLI and the GUI); README *STAGING* 15a PART 3, KEYBOARD SEMANTICS, MERGED (`d0d8395`): typeahead, oerrLock, Reset's half reset, insert-mode resets, the erase keys, numericLock off, Attn on TN3270E, GUI-witnessed on VM, gate FAIL 107 blocking; next: 15a's remaining item, x3270's default code page `bracket` (then 15b); README *STAGING* 15a PART 2, BLINK/INTENSIFY/THE BELL, MERGED (`86a9999`): canvas blink and intensify drawn, the host's alarm rings in the GUI, the browser and the TUI, `-visualbell` flashes instead, gate still FAIL 113 blocking; 15a PART 1, ASCII LINE ENDS, MERGED (`13e41b2`); PARITY TRIAGED, gate 113 blocking; ROADMAP = README item 15a-15h; x3270 PARITY CHECKLIST MERGED (`df62e6f`); THE PACKAGED GUI'S DROPPED FIRST ARGUMENT AND SYSTEM-WIDE Ctrl-] FIXED (`gui-argv-and-quit`): 413 x3270 names, 158 checklist rows, `parity.mjs gate` FAIL 157 blocking; 0.1.4 RELEASED: npm by the tag workflow with provenance, and the first GitHub release with the seven installers, SHA256SUMS and scriv notes; macOS CODE SIGNING MERGED (`db5a93d`; released installers up to 0.1.4 are UNSIGNED), Windows CI signing DROPPED for the Microsoft Store; STORE PROBE MERGED (`559ea78`); README AUDIT + FIXES MERGED (`ae8724f`); WEB RECEIVE DOWNLOADS ON COMPLETION (`4a940fe`, live-verified); `Exist` PER DIRECTION (`f533bff`); next: README *Staging* 15a part 3, the keyboard semantics (typeahead and keyboard lock, insert-mode reset, x3270's erase rules, oerr-lock))
+# Handoff — state as of 2026-11-25 (15b B2 PART 2a, THE OPTIONS MENU, BUILT on branch `options-menu`, host gate passed; 15b B2 PART 1, COLOR MODE + IBM-3279-N, BUILT on branch `color-mode`; next: Part 2 plan; 15b B1, THE PREFERENCES STORE, BUILT on branch `prefs-store`; gate 101; next: B2, brainstorm first; README *STAGING* 15b SUB-PROJECT A, IDENTITY AND HELP, BUILT on branch `identity-and-help`; gate 102 blocking; next: 15b B, brainstorm first; README *STAGING* 15a LAST ITEM, THE `bracket` DEFAULT CODE PAGE + `-codepage`, BUILT on branch `bracket-codepage` (MERGED a3b836d; witnessed on VM/370 from the CLI and the GUI); README *STAGING* 15a PART 3, KEYBOARD SEMANTICS, MERGED (`d0d8395`): typeahead, oerrLock, Reset's half reset, insert-mode resets, the erase keys, numericLock off, Attn on TN3270E, GUI-witnessed on VM, gate FAIL 107 blocking; next: 15a's remaining item, x3270's default code page `bracket` (then 15b); README *STAGING* 15a PART 2, BLINK/INTENSIFY/THE BELL, MERGED (`86a9999`): canvas blink and intensify drawn, the host's alarm rings in the GUI, the browser and the TUI, `-visualbell` flashes instead, gate still FAIL 113 blocking; 15a PART 1, ASCII LINE ENDS, MERGED (`13e41b2`); PARITY TRIAGED, gate 113 blocking; ROADMAP = README item 15a-15h; x3270 PARITY CHECKLIST MERGED (`df62e6f`); THE PACKAGED GUI'S DROPPED FIRST ARGUMENT AND SYSTEM-WIDE Ctrl-] FIXED (`gui-argv-and-quit`): 413 x3270 names, 158 checklist rows, `parity.mjs gate` FAIL 157 blocking; 0.1.4 RELEASED: npm by the tag workflow with provenance, and the first GitHub release with the seven installers, SHA256SUMS and scriv notes; macOS CODE SIGNING MERGED (`db5a93d`; released installers up to 0.1.4 are UNSIGNED), Windows CI signing DROPPED for the Microsoft Store; STORE PROBE MERGED (`559ea78`); README AUDIT + FIXES MERGED (`ae8724f`); WEB RECEIVE DOWNLOADS ON COMPLETION (`4a940fe`, live-verified); `Exist` PER DIRECTION (`f533bff`); next: README *Staging* 15a part 3, the keyboard semantics (typeahead and keyboard lock, insert-mode reset, x3270's erase rules, oerr-lock))
 
 Written to let a fresh session resume without re-deriving anything. Read this,
 then `docs/superpowers/specs/2026-08-15-tn3270-client-design.md` (the spec) and
 `docs/live-testing.md` (the live-host runbook and log). For the most recent work, read the spec and plan the
 latest START HERE entry names. Each finished feature has its own pair under `docs/superpowers/`.
 
-## START HERE — LATEST FIRST; NEXT: 15b B2 PART 2 (MENUS), PLAN FIRST (SPEC EXISTS)
+## START HERE — LATEST FIRST; NEXT: MERGE 15b B2 PART 2a; THEN PLAN PART 2b (VIEW MENU)
+
+**2026-11-25, LATEST: 15b B2 PART 2a, THE OPTIONS MENU, BUILT** on branch `options-menu`. Plan
+`docs/superpowers/plans/2026-11-25-options-menu-part2a.md` (Part 2 split: 2b is the View menu, not
+planned), run inline. 4201 tests, build and typecheck clean.
+- **What changed:** core `ResolvedCell.bold` (x3270's highlight_bold rule: the 0xF8 highlight, or an
+  FA_IS_HIGH field when `highlightBold` in 3279 mode, always in mono), drawn by the canvas and the
+  TUI instead of `intensify`; `withColorMode`; `drawList`'s sixth parameter `{ cursorColor }` and
+  `FIXED_CURSOR_RGB`; `canonicalSchemeName`; `-highlightbold` (GUI, TUI, web), `-cursorcolor` (GUI,
+  web), keys `highlightbold` (GUI, TUI), `cursorcolor` (GUI); the GUI Options menu (`menu.ts`
+  `optionsMenuStates`) wired live in `main.ts`; `guiPrefsToSave`'s runtime argument; About's real
+  color mode and scheme name; the keys seam's `menu:` step logs `checked=`.
+- **BUG FIXED:** mono drew intensified fields exactly like normal ones (all green, no bold).
+- **Witnessed under Xvfb with replayed traces** (`docs/live-testing.md`, *The Options menu, under
+  Xvfb with replayed host traces*): checkboxes uncheck (no radio quirk); bold; red cursor; schemes;
+  no Color Mode under -mono; save and relaunch.
+- **HOST GATE PASSED** once the user started VM/370 and TK5: Color Mode refused while connected,
+  3278 after Disconnect negotiated `IBM-3278-2-E`; web `cursorColor` live; TK5 bold 0/1446/1446
+  (plain, -highlightbold, -mono) in the web, visible in the GUI, 0/63/9 SGR bold in the TUI.
+  Mutation 14/14 killed. Known, not fixed: About's `Model:` line is argv's, stale after a menu change.
+- **Parity:** highlight-bold and cursor-color `ours`; color-mode and color-scheme `partial`
+  (gaps updated); gate 101 -> 99.
+
 
 **2026-11-25, LATEST: 15b B2 PART 1, COLOR MODE AND IBM-3279-N, BUILT** on branch `color-mode`. Spec
 `docs/superpowers/specs/2026-11-24-appearance-while-running-design.md` (Parts 1 and 2), plan

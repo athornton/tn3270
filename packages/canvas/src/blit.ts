@@ -152,7 +152,7 @@ export function blit(ctx: Ctx2D, list: DrawList, opts: BlitOptions): void {
     if (cell.cursor) {
       // A block cursor drawn as a reverse bar over the bottom third: visible over a glyph
       // without hiding it, which a full reverse block does.
-      ctx.fillStyle = rgbCss(cell.fg);
+      ctx.fillStyle = rgbCss(list.cursorColor ?? cell.fg);   // x3270 useCursorColor, else the cell's
       ctx.fillRect(dx, dy + h - Math.max(scale, Math.floor(h / 4)), w, Math.max(scale, Math.floor(h / 4)));
     }
   }

@@ -112,7 +112,7 @@ export type { Binding } from './bindings.js';
 // must not differ BETWEEN front ends -- the GUI drew core's saturated primaries while the
 // TUI had its own gentler table, and a user reported the blue as unreadable. Core keeps the
 // architected meaning; this decides what gets drawn.
-export { SCHEMES, SCHEME_NAMES, DEFAULT_SCHEME, resolveScheme, schemeRgb } from './palette.js';
+export { SCHEMES, SCHEME_NAMES, DEFAULT_SCHEME, resolveScheme, canonicalSchemeName, schemeRgb } from './palette.js';
 export type { Scheme, Slot } from './palette.js';
 
 // IND$FILE transfer's host-independent half: keyword validation and command construction.

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Color, COLOR_NAMES } from '@tn3270/core';
 import {
-  SCHEMES, DEFAULT_SCHEME, resolveScheme, schemeRgb, SCHEME_NAMES, type Scheme,
+  SCHEMES, DEFAULT_SCHEME, resolveScheme, schemeRgb, SCHEME_NAMES, canonicalSchemeName, type Scheme,
 } from '../src/palette.js';
 
 /** Every architected color identification, 0xF0-0xFF. */
@@ -129,5 +129,15 @@ describe('schemeRgb', () => {
   it('throws rather than guessing on a code outside 0xF0-0xFF', () => {
     expect(() => schemeRgb(SCHEMES.default!, 0x00)).toThrow(RangeError);
     expect(() => schemeRgb(SCHEMES.default!, 0xef)).toThrow(RangeError);
+  });
+});
+
+describe('canonicalSchemeName', () => {
+  it('names each scheme as SCHEME_NAMES spells it, folding case and aliases', () => {
+    for (const n of SCHEME_NAMES) expect(canonicalSchemeName(n.toUpperCase())).toBe(n);
+    expect(canonicalSchemeName('GreenScreen')).toBe('green');
+  });
+  it('throws on an unknown name, as resolveScheme does', () => {
+    expect(() => canonicalSchemeName('mauve')).toThrow(RangeError);
   });
 });

@@ -943,6 +943,46 @@ The TK5 recipe: Enter to dismiss the all-protected greeting, then `tso`. **The G
 `-model 3278-2-E` against VM drew `CP READ   VM370CE` in green, where color draws it blue, and its
 title read `127.0.0.1:3270 — TN3270 3278-2-E`.
 
+## The Options menu, under Xvfb with replayed host traces — 2026-11-25
+
+**15b B2 Part 2a, witnessed without a host.** Branch `options-menu`. No Hercules was installed on
+this pod (VM/370 and TK5 both absent), so the GUI was driven under Xvfb with `TN3270_GUI_REPLAY`
+of the recorded `vm370-logon-logoff.trace` and `mvs-tk5-tso-ispf.trace`, through the keys seam's
+`menu:ID` step, which now logs a checkbox's or radio's `checked` after the click.
+
+- **Checkboxes have no radio quirk** (Electron 44): two clicks on Highlight Bold logged
+  `checked=true` then `checked=false`, likewise Fixed Cursor Color; the double-toggled screenshot
+  was byte-identical to the untouched one.
+- **Highlight Bold** on the ISPF trace's last screen changed the image: the white `Terminal` label
+  and the red intensified art gained the overstrike. **`-mono`** drew everything green with the
+  same intensified text still bold. On the VM trace's last screen (LOGOFF, no intensified field)
+  the image did not change, as it should not.
+- **Fixed Cursor Color:** the cursor bar's pixels were `(36,216,48)` (the cell's green) without it
+  and `(255,0,0)` with it.
+- **Color Scheme:** `scheme:green` and `scheme:x3270` each gave a distinct image.
+- **Under `-mono` there is no Color Mode item:** `menu:colormode:3278` logged `NO MENU ITEM`.
+  (The seam's `item.click()` ignores `enabled`, so it can click a scheme radio that a person
+  could not; that is the seam, not the menu.)
+- **Save:** Color Scheme → Green, Highlight Bold, Fixed Cursor Color, Save Changed Options logged
+  `saved 4 settings` and wrote `{"model":"3279-2-E","scheme":"green","highlightbold":true,"cursorcolor":true}`.
+  The relaunch from that file, a run given `-scheme green -highlightbold -cursorcolor`, and the menu
+  choices without saving produced the same image hash.
+
+**Then against the hosts, the same day** (the user started VM/370 CE on `127.0.0.1:3270` and TK5 on
+`:3271`), the GUI under Xvfb, the gateway binary with a WebSocket client, the TUI under a pty:
+
+- **VM/370, Color Mode:** connected at the default (`IBM-3279-2-E` in About), `menu:colormode:3278`
+  was refused, `disconnect first; model and oversize apply at the next connect`, and left
+  `checked=false`. After `menu:model-disconnect` it was accepted (`checked=true`); Enter reconnected
+  and the title, built from the negotiated type, read `127.0.0.1:3270 — TN3270 3278-2-E`, drawn green.
+- **VM/370, web `-cursorcolor`:** the live frames carry `cursorColor [255,0,0]`, absent without it.
+  VM's logo has no intensified field, so no overstrike either way, in the GUI or the web.
+- **TK5, bold, its greeting panel:** the web gateway overstruck **0** cells plain, **1446** with
+  `-highlightbold`, **1446** with `-mono` alone. The GUI's Options → Highlight Bold thickened the
+  white `Terminal` label and the red art, and `-mono` drew them green and bold. The TUI
+  (`TERM=xterm-256color`, 100x30) emitted **0** bold SGRs plain, **63** with `-highlightbold`, **9**
+  with `-mono` (fewer, longer runs in one color).
+
 ## The preferences store, from the GUI and the TUI — 2026-11-24
 
 **15b sub-project B1, witnessed.** Branch `prefs-store`.

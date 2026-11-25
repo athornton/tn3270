@@ -42,3 +42,25 @@ describe('the Connect dialog\'s default model', () => {
     expect(connectModels('nonsense').default).toBe(CONNECT_DEFAULT_MODEL);
   });
 });
+
+describe('guiPrefsToSave with the Options menu settings (B2 Part 2a)', () => {
+  const off = { scheme: 'default', highlightBold: false, cursorColor: false };
+  it('saves a scheme chosen from the menu, and leaves the built-in default out', () => {
+    expect(guiPrefsToSave([], undefined, { ...off, scheme: 'green' })).toEqual({ scheme: 'green' });
+    expect(guiPrefsToSave([], undefined, off)).toEqual({});
+  });
+  it('saves the default when argv had chosen another, so the menu choice wins', () => {
+    expect(guiPrefsToSave(['-scheme', 'green'], undefined, off)).toEqual({ scheme: 'default' });
+  });
+  it('saves the checkboxes when on', () => {
+    expect(guiPrefsToSave([], undefined, { ...off, highlightBold: true, cursorColor: true }))
+      .toEqual({ highlightbold: true, cursorcolor: true });
+  });
+  it('drops a flag the menu turned off, so it is not saved back on', () => {
+    expect(guiPrefsToSave(['-highlightbold', '-cursorcolor'], undefined, off)).toEqual({});
+  });
+  it('without the settings, behaves as before', () => {
+    expect(guiPrefsToSave(['-highlightbold', '-scheme', 'green'], undefined))
+      .toEqual({ highlightbold: true, scheme: 'green' });
+  });
+});

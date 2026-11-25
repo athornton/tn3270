@@ -199,14 +199,23 @@ const ALIASES: Readonly<Record<string, string>> = Object.freeze({ greenscreen: '
  */
 export function resolveScheme(name?: string): Scheme {
   if (name === undefined) return SCHEMES[DEFAULT_SCHEME]!;
+  return SCHEMES[canonicalSchemeName(name)]!;
+}
+
+/**
+ * A scheme's name as `SCHEME_NAMES` spells it: case folded, aliases (`greenscreen`) resolved.
+ * A `Scheme` carries no name, so a front end that must show or save one keeps this beside it.
+ * Throws as `resolveScheme` does.
+ */
+export function canonicalSchemeName(name: string): string {
   const key = name.toLowerCase();
-  const resolved = SCHEMES[ALIASES[key] ?? key];
-  if (resolved === undefined) {
+  const canonical = ALIASES[key] ?? key;
+  if (SCHEMES[canonical] === undefined) {
     throw new RangeError(
       `unknown color scheme ${JSON.stringify(name)}; use one of ${SCHEME_NAMES.join(', ')}`,
     );
   }
-  return resolved;
+  return canonical;
 }
 
 /**

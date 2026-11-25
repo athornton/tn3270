@@ -58,6 +58,8 @@ export interface TuiArgs {
   codePage?: CodePage;
   /** `-mono`: every model is a mono 3278 (x3270's -mono). */
   mono?: boolean;
+  /** `-highlightbold`: intensified fields in SGR bold in 3279 mode (x3270's highlightBold). */
+  highlightBold?: boolean;
   /**
    * `-oversize <cols>x<rows>|auto|none`. Absent means `none`: the model's own alternate size.
    * Unlike the CLI's, `auto` is allowed -- there is a terminal to measure, at every connect and
@@ -198,6 +200,9 @@ export function parseArgs(argv: readonly string[]): TuiArgs {
       }
       case '-mono':
         args.mono = true;
+        break;
+      case '-highlightbold':
+        args.highlightBold = true;
         break;
       case '-codepage':
       case '-charset':

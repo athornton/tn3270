@@ -120,7 +120,7 @@ export async function connectFirst(
 /** The TUI's usage line: every flag `parseArgs` accepts (a test checks it). */
 export const USAGE = `usage: tn3270 [-model M] [--terminal-type T] [--colors N] [-scheme S] `
   + `[-tn3270e on|off] [-bind-image on|off] [-bind-limit on|off] [-ddm on|off] [-devname NAME] `
-  + `[-codepage|-charset NAME] [-mono] [-visualbell] [-save] ${OVERSIZE_USAGE} ${TLS_USAGE} [prefix:][LU,LU@]host[:port]`;
+  + `[-codepage|-charset NAME] [-mono] [-highlightbold] [-visualbell] [-save] ${OVERSIZE_USAGE} ${TLS_USAGE} [prefix:][LU,LU@]host[:port]`;
 
 /**
  * Where the TUI's preferences live (spec 2026-11-24-preferences-store-design.md section 1):
@@ -229,6 +229,7 @@ export async function run(
     files: nodeTransferFiles,
     ...(args.colors !== undefined ? { depth: args.colors } : {}),
     ...(args.scheme !== undefined ? { scheme: args.scheme } : {}),
+    ...(args.highlightBold === true ? { highlightBold: true } : {}),
     ...(args.visualBell !== undefined ? { visualBell: args.visualBell } : {}),
   });
   app.start();

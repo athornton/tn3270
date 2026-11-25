@@ -1,6 +1,6 @@
 import { basename } from 'node:path';
 import type { GeometrySetting } from '@tn3270/core';
-import { argvToPrefs, loadPrefs, oversizeFlagValue, GUI_PREF_KEYS, type PrefsFs } from '@tn3270/frontend';
+import { argvToPrefs, loadPrefs, oversizeFlagValue, DEFAULT_SCHEME, GUI_PREF_KEYS, type PrefsFs } from '@tn3270/frontend';
 import { MissingHostError, parseGuiArgs, UsageError, type GuiArgs } from './args.js';
 
 /**
@@ -44,10 +44,28 @@ export function guiEffectiveArgv(
  * What File -> Save Changed Options writes: the stored settings the startup argv sets (file and
  * flags), then the Model and Oversize menus' current choice, which `geometrySetting` holds.
  */
+/** The Options menu's settings as they are now (B2 Part 2a). They replace argv's. */
+export interface RuntimeOptions {
+  /** The canonical scheme name. */
+  readonly scheme: string;
+  readonly highlightBold: boolean;
+  readonly cursorColor: boolean;
+}
+
 export function guiPrefsToSave(
-  startupArgv: readonly string[], geometry: GeometrySetting | undefined,
+  startupArgv: readonly string[], geometry: GeometrySetting | undefined, runtime?: RuntimeOptions,
 ): Record<string, unknown> {
   const prefs = argvToPrefs(startupArgv, GUI_PREF_KEYS);
+  if (runtime !== undefined) {
+    // The scheme only once it is not the built-in default, or argv had set one: a menu choice back
+    // to the default must replace a saved `green`, not leave it.
+    if (runtime.scheme !== DEFAULT_SCHEME || 'scheme' in prefs) prefs['scheme'] = runtime.scheme;
+    // A bare key off is ABSENT, not false: there is no flag to turn it off, so absence is off.
+    for (const [key, on] of [['highlightbold', runtime.highlightBold], ['cursorcolor', runtime.cursorColor]] as const) {
+      if (on) prefs[key] = true;
+      else delete prefs[key];
+    }
+  }
   if (geometry !== undefined) {
     if (geometry.model !== undefined) prefs['model'] = geometry.model;
     prefs['oversize'] = oversizeFlagValue(geometry.oversize);

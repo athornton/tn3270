@@ -145,6 +145,26 @@ describe('blit', () => {
   });
 });
 
+describe('the cursor color, x3270 useCursorColor', () => {
+  const INKED = atlas.index[160]!;
+  const cell: DrawCell = {
+    x: 0, y: 0, glyph: INKED, fg: [0, 255, 0], bg: [0, 0, 0],
+    cursor: true, underline: false, blink: false, intensify: false,
+  };
+  const bar = (list: DrawList) => {
+    const r = recorder();
+    blit(r.ctx, list, opts());
+    return r.fills.filter((f) => f.h < atlas.cellHeight).map((f) => f.style);
+  };
+  it("is the cell's own color by default", () => {
+    expect(bar({ width: atlas.cellWidth, height: atlas.cellHeight, cells: [cell] })).toEqual(['rgb(0,255,0)']);
+  });
+  it("is the list's cursorColor when set", () => {
+    expect(bar({ width: atlas.cellWidth, height: atlas.cellHeight, cells: [cell], cursorColor: [255, 0, 0] }))
+      .toEqual(['rgb(255,0,0)']);
+  });
+});
+
 describe('blink and intensify, as x3270 draws them', () => {
   // A one-cell list with a visible glyph; the helpers above build lists from a Screen, so the
   // cell is built directly here: x, y, glyph, fg, bg, cursor, underline, blink, intensify.

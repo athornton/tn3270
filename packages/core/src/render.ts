@@ -131,10 +131,24 @@ export interface ResolvedCell {
    * x3270's equivalent is wider -- `(gr & GR_INTENSIFY) || FA_IS_HIGH(fa)`
    * (c3270/screen.c:1183) -- because curses gives it A_BOLD as its only
    * brightness lever and it uses bold for both. We have real color, so folding
-   * the two would make an intensified field bold AND red, double-signaling one
-   * protocol fact. A renderer wanting x3270's look can OR in its own test.
+   * the two HERE would make an intensified field bold AND red, double-signaling
+   * one protocol fact. This stays the wire fact; what to DRAW is `bold` below.
    */
   intensify: boolean;
+  /**
+   * DRAW THE OVERSTRIKE: x3270's drawing rule, which renderers use rather than
+   * `intensify`. The highlight 0xF8 always; an intensified FIELD too when
+   * `highlight_bold` holds, which is the `highlightBold` option in 3279 mode and
+   * ALWAYS in mono (x3270/screen.c:706-712 sets it; :3178 folds it into gr).
+   *
+   * Mono needs it: every mono cell is green, so without bold an intensified
+   * field on a 3278 would look exactly like a normal one.
+   *
+   * `FA_IS_HIGH` is an EQUALITY on the intensity bits, `(fa & 0x0C) == 0x08`
+   * (include/3270ds.h:211-212), so a hidden field (0x0C) is never bold -- unlike
+   * `defaultColor`'s bit test, which is right for color and wrong here.
+   */
+  bold: boolean;
   /**
    * Field intensity 0x0C: a renderer must not draw the text at all. See the
    * warning on `text` above -- this flag is the ONLY thing standing between a
@@ -160,6 +174,12 @@ export interface ResolveOptions {
    */
   mode3279?: boolean;
   codePage?: CodePage;
+  /**
+   * x3270's `highlightBold` resource, off by default (x3270/resources.c:346-347):
+   * in 3279 mode, draw intensified fields bold. Ignored in mono, which always
+   * does. See `ResolvedCell.bold`.
+   */
+  highlightBold?: boolean;
 }
 
 /**
@@ -336,6 +356,7 @@ function usableHighlight(code: number | undefined): number | undefined {
 
 export function resolve(snap: ScreenSnapshot, opts: ResolveOptions = {}): ResolvedCell[] {
   const mode3279 = opts.mode3279 ?? snap.mode3279 ?? true;
+  const highlightBold = !mode3279 || opts.highlightBold === true;
   const codePage = opts.codePage
     ?? (snap.codePage !== undefined ? CODE_PAGES.get(snap.codePage) : undefined)
     ?? DEFAULT_CODE_PAGE;
@@ -446,6 +467,8 @@ export function resolve(snap: ScreenSnapshot, opts: ResolveOptions = {}): Resolv
       reverse: gr === XAH.REVERSE,
       underscore: gr === XAH.UNDERSCORE,
       intensify: gr === XAH.INTENSIFY,
+      bold: gr === XAH.INTENSIFY
+        || (highlightBold && (attr & FA.INTENSITY) === FA.INT_HIGH_SEL),
       hidden: (attr & FA.INTENSITY) === FA.INT_ZERO_NSEL,
     };
   }

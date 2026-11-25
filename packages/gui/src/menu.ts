@@ -49,7 +49,7 @@ export interface MenuItemTemplate {
   readonly accelerator?: string;
   readonly id?: string;
   /** A literal union, for the reason `MenuRole` gives. Absent is Electron's `normal`. */
-  readonly type?: 'radio' | 'separator';
+  readonly type?: 'radio' | 'checkbox' | 'separator';
   readonly checked?: boolean;
   readonly enabled?: boolean;
   readonly click?: () => void;
@@ -159,6 +159,14 @@ export interface MenuHandlers {
   readonly onAbout?: () => void;
   /** File -> Save Changed Options (the app menu on macOS). Present only with this handler. */
   readonly onSaveOptions?: () => void;
+  /** Options -> Color Scheme: one scheme by its canonical name. Live: repaint with it. */
+  readonly onScheme?: (name: string) => void;
+  /** Options -> Color Mode: true for 3279 color, false for 3278 mono. Applied at the next connect. */
+  readonly onColorMode?: (color: boolean) => void;
+  /** Options -> Highlight Bold, toggled. */
+  readonly onHighlightBold?: () => void;
+  /** Options -> Fixed Cursor Color, toggled. */
+  readonly onCursorColor?: () => void;
 }
 
 /**
@@ -202,6 +210,8 @@ export interface ChoiceState {
   /** ABSENT on the Disconnect item, a normal item with nothing to check -- see `applyChoiceStates`. */
   readonly checked?: boolean;
   readonly enabled: boolean;
+  /** A checkbox, whose `checked` is written both ways; see `applyChoiceStates`. */
+  readonly checkbox?: true;
 }
 
 /** The model a setting resolves to, as a `KNOWN_MODELS` key: `IBM-` stripped, core's casing. */
@@ -271,7 +281,12 @@ export function applyChoiceStates(
   for (const st of states) {
     const item = get(st.id);
     if (item === null) continue;
-    if (st.checked === true) item.checked = true;
+    // A CHECKBOX IS WRITTEN BOTH WAYS: unchecking is its whole point, and the radio quirk above
+    // does not apply. MEASURED 2026-11-25, Electron 44 under Xvfb, through the keys seam's
+    // `menu:` step: two clicks on Highlight Bold read back `checked=true` then `checked=false`
+    // after this function's write, and the same for Fixed Cursor Color.
+    if (st.checkbox === true) item.checked = st.checked === true;
+    else if (st.checked === true) item.checked = true;
     item.enabled = st.enabled;
   }
 }
@@ -337,9 +352,95 @@ function modelMenu(
   };
 }
 
+/**
+ * What the Options menu is built from (B2 Part 2a). `main.ts` reads it off its live settings and
+ * the session each time.
+ */
+export interface OptionsMenu {
+  /** The scheme names, `SCHEME_NAMES`. */
+  readonly schemes: readonly string[];
+  /** The current scheme's canonical name. */
+  readonly scheme: string;
+  /** Whether the session draws in color now (`session.colorMode()`). The schemes need it. */
+  readonly mode3279: boolean;
+  /**
+   * The model's prefix as a choice: true 3279, false 3278. ABSENT means no Color Mode items: under
+   * `-mono`, as x3270 omits them (`menubar.c:2313`), and for a `--terminal-type` session, which has
+   * no model prefix to swap.
+   */
+  readonly colorModeChoice?: boolean;
+  /** Connected or connecting: Color Mode changes the terminal type, so it waits (`menubar.c:2319`). */
+  readonly connected: boolean;
+  readonly highlightBold: boolean;
+  readonly cursorColor: boolean;
+}
+
+const SCHEME_LABELS: Readonly<Record<string, string>> = { default: 'Default', green: 'Green' };
+
+/**
+ * Every Options item's `checked` and `enabled`, in menu order: the one source of the template and of
+ * `main.ts`'s updates, as `modelMenuStates` is for the Model menu.
+ *
+ * The schemes are enabled only in 3279 mode (x3270's Colors item, `menubar.c:2496`). The color modes
+ * are disabled while connected (`menubar.c:2319, :2325`). The checkboxes are always enabled.
+ */
+export function optionsMenuStates(o: OptionsMenu): ChoiceState[] {
+  return [
+    ...o.schemes.map((n) => ({ id: `scheme:${n}`, checked: n === o.scheme, enabled: o.mode3279 })),
+    ...(o.colorModeChoice !== undefined
+      ? [
+        { id: 'colormode:3279', checked: o.colorModeChoice, enabled: !o.connected },
+        { id: 'colormode:3278', checked: !o.colorModeChoice, enabled: !o.connected },
+      ]
+      : []),
+    { id: 'highlight-bold', checked: o.highlightBold, enabled: true, checkbox: true },
+    { id: 'cursor-color', checked: o.cursorColor, enabled: true, checkbox: true },
+  ];
+}
+
+/**
+ * The Options menu. Per-item enabled state, not a disabled submenu, for the reason `modelMenu`
+ * gives.
+ */
+function optionsMenu(o: OptionsMenu, handlers: MenuHandlers | undefined): MenuItemTemplate {
+  const states = new Map(optionsMenuStates(o).map((st) => [st.id, st]));
+  const state = (id: string) => {
+    const st = states.get(id)!;
+    return { id, checked: st.checked === true, enabled: st.enabled };
+  };
+  const click = (fn: (() => void) | undefined) => (fn !== undefined ? { click: fn } : {});
+  const onScheme = handlers?.onScheme;
+  const onColorMode = handlers?.onColorMode;
+  return {
+    label: 'Options',
+    id: 'options',
+    submenu: [
+      {
+        label: 'Color Scheme',
+        submenu: o.schemes.map((n) => ({
+          label: SCHEME_LABELS[n] ?? n, type: 'radio' as const, ...state(`scheme:${n}`),
+          ...click(onScheme !== undefined ? () => { onScheme(n); } : undefined),
+        })),
+      },
+      ...(o.colorModeChoice !== undefined
+        ? [{
+          label: 'Color Mode',
+          submenu: ([[true, '3279', '3279 color'], [false, '3278', '3278 mono']] as const).map(([c, id, label]) => ({
+            label, type: 'radio' as const, ...state(`colormode:${id}`),
+            ...click(onColorMode !== undefined ? () => { onColorMode(c); } : undefined),
+          })),
+        }]
+        : []),
+      { type: 'separator' },
+      { label: 'Highlight Bold', type: 'checkbox', ...state('highlight-bold'), ...click(handlers?.onHighlightBold) },
+      { label: 'Fixed Cursor Color', type: 'checkbox', ...state('cursor-color'), ...click(handlers?.onCursorColor) },
+    ],
+  };
+}
+
 /** The menu template for a platform. Handlers are optional so tests can inspect the shape. */
 export function buildMenuTemplate(
-  platform: Platform, handlers?: MenuHandlers, geometry?: GeometryMenu,
+  platform: Platform, handlers?: MenuHandlers, geometry?: GeometryMenu, options?: OptionsMenu,
 ): readonly MenuItemTemplate[] {
   const edit: MenuItemTemplate = {
     label: 'Edit',
@@ -422,7 +523,12 @@ export function buildMenuTemplate(
   //
   // THE MODEL MENU ONLY WITH A GEOMETRY, so a caller that passes none gets exactly the old
   // template. `main.ts` passes none for a `--terminal-type` session, which has no model to switch.
-  const menus = geometry !== undefined ? [edit, view, modelMenu(geometry, handlers?.onGeometry, handlers?.onDisconnect)] : [edit, view];
+  // THE OPTIONS MENU ONLY WITH AN `OptionsMenu`, likewise, between View and Model.
+  const menus = [
+    edit, view,
+    ...(options !== undefined ? [optionsMenu(options, handlers)] : []),
+    ...(geometry !== undefined ? [modelMenu(geometry, handlers?.onGeometry, handlers?.onDisconnect)] : []),
+  ];
   // QUIT, ON A MENU AND ON A KEY EVERY LAYOUT HAS. macOS's app menu carries Quit (Cmd-Q). Linux and
   // Windows had no Quit item at all, and Ctrl-] needs AltGr on German and French layouts, so they
   // get File -> Quit on Ctrl+Q. `quitChord.ts` ALSO quits on Ctrl-Q in every window's

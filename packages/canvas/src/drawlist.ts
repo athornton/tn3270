@@ -45,7 +45,7 @@
  */
 
 import {
-  CODE_PAGES, DEFAULT_CODE_PAGE, cp037, Color, type ResolvedCell, type ScreenSnapshot,
+  CODE_PAGES, DEFAULT_CODE_PAGE, cp037, Color, type ResolvedCell, type Rgb, type ScreenSnapshot,
 } from '@tn3270/core';
 import { schemeRgb, type Scheme } from '@tn3270/frontend';
 import { ebcdicToCg, column } from './cg.js';
@@ -69,6 +69,24 @@ export interface DrawList {
   };
   readonly width: number;
   readonly height: number;
+  /**
+   * The cursor bar's color when fixed, x3270's `useCursorColor`; absent means the cursor cell's
+   * own foreground, x3270's default. A list field rather than a cell field because there is one
+   * cursor; `blit.ts` reads it.
+   */
+  readonly cursorColor?: Rgb;
+}
+
+/**
+ * x3270's `cursorColor` default, the X11 name `red` (`x3270/resources.c:240-241`), used when
+ * `useCursorColor` is on (`:258-259`, off by default). X11 red, not the scheme's red: x3270
+ * allocates the name, not a 3279 color.
+ */
+export const FIXED_CURSOR_RGB: Rgb = Object.freeze([255, 0, 0] as const);
+
+/** `drawList`'s options. `cursorColor`: draw the cursor in `FIXED_CURSOR_RGB`. */
+export interface DrawListOptions {
+  readonly cursorColor?: boolean;
 }
 
 /** EBCDIC space, which is what a hidden cell draws instead of its own character. */
@@ -108,6 +126,8 @@ export function drawList(
   atlas: AtlasGeometry,
   scheme: Scheme,
   oiaText?: string,
+  // SIXTH, after `oiaText`, for the positional reason given above `scheme`.
+  opts: DrawListOptions = {},
 ): DrawList {
   const blank = column(atlas, ebcdicToCg(EBCDIC_SPACE));
   const toCp037 = cp037Bytes(snapshot.codePage);
@@ -133,7 +153,7 @@ export function drawList(
       cursor: i === snapshot.cursor,
       underline: r.underscore,
       blink: r.blink,
-      intensify: r.intensify,
+      intensify: r.bold,
     });
   }
 
@@ -150,6 +170,7 @@ export function drawList(
         },
       }
       : {}),
+    ...(opts.cursorColor === true ? { cursorColor: FIXED_CURSOR_RGB } : {}),
     width: snapshot.cols * atlas.cellWidth,
     // SCREEN PLUS THE OIA's ROW, AND NOTHING ELSE NOW. A `keypadY + keypad.height` branch was here
     // until 2026-10-06 and the keypad was the only thing that ever made the drawing taller than
