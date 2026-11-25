@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   resolveTerminalType, resolveAlternateSize, KNOWN_MODELS, TerminalTypeError, parseModel, isColorModel,
+  withColorMode,
 } from '../src/termtype.js';
 import { TERMINAL_TYPE } from '../src/constants.js';
 
@@ -159,5 +160,32 @@ describe('x3270 model names and advertising (model.c canonical_model_x, telnet.c
   it('the alternate size follows the number, whatever the prefix', () => {
     expect(resolveAlternateSize({ model: '3279-4-E' })).toEqual(resolveAlternateSize({ model: '3278-4-E' }));
     expect(resolveAlternateSize({ model: '5' })).toEqual(resolveAlternateSize({ model: '3278-5' }));
+  });
+});
+
+describe('withColorMode: swap the 3278/3279 prefix (x3270 m3278/m3279 options)', () => {
+  it('no model is the default, 3279-2-E, swapped', () => {
+    expect(withColorMode(undefined, false)).toBe('3278-2-E');
+    expect(withColorMode(undefined, true)).toBe(TERMINAL_TYPE.replace(/^IBM-/, ''));
+  });
+  it('swaps either way and keeps the number and -E', () => {
+    expect(withColorMode('3279-4-E', false)).toBe('3278-4-E');
+    expect(withColorMode('3278-3', true)).toBe('3279-3');
+    expect(withColorMode('3279-5', true)).toBe('3279-5');
+  });
+  it('a bare number takes the prefix', () => {
+    expect(withColorMode('4', false)).toBe('3278-4');
+    expect(withColorMode('4', true)).toBe('3279-4');
+  });
+  it('folds case and IBM- to the canonical name', () => {
+    expect(withColorMode('ibm-3278-2-e', true)).toBe('3279-2-E');
+  });
+  it('refuses a name parseModel refuses', () => {
+    expect(() => withColorMode('3277-2', true)).toThrow(TerminalTypeError);
+  });
+  it('every result is a KNOWN_MODELS key', () => {
+    for (const m of [undefined, ...Object.keys(KNOWN_MODELS), '2', '5']) {
+      for (const c of [true, false]) expect(Object.keys(KNOWN_MODELS)).toContain(withColorMode(m, c));
+    }
   });
 });

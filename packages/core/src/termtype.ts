@@ -146,6 +146,19 @@ export function isColorModel(opts: TerminalTypeOptions): boolean {
   return parseModel(opts.model)?.color ?? true;
 }
 
+/**
+ * The model with its color-mode prefix swapped: `3279` for color, `3278` for mono, keeping the
+ * number and `-E`. What x3270's Options -> 3278/3279 items do to the model (`menubar.c:2310-2328`,
+ * `toggle_m3279`). No model is the default (`TERMINAL_TYPE`); the result is always a canonical
+ * `KNOWN_MODELS` key. A name `parseModel` refuses throws.
+ */
+export function withColorMode(model: string | undefined, color: boolean): string {
+  const name = model ?? TERMINAL_TYPE.replace(/^IBM-/, '');
+  const p = parseModel(name);
+  if (p === undefined) throw new TerminalTypeError(`unknown model "${name}"`);
+  return `327${color ? '9' : '8'}-${p.number}${p.extended ? '-E' : ''}`;
+}
+
 export function resolveTerminalType(opts: TerminalTypeOptions): string {
   if (opts.terminalType !== undefined) {
     if (opts.terminalType.length === 0) {
