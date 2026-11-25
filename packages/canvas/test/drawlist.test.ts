@@ -87,10 +87,21 @@ describe('drawList', () => {
     const s = screenWith([[0, 0xc1]]);
     const snap = s.snapshot();
     const flagged = resolve(snap).map((c, i): ResolvedCell =>
-      (i === 0 ? { ...c, blink: true, intensify: true, underscore: true } : c));
+      (i === 0 ? { ...c, blink: true, bold: true, underscore: true } : c));
     expect(drawList(snap, flagged, atlas, SCHEMES.default!).cells[0]).toMatchObject({
       blink: true, intensify: true, underline: true,
     });
+  });
+
+  it("draws the overstrike from resolve's bold, not from the wire's intensify", () => {
+    // `bold` is x3270's drawing rule (an intensified field in mono, or with highlightBold);
+    // `intensify` is only the highlight byte, so drawing from it loses mono's bold fields.
+    const s = screenWith([[0, 0xc1], [1, 0xc2]]);
+    const snap = s.snapshot();
+    const cells = resolve(snap).map((c, i): ResolvedCell =>
+      (i === 0 ? { ...c, bold: true, intensify: false } : i === 1 ? { ...c, bold: false, intensify: true } : c));
+    const dl = drawList(snap, cells, atlas, SCHEMES.default!);
+    expect([dl.cells[0]!.intensify, dl.cells[1]!.intensify]).toEqual([true, false]);
   });
 
   it('falls back to boxsolid for a byte with no glyph, not to a neighbor', () => {

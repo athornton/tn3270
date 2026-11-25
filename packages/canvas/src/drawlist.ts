@@ -133,7 +133,7 @@ export function drawList(
       cursor: i === snapshot.cursor,
       underline: r.underscore,
       blink: r.blink,
-      intensify: r.intensify,
+      intensify: r.bold,
     });
   }
 

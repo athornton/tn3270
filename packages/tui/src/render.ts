@@ -486,7 +486,7 @@ export class TerminalRenderer {
     if (cell.blink) params.push('5');
     if (cell.reverse) params.push('7');
     if (cell.underscore) params.push('4');
-    if (cell.intensify) params.push('1');
+    if (cell.bold) params.push('1');   // resolve's drawing rule, not the wire's intensify
     const fg = sgrFor(cell.fg, this.depth, 'fg', this.scheme);
     const bg = sgrFor(cell.bg, this.depth, 'bg', this.scheme);
     if (fg) params.push(fg);
@@ -498,6 +498,6 @@ export class TerminalRenderer {
 function sameCell(a: ResolvedCell, b: ResolvedCell): boolean {
   return a.text === b.text && a.fg === b.fg && a.bg === b.bg
     && a.blink === b.blink && a.reverse === b.reverse
-    && a.underscore === b.underscore && a.intensify === b.intensify
+    && a.underscore === b.underscore && a.intensify === b.intensify && a.bold === b.bold
     && a.hidden === b.hidden;
 }

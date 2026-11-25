@@ -476,7 +476,7 @@ describe('TerminalRenderer', () => {
     // attribute. At depth 0 the `want || '0'` fallback already emitted a reset, which
     // is why the monochrome case hid this for so long -- test the color depths too.
     for (const depth of [0, 16, 256] as const) {
-      for (const flag of ['reverse', 'blink', 'underscore', 'intensify'] as const) {
+      for (const flag of ['reverse', 'blink', 'underscore', 'bold'] as const) {
         const r = new TerminalRenderer({ rows: 2, cols: 3, depth, scheme: resolveScheme() });
         const cells = grid('ABCDEF');
         cells[0]![flag] = true;
@@ -486,6 +486,35 @@ describe('TerminalRenderer', () => {
           .toMatch(/(^|[;[])(0|2[2457])([;m])/);
       }
     }
+  });
+
+  it("emits SGR 1 for resolve's bold, and not for the wire's intensify alone", () => {
+    // SGR sequences only (`...m`): `ESC[1;1H` is a cursor position, not bold.
+    // A real parameter walk: `38;5;N` and `48;5;N` carry an index that may itself be 1.
+    const sgr1 = (out: string) => [...out.matchAll(/\x1b\[([0-9;]*)m/g)].some((m) => {
+      const ps = m[1]!.split(';');
+      for (let i = 0; i < ps.length; i++) {
+        if ((ps[i] === '38' || ps[i] === '48') && ps[i + 1] === '5') { i += 2; continue; }
+        if (ps[i] === '1') return true;
+      }
+      return false;
+    });
+    const on = grid('ABCDEF');
+    on[0]!.bold = true;
+    expect(sgr1(new TerminalRenderer({ rows: 2, cols: 3, depth: 256, scheme: resolveScheme() })
+      .paint(on, 0, 's'))).toBe(true);
+    const wire = grid('ABCDEF');
+    wire[0]!.intensify = true;
+    expect(sgr1(new TerminalRenderer({ rows: 2, cols: 3, depth: 256, scheme: resolveScheme() })
+      .paint(wire, 0, 's'))).toBe(false);
+  });
+
+  it('repaints a cell whose only change is bold', () => {
+    const r = new TerminalRenderer({ rows: 2, cols: 3, depth: 256, scheme: resolveScheme() });
+    r.paint(grid('ABCDEF'), 0, 's');
+    const next = grid('ABCDEF');
+    next[0]!.bold = true;
+    expect(r.paint(next, 0, 's')).toContain('A');
   });
 
   it('emits the highlighting attributes it supports', () => {

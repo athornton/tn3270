@@ -47,5 +47,10 @@ export interface DrawCell {
   readonly cursor: boolean;
   readonly underline: boolean;
   readonly blink: boolean;
+  /**
+   * Draw the overstrike (`blit.ts`). From core's `ResolvedCell.bold` -- x3270's drawing rule,
+   * which includes an intensified FIELD in mono or with highlightBold -- not from the wire-only
+   * `ResolvedCell.intensify`, whose name this field predates.
+   */
   readonly intensify: boolean;
 }
