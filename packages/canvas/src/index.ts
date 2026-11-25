@@ -15,8 +15,8 @@
  * renderer's graph, and this file is outside it precisely because the renderer does not import
  * it.
  */
-export { drawList } from './drawlist.js';
-export type { DrawList } from './drawlist.js';
+export { drawList, FIXED_CURSOR_RGB } from './drawlist.js';
+export type { DrawList, DrawListOptions } from './drawlist.js';
 // The two shapes every drawing module here shares, from the LEAF module that declares them. They
 // were `drawlist.ts`'s, and consumers outside this package are unaffected by the move: they take
 // them from this barrel, which is the only import path `packages/gui` and `packages/web` use.

@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { Screen, resolve, Color, cp037, type ResolvedCell } from '@tn3270/core';
 import { SCHEMES, schemeRgb, type Scheme } from '@tn3270/frontend';
-import { drawList } from '../src/drawlist.js';
+import { drawList, FIXED_CURSOR_RGB } from '../src/drawlist.js';
 import type { AtlasGeometry } from '../src/geometry.js';
 import { ebcdicToCg, CG_BOXSOLID, column } from '../src/cg.js';
 
@@ -91,6 +91,16 @@ describe('drawList', () => {
     expect(drawList(snap, flagged, atlas, SCHEMES.default!).cells[0]).toMatchObject({
       blink: true, intensify: true, underline: true,
     });
+  });
+
+  it('carries a fixed cursor color only when asked: X11 red, x3270 cursorColor', () => {
+    const s = screenWith([[0, 0xc1]]);
+    const snap = s.snapshot();
+    expect(FIXED_CURSOR_RGB).toEqual([255, 0, 0]);
+    expect(drawList(snap, resolve(snap), atlas, SCHEMES.default!, undefined, { cursorColor: true }).cursorColor)
+      .toEqual([255, 0, 0]);
+    expect('cursorColor' in drawList(snap, resolve(snap), atlas, SCHEMES.default!)).toBe(false);
+    expect('cursorColor' in drawList(snap, resolve(snap), atlas, SCHEMES.default!, undefined, {})).toBe(false);
   });
 
   it("draws the overstrike from resolve's bold, not from the wire's intensify", () => {
