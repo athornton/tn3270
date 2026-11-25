@@ -2076,3 +2076,31 @@ describe('-oversize auto: a resize says when it applies', () => {
     expect(h.host.errors).toEqual([]);
   });
 });
+
+describe('highlightBold reaches resolve (B2 Part 2a)', () => {
+  // An intensified field in 3279 mode: SGR 1 only with highlightBold.
+  const paint = (highlightBold: boolean | undefined): string => {
+    const session = makeSession();
+    session.screen.setFieldAttribute(0, 0x08);   // FA intensity 10: intensified
+    session.screen.setChar(1, 0xc1);
+    const app = new App({
+      session, stdin: new FakeStdin(), stdout: new FakeStdout(25, 80), host: new FakeHost(), depth: 256,
+      ...(highlightBold !== undefined ? { highlightBold } : {}),
+    });
+    const out = (app as unknown as { stdout: FakeStdout }).stdout;
+    app.start();
+    return out.written.join('');
+  };
+  const bold = (s: string) => [...s.matchAll(/\x1b\[([0-9;]*)m/g)].some((m) => {
+    const ps = m[1]!.split(';');
+    for (let i = 0; i < ps.length; i++) {
+      if ((ps[i] === '38' || ps[i] === '48') && ps[i + 1] === '5') { i += 2; continue; }
+      if (ps[i] === '1') return true;
+    }
+    return false;
+  });
+  it('bold with it, not without', () => {
+    expect(bold(paint(true))).toBe(true);
+    expect(bold(paint(undefined))).toBe(false);
+  });
+});

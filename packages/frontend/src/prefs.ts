@@ -26,6 +26,7 @@ const COMMON: readonly PrefKey[] = [
   { key: 'codepage', flag: '-codepage', aliases: ['-charset'], type: 'string' },
   { key: 'visualbell', flag: '-visualbell', type: 'bare' },
   { key: 'mono', flag: '-mono', type: 'bare' },
+  { key: 'highlightbold', flag: '-highlightbold', type: 'bare' },
   { key: 'tn3270e', flag: '-tn3270e', type: 'onoff' },
   { key: 'bind-image', flag: '-bind-image', type: 'onoff' },
   { key: 'bind-limit', flag: '-bind-limit', type: 'onoff' },
@@ -33,7 +34,8 @@ const COMMON: readonly PrefKey[] = [
   { key: 'cafile', flag: '-cafile', type: 'string' },
 ];
 
-export const GUI_PREF_KEYS: readonly PrefKey[] = COMMON;
+// `cursorcolor` is the GUI's alone: a terminal draws its own cursor (the B2 spec's flag table).
+export const GUI_PREF_KEYS: readonly PrefKey[] = [...COMMON, { key: 'cursorcolor', flag: '-cursorcolor', type: 'bare' }];
 export const TUI_PREF_KEYS: readonly PrefKey[] = [...COMMON, { key: 'colors', flag: '--colors', type: 'number' }];
 
 /** Keys refused with a reason rather than merely unknown (spec section 2). */

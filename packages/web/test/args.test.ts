@@ -302,3 +302,12 @@ describe('-mono', () => {
     expect(session.colorMode()).toBe(false);
   });
 });
+
+describe('-highlightbold and -cursorcolor', () => {
+  it('sets each for every gateway session, absent by default', () => {
+    const a = parseWebArgs(['-highlightbold', '-cursorcolor', '127.0.0.1:3270']);
+    expect([a.highlightBold, a.cursorColor]).toEqual([true, true]);
+    const b = parseWebArgs(['127.0.0.1:3270']);
+    expect([b.highlightBold, b.cursorColor]).toEqual([undefined, undefined]);
+  });
+});

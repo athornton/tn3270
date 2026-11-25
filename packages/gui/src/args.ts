@@ -3,7 +3,7 @@ import {
   type CodePage, type GeometrySetting, type Oversize, type Session, type Size,
 } from '@tn3270/core';
 import {
-  codePageFlag, defaultSession, resolveHostSpec, takeTlsFlag, takeOversizeFlag, resolveTls, resolveScheme, SCHEME_NAMES,
+  codePageFlag, defaultSession, resolveHostSpec, takeTlsFlag, takeOversizeFlag, resolveTls, resolveScheme, canonicalSchemeName, SCHEME_NAMES,
   OVERSIZE_USAGE, TLS_USAGE, type TlsFlags, type TlsOptions, type Scheme,
 } from '@tn3270/frontend';
 
@@ -78,6 +78,12 @@ export interface GuiArgs {
   codePage?: CodePage;
   /** `-mono`: every model is a mono 3278 (x3270's -mono). */
   mono?: boolean;
+  /** `-scheme`'s canonical name (`canonicalSchemeName`), kept for About and saving. */
+  schemeName?: string;
+  /** `-highlightbold`: draw intensified fields bold in 3279 mode (x3270's highlightBold). */
+  highlightBold?: boolean;
+  /** `-cursorcolor`: a fixed red cursor (x3270's useCursorColor). */
+  cursorColor?: boolean;
   /**
    * `-oversize <cols>x<rows>|auto|none`. Absent means `none`: the model's own alternate size.
    * `auto` is allowed, as in the TUI: the display is measured at every connect (`measure.ts`).
@@ -94,7 +100,7 @@ export interface GuiArgs {
 
 export const USAGE =
   `usage: tn3270-gui [-model M] [--terminal-type T] [-scheme S] [-tn3270e on|off] `
-  + `[-bind-image on|off] [-bind-limit on|off] [-ddm on|off] [-devname NAME] [-codepage|-charset NAME] [-mono] [-visualbell] `
+  + `[-bind-image on|off] [-bind-limit on|off] [-ddm on|off] [-devname NAME] [-codepage|-charset NAME] [-mono] [-highlightbold] [-cursorcolor] [-visualbell] `
   + `${OVERSIZE_USAGE} ${TLS_USAGE} [prefix:][LU,LU@]host[:port]`;
 
 export function parseGuiArgs(argv: readonly string[]): GuiArgs {
@@ -137,6 +143,7 @@ export function parseGuiArgs(argv: readonly string[]): GuiArgs {
         // so the front end reports it the same way it reports every other bad flag.
         try {
           args.scheme = resolveScheme(value);
+          args.schemeName = canonicalSchemeName(value);
         } catch (err) {
           throw new UsageError(err instanceof Error ? err.message : String(err));
         }
@@ -179,6 +186,12 @@ export function parseGuiArgs(argv: readonly string[]): GuiArgs {
       }
       case '-mono':
         args.mono = true;
+        break;
+      case '-highlightbold':
+        args.highlightBold = true;
+        break;
+      case '-cursorcolor':
+        args.cursorColor = true;
         break;
       case '-codepage':
       case '-charset':

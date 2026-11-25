@@ -103,3 +103,21 @@ describe('the mono key', () => {
     expect(argvToPrefs(['-mono', 'vm'], TUI_PREF_KEYS)).toEqual({ mono: true });
   });
 });
+
+describe('B2 Part 2a keys', () => {
+  const key = (keys: typeof GUI_PREF_KEYS, k: string) => keys.find((d) => d.key === k);
+  it('highlightbold is a bare key for the GUI and the TUI', () => {
+    for (const keys of [GUI_PREF_KEYS, TUI_PREF_KEYS]) {
+      expect(key(keys, 'highlightbold')).toEqual({ key: 'highlightbold', flag: '-highlightbold', type: 'bare' });
+    }
+  });
+  it('cursorcolor is a bare key for the GUI only: a terminal draws its own cursor', () => {
+    expect(key(GUI_PREF_KEYS, 'cursorcolor')).toEqual({ key: 'cursorcolor', flag: '-cursorcolor', type: 'bare' });
+    expect(key(TUI_PREF_KEYS, 'cursorcolor')).toBeUndefined();
+  });
+  it('both round-trip', () => {
+    const argv = prefsToArgv({ highlightbold: true, cursorcolor: true }, GUI_PREF_KEYS).argv;
+    expect(argv).toEqual(['-highlightbold', '-cursorcolor']);
+    expect(argvToPrefs(argv, GUI_PREF_KEYS)).toEqual({ highlightbold: true, cursorcolor: true });
+  });
+});

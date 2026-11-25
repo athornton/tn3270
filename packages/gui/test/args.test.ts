@@ -471,3 +471,20 @@ describe('-mono', () => {
     expect(buildSession(parseGuiArgs(['vm']), none).colorMode()).toBe(true);
   });
 });
+
+describe('-highlightbold, -cursorcolor and the scheme name', () => {
+  it('sets each, absent by default', () => {
+    const a = parseGuiArgs(['-highlightbold', '-cursorcolor', 'vm']);
+    expect([a.highlightBold, a.cursorColor]).toEqual([true, true]);
+    const b = parseGuiArgs(['vm']);
+    expect([b.highlightBold, b.cursorColor, b.schemeName]).toEqual([undefined, undefined, undefined]);
+  });
+  it('-scheme records the canonical name beside the scheme', () => {
+    expect(parseGuiArgs(['-scheme', 'GreenScreen', 'vm']).schemeName).toBe('green');
+  });
+  it('both from the file', () => {
+    const file = prefsToArgv({ highlightbold: true, cursorcolor: true }, GUI_PREF_KEYS).argv;
+    const a = parseGuiArgs([...file, 'vm']);
+    expect([a.highlightBold, a.cursorColor]).toEqual([true, true]);
+  });
+});

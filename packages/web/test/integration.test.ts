@@ -416,6 +416,27 @@ describe('the gateway end to end', () => {
     ws.close();
   });
 
+  it('-cursorcolor and -highlightbold reach the frame (B2 Part 2a)', async () => {
+    const frame = async (extra: string[]) => {
+      const { url } = await start(extra);
+      const ws = new WebSocket(url);
+      await new Promise((r) => ws.addEventListener('open', r, { once: true }));
+      const messages = collect(ws, 4);
+      ws.send(JSON.stringify({ kind: 'hello' }));
+      const list = (await messages)[3]!['list'] as { cells: { intensify: boolean }[]; cursorColor?: unknown };
+      ws.close();
+      stop?.();
+      return list;
+    };
+    const plain = await frame([]);
+    const set = await frame(['-cursorcolor', '-highlightbold']);
+    expect('cursorColor' in plain).toBe(false);
+    expect(set.cursorColor).toEqual([255, 0, 0]);
+    const bold = (l: typeof plain) => l.cells.filter((c) => c.intensify).length;
+    // The replayed screen has intensified fields, which only highlightBold draws bold in 3279 mode.
+    expect(bold(set)).toBeGreaterThan(bold(plain));
+  });
+
   it('applies an action and sends a new frame', async () => {
     const { url } = await start();
     const ws = new WebSocket(url);

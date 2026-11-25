@@ -102,6 +102,10 @@ export interface WebArgs {
   readonly codePage?: CodePage;
   /** `-mono`: every session this gateway serves is a mono 3278. */
   readonly mono?: boolean;
+  /** `-highlightbold`: intensified fields bold in 3279 mode, every session (x3270's highlightBold). */
+  readonly highlightBold?: boolean;
+  /** `-cursorcolor`: a fixed red cursor, every session (x3270's useCursorColor). */
+  readonly cursorColor?: boolean;
   /**
    * `-oversize <cols>x<rows>|auto|none`. Absent means `none`. `auto` is allowed: the gateway's
    * window is each BROWSER's viewport, sent in `hello` and on every resize and measured at scale 1
@@ -152,7 +156,7 @@ function nonNegativeInt(raw: string, flag: string): number {
 export const USAGE = 'usage: tn3270-web [--bind ADDR] [--listen PORT] [--token TOKEN] [--auth on|off] '
   + '[--allow-origin ORIGIN]... [--grace SECONDS] [--max-sessions N] [--tls-cert FILE --tls-key FILE '
   + '[--tls-chain FILE]] [--replay TRACE] [--log-actions] [-model M] [-scheme S] [-bind-image on|off] '
-  + '[-bind-limit on|off] [-ddm on|off] [-devname NAME] [-codepage|-charset NAME] [-mono] [-visualbell] '
+  + '[-bind-limit on|off] [-ddm on|off] [-devname NAME] [-codepage|-charset NAME] [-mono] [-highlightbold] [-cursorcolor] [-visualbell] '
   + `${OVERSIZE_USAGE} ${TLS_USAGE} [prefix:][LU,LU@]host[:port]`;
 
 export function parseWebArgs(argv: readonly string[]): WebArgs {
@@ -180,6 +184,8 @@ export function parseWebArgs(argv: readonly string[]): WebArgs {
   let devname: string | undefined;
   let codePage: CodePage | undefined;
   let mono: boolean | undefined;
+  let highlightBold: boolean | undefined;
+  let cursorColor: boolean | undefined;
   let visualBell: boolean | undefined;
   const geometry: { oversize?: Oversize } = {};
 
@@ -240,6 +246,8 @@ export function parseWebArgs(argv: readonly string[]): WebArgs {
       }
       case '-devname': devname = value(args, i, a); i += 1; continue;
       case '-mono': mono = true; continue;
+      case '-highlightbold': highlightBold = true; continue;
+      case '-cursorcolor': cursorColor = true; continue;
       case '-codepage':
       case '-charset':
         codePage = codePageFlag(a, args[i + 1], (m) => new UsageError(m)); i += 1; continue;
@@ -341,6 +349,8 @@ export function parseWebArgs(argv: readonly string[]): WebArgs {
     ...(devname === undefined ? {} : { devname }),
     ...(codePage === undefined ? {} : { codePage }),
     ...(mono === undefined ? {} : { mono }),
+    ...(highlightBold === undefined ? {} : { highlightBold }),
+    ...(cursorColor === undefined ? {} : { cursorColor }),
     ...(oversize === undefined ? {} : { oversize }),
     ...(visualBell === undefined ? {} : { visualBell }),
   };

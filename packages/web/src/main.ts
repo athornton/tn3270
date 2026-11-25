@@ -295,8 +295,8 @@ export function buildServer(args: WebArgs) {
             // NO KEYPAD ARGUMENT ANY MORE: the web keypad is a DOM overlay the browser builds and
             // toggles itself, so there is nothing for this side to draw or to remember per socket.
             // A `showKeypad` boolean lived here, closed over so a toggle needed only a repaint.
-            list: drawList(snapshot, resolve(snapshot), atlas.geometry, scheme,
-              oia === '' ? undefined : oia),
+            list: drawList(snapshot, resolve(snapshot, { highlightBold: args.highlightBold === true }),
+              atlas.geometry, scheme, oia === '' ? undefined : oia, { cursorColor: args.cursorColor === true }),
           }));
         };
         mine.on('screen', send);

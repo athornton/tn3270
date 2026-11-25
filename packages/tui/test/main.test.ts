@@ -519,3 +519,14 @@ describe('-mono', () => {
     expect(buildSession(parseArgs(['-mono', 'vm']), term as never).colorMode()).toBe(false);
   });
 });
+
+describe('-highlightbold', () => {
+  it('sets highlightBold, absent by default, and from the file', () => {
+    expect(parseArgs(['-highlightbold', 'vm']).highlightBold).toBe(true);
+    expect(parseArgs(['vm']).highlightBold).toBeUndefined();
+    expect(parseArgs([...prefsToArgv({ highlightbold: true }, TUI_PREF_KEYS).argv, 'vm']).highlightBold).toBe(true);
+  });
+  it('has no -cursorcolor: a terminal draws its own cursor', () => {
+    expect(() => parseArgs(['-cursorcolor', 'vm'])).toThrow(UsageError);
+  });
+});
