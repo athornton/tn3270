@@ -861,7 +861,7 @@ async function startSession(
   // Before any connect, so the first connect's notice is printed too -- see the function.
   printGeometryNotices(session, process.stderr);
   const modelNote = monoModelNotice(args.model);
-  if (modelNote !== undefined) { process.stderr.write(`${modelNote}\n`); fail(modelNote); }
+  if (modelNote !== undefined) fail(modelNote);   // fail() also writes stderr
 
   /**
    * The atlas is read HERE and shipped over IPC, not fetched by the renderer.

@@ -70,7 +70,7 @@ stand-ins for both and launches them on every run (`scripts/store-probe.mjs`; `d
 *Store probe*). The NSIS `.exe` stays on the GitHub release for people who prefer it.
 
 **Starting `tn3270-gui` with no host opens a Connect dialog**: host (the same
-`[prefix:][LU,LU@]host[:port]` the command line takes), model (default `3278-2-E`), and a TLS
+`[prefix:][LU,LU@]host[:port]` the command line takes), model (default `3279-2-E`), and a TLS
 checkbox (on by default; untick it for a plaintext host such as Hercules). **It stays open until a
 connect succeeds.** While an attempt is in flight its error line shows `Connecting to
 HOST:PORT...`, for up to the 30-second connect deadline, plus with TLS on the 10-second
@@ -103,7 +103,7 @@ size. Commit the PNGs with any change to the SVG.
 **A usable terminal client, driven interactively against both live hosts.**
 
 ```sh
-node packages/tui/dist/main.js -insecure -model 3278-2-E 127.0.0.1:3271
+node packages/tui/dist/main.js -insecure -model 3279-2-E 127.0.0.1:3271
 ```
 
 `-insecure` is there because TLS is on by default and Hercules cannot speak it; against
@@ -126,7 +126,7 @@ window in the GUI and an overlay in the browser. Live witnesses: the CLI, the TU
 GUI's window on both hosts (the GUI over CUT on VM and DFT on TSO), and the browser on VM over CUT
 only; DFT from a browser is still owed. **The host chooses the protocol**: DDM
 is advertised by default, so a DFT-capable host (TSO) picks DFT, and `-ddm off` forces CUT (see
-*Using the CLI*). CUT needs a 24x80 screen; DFT works at any size, so a `-model 3278-4-E` session
+*Using the CLI*). CUT needs a 24x80 screen; DFT works at any size, so a `-model 3279-4-E` session
 can transfer only over DFT. One host quirk: **CMS ignores `Lrecl` for `Recfm=V`**, while TSO
 honors it as a maximum, so a `V 80` readback on CMS does not confirm the field took effect. See
 *File transfer (IND$FILE)* and *Verification*.
@@ -193,12 +193,12 @@ described under *Installing*.
 ## Using the GUI
 
 ```sh
-tn3270-gui -insecure -model 3278-4-E HOST:PORT          # installed from npm
+tn3270-gui -insecure -model 3279-4-E HOST:PORT          # installed from npm
 npm run build                                           # or from a checkout
-./node_modules/.bin/electron packages/gui/dist/main.js -insecure -model 3278-4-E HOST:PORT
+./node_modules/.bin/electron packages/gui/dist/main.js -insecure -model 3279-4-E HOST:PORT
 ```
 
-**The window title names the host first**, for example `vm.example:3270 [LU01] — TN3270 3278-2-E`,
+**The window title names the host first**, for example `vm.example:3270 [LU01] — TN3270 3279-2-E`,
 or `TN3270 — not connected`, so several windows stay distinguishable in a taskbar that truncates.
 **Help → About TN3270** (the app menu's About on macOS) shows the version, the configuration (model,
 terminal type, code page and CGCSGID, scheme) and the live connection status (host, LU, TLS,
@@ -211,7 +211,7 @@ to `preferences.json` in the app's data directory (`~/.config/TN3270/` on Linux,
 `~/Library/Application Support/TN3270/` on macOS, `%APPDATA%\TN3270\` on Windows), and the next
 launch starts from them. That includes a model chosen in the Model menu, which the Connect dialog
 then offers as its default. It's a flat JSON object keyed by flag name, e.g.
-`{"model": "3278-4-E", "scheme": "green", "codepage": "cp037", "visualbell": true}`. The stored
+`{"model": "3279-4-E", "scheme": "green", "codepage": "cp037", "visualbell": true}`. The stored
 keys are `model`, `oversize`, `scheme`, `codepage`, `visualbell`, `tn3270e`, `bind-image`,
 `bind-limit`, `ddm` and `cafile`. A flag on the command line beats the file. **`-insecure`,
 `-noverifycert`, the host and `-devname` are never stored**: a saved TLS weakening would apply to
@@ -562,7 +562,7 @@ node packages/tui/dist/main.js [-model M] [--terminal-type T] [--colors N] [-sch
 Windows), and later runs start from them. It has the same keys and rules as the GUI's
 `preferences.json` (see *Using the GUI*), plus `colors`.
 
-`-model 3278-2-E` is usually what you want: TSO rejects a plain `IBM-3278-2`. Port
+`-model 3279-2-E` is usually what you want: TSO rejects a plain `IBM-3279-2`. Port
 defaults to 23. Models 2–5 are accepted, with or without `-E`; see *Screen models*.
 `--colors` takes `0|8|16|256|16m|auto`, where `auto` asks terminfo and
 `0` is monochrome because you said so — the distinction matters, since it is how the
@@ -577,12 +577,12 @@ TUI's counterpart of the GUI's Connect dialog:
 ```
 $ tn3270
 Host: hercules:3270
-Model [3278-2-E]:
+Model [3279-2-E]:
 TLS [Y/n]:
 Connecting to hercules:3270...
 Answer n to TLS: hercules:3270 accepted the connection but never completed a TLS handshake, ...
 Host [hercules:3270]:
-Model [3278-2-E]:
+Model [3279-2-E]:
 TLS [Y/n]: n
 Connecting to hercules:3270...
 ```
@@ -716,6 +716,13 @@ reference to.
 `-E` is an extended-data-stream claim, not a size: `3278-4` and `3278-4-E` have identical
 geometry.
 
+**The model's prefix is the color mode, as in x3270** (since 2026-11-24): `3279-N` (and a bare `N`)
+is a color 3279, `3278-N` a mono 3278 drawn in green, and `-mono` makes any model mono. A color
+model 2 or 3 is advertised as `IBM-3279-N` and everything else as `IBM-3278-N`, x3270's
+`create_3270_termtype`. **The default is `3279-2-E`** (`IBM-3279-2-E`, accepted by TSO and VM/370
+alike). An explicit `3278-` model used to draw in color; it now means mono, and the first one in a
+run says so and names the color form.
+
 Observed live on VM/370: the host sends Erase/Write for its logo at 24×80, then
 Erase/Write Alternate to move to 43×80 — the architected sequence, both halves in one
 session.
@@ -734,7 +741,7 @@ by 160 columns**. Our own messages say a size in words ("62 rows by 160 columns"
 repeat that order. Absent, or `none`, means the model's own alternate size, as before.
 
 ```sh
-node packages/tui/dist/main.js -insecure -model 3278-4-E -oversize 160x62 HOST:PORT
+node packages/tui/dist/main.js -insecure -model 3279-4-E -oversize 160x62 HOST:PORT
 node packages/tui/dist/main.js -insecure -oversize auto HOST:PORT
 ```
 
@@ -742,7 +749,7 @@ node packages/tui/dist/main.js -insecure -oversize auto HOST:PORT
 and the size itself goes to the host in the Query Reply (Usable Area and Implicit Partition).
 The default size stays 24x80; the oversize is the ALTERNATE, so a host still reaches it with
 Erase/Write Alternate. **It needs an extended (`-E`) model**, since a Query Reply is part of the
-extended data stream. The default with no `-model` is `3278-2-E`, which already is one.
+extended data stream. The default with no `-model` is `3279-2-E`, which already is one.
 A BIND is bounded by the oversize rather than the model; see `-bind-limit` under *TN3270E*.
 
 **`auto` measures the window, at each connect and reconnect only:**
@@ -773,7 +780,7 @@ fewer rows, which is noted in the trace only, not on stderr.
 **Refused before anything connects**, with a usage error:
 
 - `-oversize` together with `--terminal-type`, since an oversize is advertised as `IBM-DYNAMIC`;
-- a non-`-E` model (`use -model 3278-4-E`). x3270 drops the oversize silently here; we refuse;
+- a non-`-E` model (`use -model 3279-4-E`). x3270 drops the oversize silently here; we refuse;
 - a fixed size below the model's alternate (`160x20` on any model; `100x40` on a model 4, which
   is 43 rows);
 - more than 16383 cells, the 14-bit address limit;
@@ -820,7 +827,7 @@ test certificate, and a proxy to put TLS in front of a host that lacks it:
 node packages/cli/scripts/gen-test-certs.mjs /tmp/certs
 node packages/cli/scripts/tls-proxy.mjs --to 127.0.0.1:3271 --listen 19271 \
     --cert /tmp/certs/cert.pem --key /tmp/certs/key.pem
-node packages/tui/dist/main.js -model 3278-2-E -cafile /tmp/certs/cert.pem 127.0.0.1:19271
+node packages/tui/dist/main.js -model 3279-2-E -cafile /tmp/certs/cert.pem 127.0.0.1:19271
 ```
 
 **A plaintext host does not refuse TLS — it goes quiet.** Hercules sends
@@ -1042,7 +1049,7 @@ session started with `--terminal-type`, which has no model or oversize to change
 oversize** to make the pair fit: those two front ends apply `applyGeometryChoice`'s reset rule
 for a one-field pick, but `Set()`'s own model-and-oversize validation (above) means a model given
 without its oversize is checked against whatever oversize is already set and refused outright if
-the pair does not fit — give both in one call instead, e.g. `Set(model,3278-5-E,oversize,none)`.
+the pair does not fit — give both in one call instead, e.g. `Set(model,3279-5-E,oversize,none)`.
 
 **`Reconnect()` takes no argument and dials the last host again**, and it is the CLI's only route
 to that: **`Enter()` here does NOT reconnect**, unlike the interactive front ends' Enter key,
@@ -1127,7 +1134,7 @@ report `ok` throughout while silently failing a logon.
 
 ```sh
 npm run build
-node packages/web/dist/main.js -insecure -model 3278-4-E HOST:PORT
+node packages/web/dist/main.js -insecure -model 3279-4-E HOST:PORT
 ```
 
 It prints the URL to open. With the default (no token) that is just the address:
