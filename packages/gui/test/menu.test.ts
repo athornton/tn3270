@@ -4,8 +4,10 @@ import {
 } from '@tn3270/core';
 import type { GeometryChoice } from '@tn3270/frontend';
 import {
-  buildMenuTemplate, modelMenuStates, applyChoiceStates, type MutableChoice, type GeometryMenu,
+  buildMenuTemplate, modelMenuStates, applyChoiceStates, optionsMenuStates,
+  type MutableChoice, type GeometryMenu, type OptionsMenu, type MenuItemTemplate,
 } from '../src/menu.js';
+import { SCHEME_NAMES } from '@tn3270/frontend';
 
 describe('the Edit menu accelerators are PLATFORM-SPLIT', () => {
   it('uses Cmd-C / Cmd-V on macOS, where Cmd is free', () => {
@@ -507,5 +509,96 @@ describe('Save Changed Options', () => {
   });
   it('absent without the handler', () => {
     expect(buildMenuTemplate('linux', base)[0]!.submenu!.some((i) => i.id === 'save-options')).toBe(false);
+  });
+});
+
+describe('the Options menu (B2 Part 2a; x3270 menubar.c)', () => {
+  const opt: OptionsMenu = {
+    schemes: SCHEME_NAMES, scheme: 'default', mode3279: true, colorModeChoice: true,
+    connected: false, highlightBold: false, cursorColor: false,
+  };
+  const options = (o: OptionsMenu, platform = 'linux'): MenuItemTemplate =>
+    buildMenuTemplate(platform, undefined, undefined, o).find((m) => m.label === 'Options')!;
+  const sub = (m: MenuItemTemplate, label: string) => m.submenu!.find((i) => i.label === label)!;
+
+  it('sits after View and before Model', () => {
+    const geo: GeometryMenu = { models: ['3279-2-E'], current: { oversize: { kind: 'none' } }, connected: false };
+    expect(buildMenuTemplate('linux', undefined, geo, opt).map((m) => m.label))
+      .toEqual(['File', 'Edit', 'View', 'Options', 'Model']);
+  });
+  it('is absent without an OptionsMenu, leaving the old template', () => {
+    expect(buildMenuTemplate('linux').map((m) => m.label)).toEqual(['File', 'Edit', 'View']);
+  });
+  it('holds Color Scheme, Color Mode, a separator and the two checkboxes, in order', () => {
+    const m = options(opt);
+    expect(m.submenu!.map((i) => i.label ?? i.type)).toEqual(
+      ['Color Scheme', 'Color Mode', 'separator', 'Highlight Bold', 'Fixed Cursor Color']);
+    expect(sub(m, 'Highlight Bold')).toMatchObject({ id: 'highlight-bold', type: 'checkbox' });
+    expect(sub(m, 'Fixed Cursor Color')).toMatchObject({ id: 'cursor-color', type: 'checkbox' });
+  });
+  it('lists a radio per scheme, from SCHEME_NAMES, labelled', () => {
+    const items = sub(options(opt), 'Color Scheme').submenu!;
+    expect(items.map((i) => i.id)).toEqual(SCHEME_NAMES.map((n) => `scheme:${n}`));
+    expect(items.map((i) => i.label)).toEqual(['Default', '3279', 'x3270', 'Green']);
+    expect(items.every((i) => i.type === 'radio')).toBe(true);
+  });
+  it('lists the two color modes as radios', () => {
+    const items = sub(options(opt), 'Color Mode').submenu!;
+    expect(items.map((i) => [i.id, i.label, i.type])).toEqual([
+      ['colormode:3279', '3279 color', 'radio'], ['colormode:3278', '3278 mono', 'radio']]);
+  });
+  it('has no Color Mode at all when there is no prefix to swap (-mono, or --terminal-type)', () => {
+    const { colorModeChoice: _, ...rest } = opt;
+    const m = options({ ...rest, mode3279: false });
+    expect(m.submenu!.map((i) => i.label ?? i.type)).toEqual(
+      ['Color Scheme', 'separator', 'Highlight Bold', 'Fixed Cursor Color']);
+    expect(optionsMenuStates({ ...rest, mode3279: false }).some((st) => st.id.startsWith('colormode:'))).toBe(false);
+  });
+  it('the template is built from the same states', () => {
+    const o = { ...opt, scheme: 'green', connected: true, highlightBold: true };
+    const states = new Map(optionsMenuStates(o).map((st) => [st.id, st]));
+    const m = options(o);
+    const all = [...sub(m, 'Color Scheme').submenu!, ...sub(m, 'Color Mode').submenu!,
+      sub(m, 'Highlight Bold'), sub(m, 'Fixed Cursor Color')];
+    for (const i of all) {
+      const st = states.get(i.id!)!;
+      expect([i.id, i.checked === true, i.enabled]).toEqual([i.id, st.checked === true, st.enabled]);
+    }
+  });
+});
+
+describe('optionsMenuStates', () => {
+  const opt: OptionsMenu = {
+    schemes: SCHEME_NAMES, scheme: 'x3270', mode3279: true, colorModeChoice: true,
+    connected: false, highlightBold: true, cursorColor: false,
+  };
+  const by = (o: OptionsMenu) => new Map(optionsMenuStates(o).map((st) => [st.id, st]));
+  it('checks the current scheme, enabled only in 3279 mode (menubar.c:2496)', () => {
+    expect(by(opt).get('scheme:x3270')).toMatchObject({ checked: true, enabled: true });
+    expect(by(opt).get('scheme:default')).toMatchObject({ checked: false, enabled: true });
+    const mono = by({ ...opt, mode3279: false, colorModeChoice: false });
+    expect(SCHEME_NAMES.every((n) => mono.get(`scheme:${n}`)!.enabled === false)).toBe(true);
+  });
+  it('checks the current color mode, disabled while connected (menubar.c:2319)', () => {
+    expect(by(opt).get('colormode:3279')).toMatchObject({ checked: true, enabled: true });
+    expect(by({ ...opt, colorModeChoice: false }).get('colormode:3278')).toMatchObject({ checked: true });
+    const conn = by({ ...opt, connected: true });
+    expect([conn.get('colormode:3279')!.enabled, conn.get('colormode:3278')!.enabled]).toEqual([false, false]);
+  });
+  it('checkboxes are always enabled, checked per their values, and marked checkbox', () => {
+    const m = by({ ...opt, connected: true, mode3279: false });
+    expect(m.get('highlight-bold')).toEqual({ id: 'highlight-bold', checked: true, enabled: true, checkbox: true });
+    expect(m.get('cursor-color')).toEqual({ id: 'cursor-color', checked: false, enabled: true, checkbox: true });
+  });
+  it('applyChoiceStates writes a checkbox both ways, and a radio only when true', () => {
+    const items = new Map<string, MutableChoice>([
+      ['highlight-bold', { checked: true, enabled: true }], ['scheme:default', { checked: true, enabled: true }],
+    ]);
+    applyChoiceStates([
+      { id: 'highlight-bold', checked: false, enabled: true, checkbox: true },
+      { id: 'scheme:default', checked: false, enabled: true },
+    ], (id) => items.get(id) ?? null);
+    expect(items.get('highlight-bold')!.checked).toBe(false);
+    expect(items.get('scheme:default')!.checked).toBe(true);   // radios: never written false
   });
 });
