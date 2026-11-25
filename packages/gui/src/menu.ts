@@ -282,7 +282,9 @@ export function applyChoiceStates(
     const item = get(st.id);
     if (item === null) continue;
     // A CHECKBOX IS WRITTEN BOTH WAYS: unchecking is its whole point, and the radio quirk above
-    // was measured on radios only. Task 7 of the Part 2a plan measures checkboxes under Xvfb.
+    // does not apply. MEASURED 2026-11-25, Electron 44 under Xvfb, through the keys seam's
+    // `menu:` step: two clicks on Highlight Bold read back `checked=true` then `checked=false`
+    // after this function's write, and the same for Fixed Cursor Color.
     if (st.checkbox === true) item.checked = st.checked === true;
     else if (st.checked === true) item.checked = true;
     item.enabled = st.enabled;

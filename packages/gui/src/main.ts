@@ -6,13 +6,13 @@ import { writeFileSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import {
-  resolve, OversizeError, TerminalTypeError, KNOWN_MODELS, DEFAULT_CODE_PAGE,
+  resolve, OversizeError, TerminalTypeError, KNOWN_MODELS, DEFAULT_CODE_PAGE, isColorModel, withColorMode,
   type GeometrySetting, type Session, type Size,
 } from '@tn3270/core';
 import {
   answerInfoFlag, monoModelNotice, versionText, windowTitle, nodePrefsFs, savePrefs, GUI_PREF_KEYS,
   applyAction, applyGeometryChoice, applyPaste, describeConnectError, describeTlsError, resolveScheme,
-  startTransfer, transferCommand, DEFAULT_TLS,
+  startTransfer, transferCommand, DEFAULT_TLS, DEFAULT_SCHEME, SCHEME_NAMES,
   type Action, type ConnectForm, type GeometryChoice, type TlsRemedy,
 } from '@tn3270/frontend';
 import { nodeTransferFiles } from '@tn3270/node-files';
@@ -22,7 +22,9 @@ import { connectModels, parseConnectSeam, planStartup, submitConnect } from './c
 import { makeConnector, type DialogConnector } from './connectAttempt.js';
 import { measureAuto, windowScale } from './measure.js';
 import { parseKeySpec, type KeySpec } from './keyspec.js';
-import { buildMenuTemplate, modelMenuStates, applyChoiceStates, type GeometryMenu } from './menu.js';
+import {
+  buildMenuTemplate, modelMenuStates, applyChoiceStates, optionsMenuStates, type GeometryMenu, type OptionsMenu,
+} from './menu.js';
 import { createTransferController, saveDialogOptions, suggestedNameFrom } from './transferWindow.js';
 import { layoutFor } from './appRoot.js';
 import { userArgv } from './electronSwitches.js';
@@ -807,9 +809,13 @@ async function startSession(
   win: BrowserWindow, fail: (message: string) => void, args: GuiArgs, remedy: TlsRemedy,
   mode: 'connect' | 'dialog' = 'connect',
 ): Promise<{ connector: DialogConnector; afterConnect: () => Promise<void> } | undefined> {
-  // Resolved once: a scheme is fixed for the process, and re-resolving per frame would put a
-  // string lookup in the paint path.
-  const scheme = args.scheme ?? resolveScheme();
+  // Resolved once here and again only when Options -> Color Scheme picks one (B2 Part 2a):
+  // re-resolving per frame would put a string lookup in the paint path. These four are the
+  // Options menu's live settings; `send()` reads them, and Save writes them.
+  let scheme = args.scheme ?? resolveScheme();
+  let schemeName = args.schemeName ?? DEFAULT_SCHEME;
+  let highlightBold = args.highlightBold === true;
+  let cursorColor = args.cursorColor === true;
 
   /**
    * `-oversize auto`'s measure, which the session calls at EVERY connect and never before
@@ -1016,10 +1022,10 @@ async function startSession(
     const page = args.codePage ?? DEFAULT_CODE_PAGE;
     return aboutText(versionText('gui', process.versions), {
       model: args.model ?? '(default)',
-      colorMode: '3279 color',
+      colorMode: session.colorMode() ? '3279 color' : '3278 mono',
       codePage: { name: page.name, cgcsgid: page.cgcsgid },
       font: '3270 font atlas (built in)',
-      scheme: args.scheme === undefined ? 'default' : 'set by -scheme',
+      scheme: schemeName,
       keymap: 'built in',
     }, session.connectionInfo(), tls);
   };
@@ -1441,7 +1447,8 @@ async function startSession(
     const snapshot = session.screen.snapshot();
     const oia = session.oia.toText();
     const list = drawList(
-      snapshot, resolve(snapshot), geometry, scheme, oia === '' ? undefined : oia,
+      snapshot, resolve(snapshot, { highlightBold }), geometry, scheme, oia === '' ? undefined : oia,
+      { cursorColor },
     );
     fit(list);
     win.webContents.send('frame', list);
@@ -1555,6 +1562,35 @@ async function startSession(
   for (const ev of ['geometry', 'connect', 'connectSettled', 'disconnect'] as const) {
     session.on(ev, refreshModelMenu);
   }
+  /**
+   * THE OPTIONS MENU (B2 Part 2a), read off the live settings and the session, and refreshed by id
+   * on the same four events and after every click, for the reasons `refreshModelMenu` gives.
+   * `colorModeChoice` is absent under `-mono` (x3270 omits the items, `menubar.c:2313`) and for a
+   * `--terminal-type` session, which has no model prefix to swap.
+   */
+  const optionsMenu = (): OptionsMenu => {
+    const g = session.geometrySetting;
+    return {
+      schemes: SCHEME_NAMES, scheme: schemeName, mode3279: session.colorMode(),
+      ...(args.mono !== true && g !== undefined ? { colorModeChoice: isColorModel(g) } : {}),
+      connected: session.isConnected() || session.isConnecting(),
+      highlightBold, cursorColor,
+    };
+  };
+  const refreshOptionsMenu = (): void => {
+    const menu = Menu.getApplicationMenu();
+    if (menu === null) return;
+    applyChoiceStates(optionsMenuStates(optionsMenu()), (id) => menu.getMenuItemById(id));
+  };
+  for (const ev of ['geometry', 'connect', 'connectSettled', 'disconnect'] as const) {
+    session.on(ev, refreshOptionsMenu);
+  }
+  /** An Options change that only redraws: set, repaint, refresh the menu. */
+  const restyle = (change: () => void): void => {
+    change();
+    send();
+    refreshOptionsMenu();
+  };
   // BUILT HERE, INSTALLED BY `goLive` -- at once in 'connect' mode, so the command line's order is
   // unchanged; after the first successful connect in 'dialog' mode. Building a menu has no effect
   // until it is installed: its accelerators are registered by `setApplicationMenu`. Every handler
@@ -1599,6 +1635,31 @@ async function startSession(
        * has no choices to free.
        */
       onDisconnect: ifLive(() => { session.disconnect(); }),
+      /** OPTIONS -> COLOR SCHEME, live: the next frame is drawn with it. */
+      onScheme: ifLive((name: string) => {
+        restyle(() => { scheme = resolveScheme(name); schemeName = name; });
+      }),
+      /**
+       * OPTIONS -> COLOR MODE: swap the model's prefix, applied at the next connect through the
+       * Model menu's own path, which refuses while connected. No `monoModelNotice`: the user chose
+       * mono here, so there is nothing to warn about.
+       */
+      onColorMode: ifLive((color: boolean) => {
+        const current = session.geometrySetting;
+        if (current !== undefined) {
+          try {
+            const notice = applyGeometryChoice(current, { model: withColorMode(current.model, color) },
+              (next) => { session.setGeometry(next); });
+            if (notice !== undefined) fail(notice);
+          } catch (err) {
+            fail(explain(err));
+          }
+        }
+        refreshModelMenu();
+        restyle(() => {});
+      }),
+      onHighlightBold: ifLive(() => { restyle(() => { highlightBold = !highlightBold; }); }),
+      onCursorColor: ifLive(() => { restyle(() => { cursorColor = !cursorColor; }); }),
       /**
        * OPEN THE KEYPAD, and NOT gated on which window has focus -- unlike Copy and Paste below.
        *
@@ -1615,7 +1676,8 @@ async function startSession(
       onSaveOptions: ifLive(() => {
         const path = prefsPath();
         try {
-          const n = savePrefs(path, guiPrefsToSave(startupArgv, session.geometrySetting), GUI_PREF_KEYS, nodePrefsFs);
+          const n = savePrefs(path, guiPrefsToSave(startupArgv, session.geometrySetting,
+            { scheme: schemeName, highlightBold, cursorColor }), GUI_PREF_KEYS, nodePrefsFs);
           const msg = `saved ${n} setting${n === 1 ? '' : 's'} to ${path}`;
           process.stdout.write(`prefs: ${msg}\n`);
           fail(msg);
@@ -1693,7 +1755,7 @@ async function startSession(
           process.stdout.write(`paste failed: ${String(err)}\n`);
         });
       }),
-    }, geometryMenu())],
+    }, geometryMenu(), optionsMenu())],
   );
   /**
    * THE SESSION'S CONTROLS GO LIVE: the application menu (and its accelerators) installed, and the
@@ -1704,6 +1766,7 @@ async function startSession(
     live = true;
     Menu.setApplicationMenu(appMenu);
     refreshModelMenu();   // the template's states were read at build time; the connect changed them
+    refreshOptionsMenu();
   };
   if (mode === 'connect') Menu.setApplicationMenu(appMenu);
   /**
@@ -2309,7 +2372,10 @@ async function maybeSendKeys(
         return;
       }
       item.click();
-      process.stdout.write(`keys: clicked menu ${step.id}\n`);
+      // A checkbox's or radio's state AFTER our handler's refresh wrote it: the witness for the
+      // Electron checked-write quirk (`menu.ts` `applyChoiceStates`), and for what a click left.
+      const state = item.type === 'checkbox' || item.type === 'radio' ? ` checked=${String(item.checked)}` : '';
+      process.stdout.write(`keys: clicked menu ${step.id}${state}\n`);
       await new Promise((r) => setTimeout(r, 1500));
       continue;
     }
