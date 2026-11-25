@@ -9,7 +9,7 @@ import {
 function grid(text: string, rows = 2, cols = 3): ResolvedCell[] {
   return [...text].map((ch) => ({
     text: ch, fg: Color.GREEN, bg: Color.NEUTRAL_BLACK,
-    blink: false, reverse: false, underscore: false, intensify: false, hidden: false,
+    blink: false, reverse: false, underscore: false, intensify: false, bold: false, hidden: false,
   })).slice(0, rows * cols);
 }
 

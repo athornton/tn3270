@@ -985,3 +985,42 @@ describe('the live TK5 ISPF fixture', () => {
     }
   });
 });
+
+describe('resolve: bold, x3270 highlight_bold (x3270/screen.c:706-712, :3178)', () => {
+  const HIGH = FA.PRINTABLE | FA.INT_HIGH_SEL;
+  const mono = (s: Screen) => { s.mode3279 = false; return s.snapshot(); };
+  it('3279: an intensified field is not bold by default', () => {
+    expect(resolve(fielded(HIGH).snapshot())[1]!.bold).toBe(false);
+  });
+  it('3279: highlightBold makes it bold', () => {
+    expect(resolve(fielded(HIGH).snapshot(), { highlightBold: true })[1]!.bold).toBe(true);
+  });
+  it('mono: always bold, whatever highlightBold says', () => {
+    expect(resolve(mono(fielded(HIGH)))[1]!.bold).toBe(true);
+    expect(resolve(mono(fielded(HIGH)), { highlightBold: false })[1]!.bold).toBe(true);
+  });
+  it('a normal field is never bold, in either mode or with highlightBold', () => {
+    expect(resolve(mono(fielded(FA.PRINTABLE)))[1]!.bold).toBe(false);
+    expect(resolve(fielded(FA.PRINTABLE).snapshot(), { highlightBold: true })[1]!.bold).toBe(false);
+  });
+  it('a hidden field is never bold: FA_IS_HIGH is an equality, not a bit test', () => {
+    expect(resolve(mono(fielded(FA.PRINTABLE | FA.INT_ZERO_NSEL)))[1]!.bold).toBe(false);
+    expect(resolve(fielded(FA.PRINTABLE | FA.INT_ZERO_NSEL).snapshot(), { highlightBold: true })[1]!.bold)
+      .toBe(false);
+  });
+  it('highlight 0xF8 is bold in either mode, as before', () => {
+    for (const m of [true, false]) {
+      const s = fielded(FA.PRINTABLE);
+      s.setExtended(1, { gr: XAH.INTENSIFY });
+      s.mode3279 = m;
+      const c = resolve(s.snapshot())[1]!;
+      expect([c.bold, c.intensify], `mode3279 ${m}`).toEqual([true, true]);
+    }
+  });
+  it('intensify keeps its wire meaning: an intensified field alone leaves it false', () => {
+    expect(resolve(mono(fielded(HIGH)))[1]!.intensify).toBe(false);
+  });
+  it('an explicit mode3279 option beats the snapshot for bold too', () => {
+    expect(resolve(fielded(HIGH).snapshot(), { mode3279: false })[1]!.bold).toBe(true);
+  });
+});
