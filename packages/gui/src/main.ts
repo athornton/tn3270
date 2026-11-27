@@ -30,7 +30,7 @@ import { currentScale, maxScale, stepScale, targetScale, type Appearance } from 
 import { createTransferController, saveDialogOptions, suggestedNameFrom } from './transferWindow.js';
 import { layoutFor } from './appRoot.js';
 import { userArgv } from './electronSwitches.js';
-import { aboutText } from './about.js';
+import { aboutModel, aboutText } from './about.js';
 import { guiEffectiveArgv, guiPrefsToSave, startupAppearance, startupModel } from './guiPrefs.js';
 import { quitOnChord } from './quitChord.js';
 import { probeLine } from './probe.js';
@@ -1031,7 +1031,7 @@ async function startSession(
       : `on (${tlsChoice.current.verify ? 'certificate verified' : 'certificate NOT verified'})`;
     const page = args.codePage ?? DEFAULT_CODE_PAGE;
     return aboutText(versionText('gui', process.versions), {
-      model: args.model ?? '(default)',
+      model: aboutModel(session.geometrySetting, args.model),
       colorMode: session.colorMode() ? '3279 color' : '3278 mono',
       codePage: { name: page.name, cgcsgid: page.cgcsgid },
       font: '3270 font atlas (built in)',
@@ -1039,8 +1039,19 @@ async function startSession(
       keymap: 'built in',
     }, session.connectionInfo(), tls);
   };
+  // THE MODEL LINE, LOGGED UNDER A SEAM when it changes, so a harness can read what About shows
+  // after a Model-menu or Color Mode change without reading the window's DOM. Model only: the
+  // rest of the text carries connection details that an ungated run must not print.
+  let aboutModelLogged = '';
   const pushAbout = (): void => {
-    if (aboutWin !== undefined && !aboutWin.isDestroyed()) aboutWin.webContents.send('about:text', aboutNow());
+    if (aboutWin === undefined || aboutWin.isDestroyed()) return;
+    const text = aboutNow();
+    aboutWin.webContents.send('about:text', text);
+    const line = text.split('\n').find((l) => l.startsWith('  Model: '))?.trim() ?? '';
+    if (SEAM_ACTIVE && line !== aboutModelLogged) {
+      aboutModelLogged = line;
+      process.stdout.write(`about: ${line}\n`);
+    }
   };
   ipcMain.on('about:copy', (e) => {
     if (aboutWin === undefined || aboutWin.isDestroyed() || e.sender !== aboutWin.webContents) return;
