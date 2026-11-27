@@ -13,10 +13,11 @@ Plan `docs/superpowers/plans/2026-11-27-view-menu-part2b.md` (on main as `27abe4
 `-scale N` and `-appearance`, saved as `scale` and `appearance` (GUI only). The arithmetic is
 `gui/src/viewScale.ts`; every View command is a window resize, because the renderer already draws at
 the best scale for its window. 4220 tests, build and typecheck clean, mutation 12/12, parity gate 99.
-Witnessed under Xvfb (`docs/live-testing.md`, 2026-11-27). **Owed before merge, to the user on a
-desktop:** the three chords, Snap after a resize by hand, Appearance's visible effect, and whether a
-window at scale 5 or above draws. Under Xvfb, `capturePage` returns 0x0 at 3600x1750 and above, and
-plain Fit on a 5120x2880 screen does the same, so that one predates this branch.
+Witnessed under Xvfb (`docs/live-testing.md`, 2026-11-27), then **on a desktop by the user**: the
+chords, Snap after a resize by hand, and Appearance all work. **Scale 5 and above has no witness**
+(the user's display is too small); the user ruled that not a merge blocker. Under Xvfb,
+`capturePage` returns 0x0 at 3600x1750 and above, and plain Fit does the same, so that predates
+this branch.
 **Unreviewed plan decisions, accepted by the user 2026-11-27:** the `-scale` flag; Bigger bounded
 by the full work area; `Ctrl+=` and not `Ctrl+Plus`.
 

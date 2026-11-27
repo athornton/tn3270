@@ -950,6 +950,9 @@ keys seam's `menu:ID` steps, on a **3840x2160** Xvfb screen: at the recipe's 128
 - **Owed, not witnessed:** the chords Ctrl-=, Ctrl-- and Ctrl-0 (`sendInputEvent` cannot trigger
   accelerators, and `xdotool` is not installed); **Snap Window after a resize by hand** (no seam
   resizes a session window); Appearance's visible effect; scale 5 and above drawing.
+- **Then on a real desktop, by the user, 2026-11-27:** the three chords work; Snap Window after a
+  resize by hand works; Light and Dark change the GUI's windows. **Scale 5 and above has NO
+  witness**: the user's display is too small to reach it. Not a merge blocker (the user's call).
 - **Mutation:** 12 of 12 killed (stepScale's two clamps, targetScale's two branches, the max bound,
   both enabled states, the appearance check, the two save rules, `-scale 0`, the missing key).
 

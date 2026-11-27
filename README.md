@@ -1402,7 +1402,7 @@ gate, in the order agreed 2026-11-17; each milestone gets its own spec, plan and
      other fonts. **Deferred from B2, kept here so they aren't lost:** live switching in the
      browser's Alt-M panel (not a parity gate: the gateway has no x3270 counterpart); free scaling
      with vector fonts, for the Super-Terminal; a color picker for each 3279 color and the
-     background, built-in light and dark terminal themes, and saving a set of colors as a named
+     background, built-in light and dark terminal themes (which View → Appearance should then switch too, the user, 2026-11-27), and saving a set of colors as a named
      theme; x3270's `wrongTerminalName`; fixed-size windows; **C, connecting from a running window**. See *What is not implemented*.
    - **15c. Code pages.** Only `bracket` and `cp037` exist (`packages/core/src/codepages/`), which is
      wrong for any host outside the US: 273 (Germany/Austria), 285 (UK), 297 (France), 500
