@@ -778,13 +778,13 @@
   title: Resize the window, step the font size, snap the window to the font
   covers: [xaction:StepEfont, resource:allowResize, resource:fixedSize, menu:snapOption]
   x3270: "allowResize (on by default, x3270/resources.c:266-267): a window resize picks the font that fits; Ctrl-+/Ctrl-- run StepEfont(bigger|smaller) (x3270/fb-x3270:275-278, x3270/screen.c:2082); Options → Snap fits the window to the screen (x3270/menubar.c:2407); fixedSize pins the window size"
-  gui: "the window sizes itself to the screen the host sets, and a manual resize redraws at the largest whole-number scale that fits"
+  gui: "the window sizes itself to the screen the host sets, and a manual resize redraws at the largest whole-number scale that fits; View → Bigger (Ctrl-=), Smaller (Ctrl--) and Fit Window (Ctrl-0) step that scale and resize the window, and Snap Window fits the window to the scale it draws at (B2 Part 2b); -scale N saves the choice"
   status: partial
-  gap: "no key to step the font bigger or smaller, no Snap item (a resized window letterboxes rather than fitting), and no fixed-size setting"
+  gap: "no fixed-size setting; Bigger and Smaller step a whole-number scale of the one bitmap font, not x3270's font list; Snap is under View, not Options"
   evidence:
-    code: [packages/canvas/src/renderer.ts:735, packages/canvas/src/blit.ts:99, packages/gui/src/main.ts:1326]
-    tests: [packages/canvas/test/blit.test.ts, packages/gui/test/measure.test.ts]
-    live: unwitnessed
+    code: [packages/canvas/src/renderer.ts:735, packages/canvas/src/blit.ts:99, packages/gui/src/viewScale.ts, packages/gui/src/menu.ts]
+    tests: [packages/canvas/test/blit.test.ts, packages/gui/test/measure.test.ts, packages/gui/test/viewScale.test.ts, packages/gui/test/menu.test.ts]
+    live: "The View menu's scale and Appearance, under Xvfb with a replayed trace — 2026-11-27"
   browser: "the page redraws at the largest whole-number scale for the viewport"
 - id: x11-display-tuning
   area: display
