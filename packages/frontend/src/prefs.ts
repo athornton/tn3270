@@ -35,7 +35,13 @@ const COMMON: readonly PrefKey[] = [
 ];
 
 // `cursorcolor` is the GUI's alone: a terminal draws its own cursor (the B2 spec's flag table).
-export const GUI_PREF_KEYS: readonly PrefKey[] = [...COMMON, { key: 'cursorcolor', flag: '-cursorcolor', type: 'bare' }];
+// `scale` and `appearance` likewise (B2 Part 2b): a terminal has no window to size or theme.
+export const GUI_PREF_KEYS: readonly PrefKey[] = [
+  ...COMMON,
+  { key: 'cursorcolor', flag: '-cursorcolor', type: 'bare' },
+  { key: 'scale', flag: '-scale', type: 'number' },
+  { key: 'appearance', flag: '-appearance', type: 'string' },
+];
 export const TUI_PREF_KEYS: readonly PrefKey[] = [...COMMON, { key: 'colors', flag: '--colors', type: 'number' }];
 
 /** Keys refused with a reason rather than merely unknown (spec section 2). */

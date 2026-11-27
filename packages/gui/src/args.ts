@@ -1,3 +1,4 @@
+import { APPEARANCES, type Appearance } from './viewScale.js';
 import {
   resolveGeometry, resolveTerminalType, resolveAlternateSize, OversizeError,
   type CodePage, type GeometrySetting, type Oversize, type Session, type Size,
@@ -85,6 +86,13 @@ export interface GuiArgs {
   /** `-cursorcolor`: a fixed red cursor (x3270's useCursorColor). */
   cursorColor?: boolean;
   /**
+   * `-scale N`: draw at this whole-number scale (the View menu's Bigger and Smaller, saved as
+   * `scale`). Absent means Fit: the largest scale that fits 80% of the work area (`measure.ts`).
+   */
+  scale?: number;
+  /** `-appearance`: the GUI's own windows' theme (`nativeTheme.themeSource`). Absent means system. */
+  appearance?: Appearance;
+  /**
    * `-oversize <cols>x<rows>|auto|none`. Absent means `none`: the model's own alternate size.
    * `auto` is allowed, as in the TUI: the display is measured at every connect (`measure.ts`).
    * A combination `resolveGeometry` would refuse at connect is refused here instead.
@@ -101,6 +109,7 @@ export interface GuiArgs {
 export const USAGE =
   `usage: tn3270-gui [-model M] [--terminal-type T] [-scheme S] [-tn3270e on|off] `
   + `[-bind-image on|off] [-bind-limit on|off] [-ddm on|off] [-devname NAME] [-codepage|-charset NAME] [-mono] [-highlightbold] [-cursorcolor] [-visualbell] `
+  + `[-scale N] [-appearance system|light|dark] `
   + `${OVERSIZE_USAGE} ${TLS_USAGE} [prefix:][LU,LU@]host[:port]`;
 
 export function parseGuiArgs(argv: readonly string[]): GuiArgs {
@@ -192,6 +201,22 @@ export function parseGuiArgs(argv: readonly string[]): GuiArgs {
         break;
       case '-cursorcolor':
         args.cursorColor = true;
+        break;
+      case '-scale':
+        if (value === undefined) throw new UsageError('-scale needs a value, a whole number, 1 or more');
+        if (!/^[1-9][0-9]*$/.test(value)) {
+          throw new UsageError(`-scale takes a whole number, 1 or more, not ${JSON.stringify(value)}`);
+        }
+        args.scale = Number(value);
+        i++;
+        break;
+      case '-appearance':
+        if (value === undefined) throw new UsageError('-appearance needs a value: system, light or dark');
+        if (!(APPEARANCES as readonly string[]).includes(value)) {
+          throw new UsageError(`-appearance takes system, light or dark, not ${JSON.stringify(value)}`);
+        }
+        args.appearance = value as Appearance;
+        i++;
         break;
       case '-codepage':
       case '-charset':
