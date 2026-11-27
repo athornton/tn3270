@@ -11,6 +11,17 @@ export interface AboutConfig {
 }
 
 /**
+ * About's Model line: the session's CURRENT setting, which the Model menu and Options -> Color Mode
+ * change, before the command line's `-model`. Reading only argv left the line stale after a menu
+ * change (known since B2 Part 2a). `setting` is undefined for a `--terminal-type` session.
+ */
+export function aboutModel(
+  setting: { readonly model?: string | undefined } | undefined, argvModel: string | undefined,
+): string {
+  return setting?.model ?? argvModel ?? '(default)';
+}
+
+/**
  * The About window's whole text: version, configuration, connection. ONE FUNCTION FOR BOTH what
  * the window shows and what Copy copies, so a pasted bug report is exactly what was on screen.
  * `tls` is the front end's, since core never sees it (`ConnectionInfo`'s comment).

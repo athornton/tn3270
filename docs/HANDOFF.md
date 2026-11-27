@@ -38,7 +38,7 @@ planned), run inline. 4201 tests, build and typecheck clean.
 - **HOST GATE PASSED** once the user started VM/370 and TK5: Color Mode refused while connected,
   3278 after Disconnect negotiated `IBM-3278-2-E`; web `cursorColor` live; TK5 bold 0/1446/1446
   (plain, -highlightbold, -mono) in the web, visible in the GUI, 0/63/9 SGR bold in the TUI.
-  Mutation 14/14 killed. Known, not fixed: About's `Model:` line is argv's, stale after a menu change.
+  Mutation 14/14 killed. About's `Model:` line was argv's, stale after a menu change: FIXED 2026-11-27 on branch `about-model` (`aboutModel` in `gui/src/about.ts`).
 - **Parity:** highlight-bold and cursor-color `ours`; color-mode and color-scheme `partial`
   (gaps updated); gate 101 -> 99.
 

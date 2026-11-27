@@ -927,6 +927,13 @@ and the Recording log says what happened when they were run.
   we hardcode.** Not a TN3270E problem — `IBM-3278-2-E` reaches TSO with the TN3270E
   option never negotiated. See the Recording log. `record-mvs.txt` remains a draft.
 
+## About's Model line after a menu change, under Xvfb — 2026-11-27
+
+Branch `about-model`. Replayed `vm370-logon-logoff.trace` with `-model 3279-2-E`, keys
+`menu:about,menu:model-disconnect,menu:model:3278-4-E,menu:colormode:3279`. Under a seam, About now
+logs its `Model:` line when it changes: `3279-2-E`, then `3278-4-E`, then `3279-4-E`. **The control
+run**, with main reading argv's model again, logged only `3279-2-E`: the stale line reproduced.
+
 ## The View menu's scale and Appearance, under Xvfb with a replayed trace — 2026-11-27
 
 **15b B2 Part 2b, witnessed without a host** (display only, so the spec's gate is Xvfb). Branch

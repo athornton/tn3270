@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { ConnectionInfo } from '@tn3270/core';
-import { aboutText, type AboutConfig } from '../src/about.js';
+import { aboutModel, aboutText, type AboutConfig } from '../src/about.js';
 
 const config: AboutConfig = {
   model: '3278-2-E', colorMode: '3279 color', codePage: { name: 'bracket', cgcsgid: 37 },
@@ -31,5 +31,21 @@ describe('aboutText', () => {
     expect(d).toContain('not connected');
     expect(d).not.toContain('Bytes in/out');
     expect(d).not.toContain('LU01');
+  });
+});
+
+/**
+ * THE MODEL LINE FOLLOWS THE MENUS. It used to read argv's `-model`, so after the Model menu or
+ * Options -> Color Mode changed the session's setting, About still showed the startup model.
+ */
+describe('aboutModel', () => {
+  it('reads the session\'s current setting over the command line', () => {
+    expect(aboutModel({ model: '3278-4-E' }, '3279-2-E')).toBe('3278-4-E');
+    expect(aboutModel({ model: '3279-3-E' }, undefined)).toBe('3279-3-E');
+  });
+  it('falls back to the command line, then (default)', () => {
+    expect(aboutModel({}, '3279-2-E')).toBe('3279-2-E');
+    expect(aboutModel(undefined, '3278-2')).toBe('3278-2');   // a --terminal-type session has no setting
+    expect(aboutModel(undefined, undefined)).toBe('(default)');
   });
 });
