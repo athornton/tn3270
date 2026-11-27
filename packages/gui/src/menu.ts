@@ -22,6 +22,7 @@
  * reads them, not from a copy here. `@tn3270/frontend` only for a type.
  */
 
+import { APPEARANCES, type Appearance } from './viewScale.js';
 import {
   KNOWN_MODELS, describeSize, resolveTerminalType,
   type GeometrySetting, type Oversize, type Size,
@@ -167,6 +168,73 @@ export interface MenuHandlers {
   readonly onHighlightBold?: () => void;
   /** Options -> Fixed Cursor Color, toggled. */
   readonly onCursorColor?: () => void;
+  /** View -> Bigger: one whole-number scale up, and the window resized to it (B2 Part 2b). */
+  readonly onBigger?: () => void;
+  /** View -> Smaller: one scale down. */
+  readonly onSmaller?: () => void;
+  /** View -> Fit Window: back to the largest scale that fits 80% of the work area. */
+  readonly onFit?: () => void;
+  /** View -> Snap Window: the window resized to exactly the scale it is drawing at. */
+  readonly onSnap?: () => void;
+  /** View -> Appearance: the GUI's own windows' theme. */
+  readonly onAppearance?: (appearance: Appearance) => void;
+}
+
+/** The View menu's scale and Appearance inputs (B2 Part 2b), read off the window each refresh. */
+export interface ViewMenu {
+  /** The scale the window is drawing at now (`currentScale`). */
+  readonly current: number;
+  /** Bigger's bound (`maxScale`). */
+  readonly max: number;
+  readonly appearance: Appearance;
+}
+
+const APPEARANCE_LABELS: Readonly<Record<Appearance, string>> = { system: 'System', light: 'Light', dark: 'Dark' };
+
+/**
+ * The View menu's scale and Appearance states, as `optionsMenuStates` is for Options. Bigger is
+ * enabled below `max` and Smaller above 1; Fit and Snap always. The Appearance radios carry
+ * `checked` both ways, and `applyChoiceStates` writes only the true one (the radio quirk).
+ */
+export function viewMenuStates(v: ViewMenu): ChoiceState[] {
+  return [
+    { id: 'view-bigger', enabled: v.current < v.max },
+    { id: 'view-smaller', enabled: v.current > 1 },
+    { id: 'view-fit', enabled: true },
+    { id: 'view-snap', enabled: true },
+    ...APPEARANCES.map((a) => ({ id: `appearance-${a}`, checked: a === v.appearance, enabled: true })),
+  ];
+}
+
+/**
+ * The View menu's scale items and Appearance submenu. CTRL ON EVERY PLATFORM, as Ctrl+K and Ctrl+B
+ * are: none of `= - 0` is bound in the 3270 keyboard (`canvas/src/keys.ts` CTRL). Bigger is `Ctrl+=`,
+ * not `Ctrl+Plus`: on a US layout `+` needs Shift, and `=` is the key marked `+`, which is what
+ * browsers bind for zoom in.
+ */
+function viewScaleItems(v: ViewMenu, handlers: MenuHandlers | undefined): MenuItemTemplate[] {
+  const states = new Map(viewMenuStates(v).map((st) => [st.id, st]));
+  const state = (id: string) => {
+    const st = states.get(id)!;
+    return { id, enabled: st.enabled, ...(st.checked !== undefined ? { checked: st.checked } : {}) };
+  };
+  const click = (fn: (() => void) | undefined) => (fn !== undefined ? { click: fn } : {});
+  const onAppearance = handlers?.onAppearance;
+  return [
+    { type: 'separator' },
+    { label: 'Bigger', accelerator: 'Ctrl+=', ...state('view-bigger'), ...click(handlers?.onBigger) },
+    { label: 'Smaller', accelerator: 'Ctrl+-', ...state('view-smaller'), ...click(handlers?.onSmaller) },
+    { label: 'Fit Window', accelerator: 'Ctrl+0', ...state('view-fit'), ...click(handlers?.onFit) },
+    { label: 'Snap Window', ...state('view-snap'), ...click(handlers?.onSnap) },
+    { type: 'separator' },
+    {
+      label: 'Appearance',
+      submenu: APPEARANCES.map((a) => ({
+        label: APPEARANCE_LABELS[a], type: 'radio' as const, ...state(`appearance-${a}`),
+        ...click(onAppearance !== undefined ? () => { onAppearance(a); } : undefined),
+      })),
+    },
+  ];
 }
 
 /**
@@ -441,6 +509,7 @@ function optionsMenu(o: OptionsMenu, handlers: MenuHandlers | undefined): MenuIt
 /** The menu template for a platform. Handlers are optional so tests can inspect the shape. */
 export function buildMenuTemplate(
   platform: Platform, handlers?: MenuHandlers, geometry?: GeometryMenu, options?: OptionsMenu,
+  viewMenu?: ViewMenu,
 ): readonly MenuItemTemplate[] {
   const edit: MenuItemTemplate = {
     label: 'Edit',
@@ -516,6 +585,8 @@ export function buildMenuTemplate(
         accelerator: 'Ctrl+B',
         ...(handlers !== undefined ? { click: handlers.onKeyboard } : {}),
       },
+      // THE SCALE ITEMS ONLY WITH A `ViewMenu`, so a caller that passes none keeps the old View.
+      ...(viewMenu !== undefined ? viewScaleItems(viewMenu, handlers) : []),
     ],
   };
   // AN APP MENU IS MANDATORY ON macOS: without one the window gets NO menu bar at all, which is a

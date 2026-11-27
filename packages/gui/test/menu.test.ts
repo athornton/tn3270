@@ -4,7 +4,7 @@ import {
 } from '@tn3270/core';
 import type { GeometryChoice } from '@tn3270/frontend';
 import {
-  buildMenuTemplate, modelMenuStates, applyChoiceStates, optionsMenuStates,
+  buildMenuTemplate, modelMenuStates, applyChoiceStates, optionsMenuStates, viewMenuStates,
   type MutableChoice, type GeometryMenu, type OptionsMenu, type MenuItemTemplate,
 } from '../src/menu.js';
 import { SCHEME_NAMES } from '@tn3270/frontend';
@@ -600,5 +600,79 @@ describe('optionsMenuStates', () => {
     ], (id) => items.get(id) ?? null);
     expect(items.get('highlight-bold')!.checked).toBe(false);
     expect(items.get('scheme:default')!.checked).toBe(true);   // radios: never written false
+  });
+});
+
+/** B2 Part 2b: the View menu's scale items and Appearance, present only with a `ViewMenu`. */
+describe('the View menu scale and Appearance items', () => {
+  type Item = {
+    label?: string; id?: string; type?: string; accelerator?: string; checked?: boolean;
+    enabled?: boolean; click?: () => void; submenu?: Item[];
+  };
+  const view = (current: number, max: number, appearance: 'system' | 'light' | 'dark' = 'system') =>
+    ({ current, max, appearance });
+  const viewItems = (t: readonly MenuItemTemplate[]) => (t.find((m) => m.label === 'View')!.submenu as Item[]);
+
+  it('lays out Keypad, Keyboard, the four scale items, then Appearance', () => {
+    const items = viewItems(buildMenuTemplate('linux', undefined, undefined, undefined, view(2, 3)));
+    expect(items.map((i) => i.type === 'separator' ? '-' : i.label)).toEqual(
+      ['Keypad', 'Keyboard', '-', 'Bigger', 'Smaller', 'Fit Window', 'Snap Window', '-', 'Appearance']);
+    expect(items.slice(3, 7).map((i) => [i.id, i.accelerator])).toEqual([
+      ['view-bigger', 'Ctrl+='], ['view-smaller', 'Ctrl+-'], ['view-fit', 'Ctrl+0'], ['view-snap', undefined]]);
+    expect(items[8]!.submenu!.map((i) => [i.label, i.id, i.type])).toEqual([
+      ['System', 'appearance-system', 'radio'], ['Light', 'appearance-light', 'radio'],
+      ['Dark', 'appearance-dark', 'radio']]);
+  });
+
+  it('without a ViewMenu, View is exactly Keypad and Keyboard, as before', () => {
+    expect(viewItems(buildMenuTemplate('linux')).map((i) => i.label)).toEqual(['Keypad', 'Keyboard']);
+  });
+
+  it('no accelerator in the whole template is used twice', () => {
+    for (const platform of ['darwin', 'linux', 'win32'] as const) {
+      const accels: string[] = [];
+      const walk = (items: readonly Item[]): void => {
+        for (const i of items) {
+          if (i.accelerator !== undefined) accels.push(i.accelerator);
+          if (i.submenu !== undefined) walk(i.submenu);
+        }
+      };
+      walk(buildMenuTemplate(platform, undefined, undefined, undefined, view(1, 3)) as Item[]);
+      expect(accels.length, platform).toBeGreaterThanOrEqual(3);
+      expect(new Set(accels).size, `${platform}: ${accels.join(' ')}`).toBe(accels.length);
+    }
+  });
+
+  it('Bigger stops at max, Smaller at 1; Fit and Snap are always enabled', () => {
+    const en = (c: number, m: number) =>
+      Object.fromEntries(viewMenuStates(view(c, m)).map((s) => [s.id, s.enabled]));
+    expect(en(1, 3)).toMatchObject({ 'view-bigger': true, 'view-smaller': false, 'view-fit': true, 'view-snap': true });
+    expect(en(2, 3)).toMatchObject({ 'view-bigger': true, 'view-smaller': true });
+    expect(en(3, 3)).toMatchObject({ 'view-bigger': false, 'view-smaller': true });
+    expect(en(1, 1)).toMatchObject({ 'view-bigger': false, 'view-smaller': false });
+  });
+
+  it('checks exactly the current Appearance, and the template agrees', () => {
+    for (const a of ['system', 'light', 'dark'] as const) {
+      const checked = viewMenuStates(view(1, 2, a)).filter((s) => s.checked === true).map((s) => s.id);
+      expect(checked).toEqual([`appearance-${a}`]);
+      const sub = viewItems(buildMenuTemplate('linux', undefined, undefined, undefined, view(1, 2, a)))[8]!.submenu!;
+      expect(sub.filter((i) => i.checked).map((i) => i.id)).toEqual([`appearance-${a}`]);
+    }
+  });
+
+  it('wires each item to its handler', () => {
+    const calls: string[] = [];
+    const h = {
+      onCopy: () => {}, onPaste: () => {}, onKeypad: () => {}, onKeyboard: () => {},
+      onBigger: () => calls.push('bigger'), onSmaller: () => calls.push('smaller'),
+      onFit: () => calls.push('fit'), onSnap: () => calls.push('snap'),
+      onAppearance: (a: string) => calls.push(`appearance:${a}`),
+    };
+    const items = viewItems(buildMenuTemplate('linux', h, undefined, undefined, view(2, 3)));
+    for (const i of items.slice(3, 7)) i.click!();
+    for (const i of items[8]!.submenu!) i.click!();
+    expect(calls).toEqual(['bigger', 'smaller', 'fit', 'snap',
+      'appearance:system', 'appearance:light', 'appearance:dark']);
   });
 });
