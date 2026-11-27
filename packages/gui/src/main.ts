@@ -1,5 +1,5 @@
 import {
-  app, BrowserWindow, clipboard, dialog, ipcMain, Menu, screen, shell,
+  app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, screen, shell,
 } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { writeFileSync, readFileSync } from 'node:fs';
@@ -23,13 +23,15 @@ import { makeConnector, type DialogConnector } from './connectAttempt.js';
 import { measureAuto, windowScale } from './measure.js';
 import { parseKeySpec, type KeySpec } from './keyspec.js';
 import {
-  buildMenuTemplate, modelMenuStates, applyChoiceStates, optionsMenuStates, type GeometryMenu, type OptionsMenu,
+  buildMenuTemplate, modelMenuStates, applyChoiceStates, optionsMenuStates, viewMenuStates,
+  type GeometryMenu, type OptionsMenu, type ViewMenu,
 } from './menu.js';
+import { currentScale, maxScale, stepScale, targetScale, type Appearance } from './viewScale.js';
 import { createTransferController, saveDialogOptions, suggestedNameFrom } from './transferWindow.js';
 import { layoutFor } from './appRoot.js';
 import { userArgv } from './electronSwitches.js';
 import { aboutText } from './about.js';
-import { guiEffectiveArgv, guiPrefsToSave, startupModel } from './guiPrefs.js';
+import { guiEffectiveArgv, guiPrefsToSave, startupAppearance, startupModel } from './guiPrefs.js';
 import { quitOnChord } from './quitChord.js';
 import { probeLine } from './probe.js';
 import { describeFileError } from './seamFile.js';
@@ -553,6 +555,9 @@ app.whenReady().then(async () => {
     return;
   }
   startupArgv = argv;
+  // THE APPEARANCE BEFORE ANY DIALOG OR SESSION (B2 Part 2b). `themeSource` is process-wide and
+  // live, so this one write themes the main window, the Connect dialog and every later window.
+  nativeTheme.themeSource = startupAppearance(argv) ?? 'system';
   const plan = planStartup(argv, SEAM);
   if (plan.kind === 'fail') {
     fail(explain(plan.err));
@@ -816,6 +821,11 @@ async function startSession(
   let schemeName = args.schemeName ?? DEFAULT_SCHEME;
   let highlightBold = args.highlightBold === true;
   let cursorColor = args.cursorColor === true;
+  // THE VIEW MENU'S STATE (B2 Part 2b). `chosenScale` undefined is Fit. `appearance` is read back
+  // from `nativeTheme`, which the startup argv set before this session existed.
+  let chosenScale = args.scale;
+  let appearance: Appearance = nativeTheme.themeSource;
+  let lastList: { width: number; height: number } | undefined;
 
   /**
    * `-oversize auto`'s measure, which the session calls at EVERY connect and never before
@@ -1435,12 +1445,22 @@ async function startSession(
    * copy of the 0.8, and `measure.test.ts` tests it.
    */
   let sized = '';
-  const fit = (list: { width: number; height: number }): void => {
+  /*
+    THE VIEW MENU'S SCALE (B2 Part 2b) goes through here: `targetScale` is Fit's `windowScale` when
+    nothing is chosen, else the choice clamped to the work area, so a geometry change keeps the
+    chosen scale. `force` is a View command, which must resize though the list is the same size.
+  */
+  const fit = (list: { width: number; height: number }, force = false): void => {
     const key = `${list.width}x${list.height}`;
-    if (key === sized) return;                       // most frames change nothing
+    if (key === sized && !force) return;             // most frames change nothing
     sized = key;
-    const scale = windowScale(list, screen.getPrimaryDisplay().workAreaSize);
+    const scale = targetScale(chosenScale, list, screen.getPrimaryDisplay().workAreaSize);
     win.setContentSize(list.width * scale, list.height * scale);
+    if (force && SEAM_ACTIVE) {
+      const [w, h] = win.getContentSize();
+      process.stdout.write(`view: scale=${scale} content=${w}x${h}\n`);
+    }
+    refreshViewMenu();
   };
 
   const send = (): void => {
@@ -1450,6 +1470,7 @@ async function startSession(
       snapshot, resolve(snapshot, { highlightBold }), geometry, scheme, oia === '' ? undefined : oia,
       { cursorColor },
     );
+    lastList = list;
     fit(list);
     win.webContents.send('frame', list);
   };
@@ -1577,6 +1598,13 @@ async function startSession(
       highlightBold, cursorColor,
     };
   };
+  // A FUNCTION DECLARATION, hoisted, because `fit` and the window's 'resize' call it and a `const`
+  // read before its line throws (TDZ; memory: optional chaining does not guard it).
+  function refreshViewMenu(): void {
+    const menu = Menu.getApplicationMenu();
+    if (menu === null || win.isDestroyed()) return;
+    applyChoiceStates(viewMenuStates(viewMenu()), (id) => menu.getMenuItemById(id));
+  }
   const refreshOptionsMenu = (): void => {
     const menu = Menu.getApplicationMenu();
     if (menu === null) return;
@@ -1585,6 +1613,27 @@ async function startSession(
   for (const ev of ['geometry', 'connect', 'connectSettled', 'disconnect'] as const) {
     session.on(ev, refreshOptionsMenu);
   }
+  /**
+   * THE VIEW MENU (B2 Part 2b), read off the window: `current` is what the renderer draws at in
+   * this content size, so a resize by hand moves it. Before the first frame there is no list, and
+   * Bigger and Smaller are both disabled.
+   */
+  const viewMenu = (): ViewMenu => {
+    if (lastList === undefined) return { current: 1, max: 1, appearance };
+    const [w, h] = win.getContentSize();
+    return {
+      current: currentScale(lastList, { width: w!, height: h! }),
+      max: maxScale(lastList, screen.getPrimaryDisplay().workAreaSize),
+      appearance,
+    };
+  };
+  /** A View scale command: pick the scale from the window as it is now, then resize to it. */
+  const rescale = (pick: (v: ViewMenu) => number | undefined): void => {
+    if (lastList === undefined || win.isDestroyed()) return;
+    chosenScale = pick(viewMenu());
+    fit(lastList, true);
+  };
+  win.on('resize', () => { refreshViewMenu(); });
   /** An Options change that only redraws: set, repaint, refresh the menu. */
   const restyle = (change: () => void): void => {
     change();
@@ -1660,6 +1709,17 @@ async function startSession(
       }),
       onHighlightBold: ifLive(() => { restyle(() => { highlightBold = !highlightBold; }); }),
       onCursorColor: ifLive(() => { restyle(() => { cursorColor = !cursorColor; }); }),
+      onBigger: ifLive(() => { rescale((v) => stepScale(v.current, 1, v.max)); }),
+      onSmaller: ifLive(() => { rescale((v) => stepScale(v.current, -1, v.max)); }),
+      onFit: ifLive(() => { rescale(() => undefined); }),
+      // SNAP RECORDS THE SCALE, so a resize by hand followed by Snap is what Save writes.
+      onSnap: ifLive(() => { rescale((v) => v.current); }),
+      onAppearance: ifLive((a: Appearance) => {
+        appearance = a;
+        nativeTheme.themeSource = a;
+        if (SEAM_ACTIVE) process.stdout.write(`appearance: ${a}\n`);
+        refreshViewMenu();
+      }),
       /**
        * OPEN THE KEYPAD, and NOT gated on which window has focus -- unlike Copy and Paste below.
        *
@@ -1677,7 +1737,8 @@ async function startSession(
         const path = prefsPath();
         try {
           const n = savePrefs(path, guiPrefsToSave(startupArgv, session.geometrySetting,
-            { scheme: schemeName, highlightBold, cursorColor }), GUI_PREF_KEYS, nodePrefsFs);
+            { scheme: schemeName, highlightBold, cursorColor, scale: chosenScale, appearance }),
+          GUI_PREF_KEYS, nodePrefsFs);
           const msg = `saved ${n} setting${n === 1 ? '' : 's'} to ${path}`;
           process.stdout.write(`prefs: ${msg}\n`);
           fail(msg);
@@ -1755,7 +1816,7 @@ async function startSession(
           process.stdout.write(`paste failed: ${String(err)}\n`);
         });
       }),
-    }, geometryMenu(), optionsMenu())],
+    }, geometryMenu(), optionsMenu(), viewMenu())],
   );
   /**
    * THE SESSION'S CONTROLS GO LIVE: the application menu (and its accelerators) installed, and the
@@ -1767,6 +1828,7 @@ async function startSession(
     Menu.setApplicationMenu(appMenu);
     refreshModelMenu();   // the template's states were read at build time; the connect changed them
     refreshOptionsMenu();
+    refreshViewMenu();
   };
   if (mode === 'connect') Menu.setApplicationMenu(appMenu);
   /**

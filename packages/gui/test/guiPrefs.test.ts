@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { guiEffectiveArgv, guiPrefsToSave, startupModel } from '../src/guiPrefs.js';
+import { guiEffectiveArgv, guiPrefsToSave, startupAppearance, startupModel } from '../src/guiPrefs.js';
 import { connectModels, CONNECT_DEFAULT_MODEL } from '../src/connectDialog.js';
 
 const mem = (files: Record<string, string>) => ({
@@ -62,5 +62,32 @@ describe('guiPrefsToSave with the Options menu settings (B2 Part 2a)', () => {
   it('without the settings, behaves as before', () => {
     expect(guiPrefsToSave(['-highlightbold', '-scheme', 'green'], undefined))
       .toEqual({ highlightbold: true, scheme: 'green' });
+  });
+});
+
+describe('guiPrefsToSave with the View menu settings (B2 Part 2b)', () => {
+  const off = { scheme: 'default', highlightBold: false, cursorColor: false };
+  it('saves a chosen scale, and DELETES it when Fit cleared one argv had', () => {
+    expect(guiPrefsToSave([], undefined, { ...off, scale: 3 })['scale']).toBe(3);
+    expect('scale' in guiPrefsToSave(['-scale', '2'], undefined, { ...off, scale: undefined })).toBe(false);
+    expect('scale' in guiPrefsToSave([], undefined, off)).toBe(false);
+  });
+  it('saves appearance when not system, or when argv had one (the scheme\'s rule)', () => {
+    expect(guiPrefsToSave([], undefined, { ...off, appearance: 'dark' })['appearance']).toBe('dark');
+    expect('appearance' in guiPrefsToSave([], undefined, { ...off, appearance: 'system' })).toBe(false);
+    expect(guiPrefsToSave(['-appearance', 'dark'], undefined, { ...off, appearance: 'system' })['appearance'])
+      .toBe('system');
+  });
+  it('without runtime settings, argv\'s scale and appearance are saved as they were', () => {
+    expect(guiPrefsToSave(['-scale', '2', '-appearance', 'light'], undefined))
+      .toEqual({ scale: 2, appearance: 'light' });
+  });
+});
+
+describe('the Connect dialog\'s appearance', () => {
+  it('reads -appearance from a hostless argv, and undefined when absent or bad', () => {
+    expect(startupAppearance(['-appearance', 'dark'])).toBe('dark');
+    expect(startupAppearance([])).toBeUndefined();
+    expect(startupAppearance(['-appearance', 'mauve'])).toBeUndefined();
   });
 });

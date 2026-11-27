@@ -2,6 +2,7 @@ import { basename } from 'node:path';
 import type { GeometrySetting } from '@tn3270/core';
 import { argvToPrefs, loadPrefs, oversizeFlagValue, DEFAULT_SCHEME, GUI_PREF_KEYS, type PrefsFs } from '@tn3270/frontend';
 import { MissingHostError, parseGuiArgs, UsageError, type GuiArgs } from './args.js';
+import type { Appearance } from './viewScale.js';
 
 /**
  * `parseGuiArgs` for an argv that may have no host (a preferences file never has one; a dialog
@@ -50,6 +51,10 @@ export interface RuntimeOptions {
   readonly scheme: string;
   readonly highlightBold: boolean;
   readonly cursorColor: boolean;
+  /** View -> Bigger/Smaller/Snap's scale (B2 Part 2b); undefined is Fit, saved as no key. */
+  readonly scale?: number | undefined;
+  /** View -> Appearance. Absent is treated as not set by the menu. */
+  readonly appearance?: Appearance;
 }
 
 export function guiPrefsToSave(
@@ -64,6 +69,14 @@ export function guiPrefsToSave(
     for (const [key, on] of [['highlightbold', runtime.highlightBold], ['cursorcolor', runtime.cursorColor]] as const) {
       if (on) prefs[key] = true;
       else delete prefs[key];
+    }
+  }
+  if (runtime !== undefined) {
+    // Fit is NO key, not `scale: undefined`: a `-scale 2` that Fit Window cleared must not come back.
+    if (runtime.scale !== undefined) prefs['scale'] = runtime.scale;
+    else delete prefs['scale'];
+    if (runtime.appearance !== undefined && (runtime.appearance !== 'system' || 'appearance' in prefs)) {
+      prefs['appearance'] = runtime.appearance;
     }
   }
   if (geometry !== undefined) {
@@ -82,5 +95,17 @@ export function startupModel(argv: readonly string[]): string | undefined {
     return parseHostless(argv).model;
   } catch {
     return undefined;   // the dialog's own submit reports a bad command line
+  }
+}
+
+/**
+ * The appearance the startup argv names, for the Connect dialog, which is shown before any session
+ * exists; undefined if none or unparseable, as `startupModel`.
+ */
+export function startupAppearance(argv: readonly string[]): Appearance | undefined {
+  try {
+    return parseHostless(argv).appearance;
+  } catch {
+    return undefined;
   }
 }
