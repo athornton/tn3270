@@ -289,7 +289,16 @@ model's prefix, applied at the next connect and disabled while connected (absent
 `--terminal-type`); **Highlight Bold** draws intensified fields bold in 3279 mode (mono always
 does), `-highlightbold`; **Fixed Cursor Color** draws the cursor red rather than in its cell's
 color, `-cursorcolor`. All four are saved by **Save Changed Options**. The TUI takes
-`-highlightbold` (as SGR bold) and the web gateway both flags, for every session it serves. The Model menu (`Alt-M` pops it up) starts with **Disconnect**, enabled only while
+`-highlightbold` (as SGR bold) and the web gateway both flags, for every session it serves.
+
+**The View menu's scale and Appearance items** (since 2026-11-27): **Bigger** (`Ctrl-=`, the key
+marked `+`), **Smaller** (`Ctrl--`) and **Fit Window** (`Ctrl-0`) step the bitmap font's
+whole-number scale and resize the window to it. Bigger goes up to the largest scale that fits the
+whole work area; Fit returns to the default, the largest that fits 80% of it. **Snap Window**
+resizes the window to exactly the scale it is drawing at, removing the border a resize by hand
+leaves. **Appearance** is System, Light or Dark for the GUI's own windows; the terminal keeps its
+scheme's colors. The flags are `-scale N` (absent means Fit) and `-appearance system|light|dark`,
+and Save Changed Options saves both, GUI only. The Model menu (`Alt-M` pops it up) starts with **Disconnect**, enabled only while
 connected, which drops the host session so a choice can be made without waiting for the host to
 drop the line; `Enter` or `Clear` then reconnects with it. A connect attempt in flight cannot be
 cancelled, so the item stays disabled until it settles. Then come the eight models, then oversize
@@ -1389,7 +1398,7 @@ gate, in the order agreed 2026-11-17; each milestone gets its own spec, plan and
      (the model's 3278/3279 prefix, as x3270, advertising IBM-3279-N: **Part 1 done**) and appearance
      changed while running (spec `docs/superpowers/specs/2026-11-24-appearance-while-running-design.md`;
      **Part 2a, the Options menu, `-highlightbold` and `-cursorcolor`: done**; **Part 2b, the View
-     menu's Bigger, Smaller, Fit and Snap Window and Appearance, with `-appearance`: next**), and B3,
+     menu's Bigger, Smaller, Fit and Snap Window and Appearance, with `-scale` and `-appearance`: done**), and B3,
      other fonts. **Deferred from B2, kept here so they aren't lost:** live switching in the
      browser's Alt-M panel (not a parity gate: the gateway has no x3270 counterpart); free scaling
      with vector fonts, for the Super-Terminal; a color picker for each 3279 color and the

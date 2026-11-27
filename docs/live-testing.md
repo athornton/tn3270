@@ -927,6 +927,32 @@ and the Recording log says what happened when they were run.
   we hardcode.** Not a TN3270E problem — `IBM-3278-2-E` reaches TSO with the TN3270E
   option never negotiated. See the Recording log. `record-mvs.txt` remains a draft.
 
+## The View menu's scale and Appearance, under Xvfb with a replayed trace — 2026-11-27
+
+**15b B2 Part 2b, witnessed without a host** (display only, so the spec's gate is Xvfb). Branch
+`view-menu`. `TN3270_GUI_REPLAY` of `vm370-logon-logoff.trace` (a 720x350 draw list), driven by the
+keys seam's `menu:ID` steps, on a **3840x2160** Xvfb screen: at the recipe's 1280x1024 every scale is
+1 and nothing is shown. A View command logs `view: scale=N content=WxH`.
+
+- **Fit is 4** (80% is 3072x1728). Smaller went 3, 2, 1, then stayed at 1. Bigger went 2, 3, 4, 5,
+  then stayed at 5. Fit returned to 4. Content was exactly 720x350 times the scale at every step.
+- **Bigger's bound is the full work area.** At 5 the content is 3600x1750 on a 3840x2160 screen,
+  which fits. Xvfb has no window manager, so a desktop's frame and menu bar are not measured here.
+- **Appearance:** `menu:appearance-dark`, `-light` and `-system` each logged `appearance: X` and
+  `checked=true`. **No screenshot of a themed window was taken**, so the visible change is owed.
+- **Save:** Bigger, Dark, Save Changed Options logged `saved 2 settings` and wrote
+  `{"scale":5,"appearance":"dark"}`.
+- **Capture fails at scale 5 and above, and that is NOT new.** `capturePage` returned 0x0 for every
+  3600x1750 or larger window. That held for `-scale 5` and `-scale 6` on a 5120x2880 screen, and for
+  **plain Fit** on that screen, which picks 5 with no View command involved. Scale 4 (2880x1400)
+  captures fine. So the relaunch from the saved file and the `-scale 5` run could not be compared
+  by image. Whether such a window draws, as opposed to whether it captures, is owed to a desktop.
+- **Owed, not witnessed:** the chords Ctrl-=, Ctrl-- and Ctrl-0 (`sendInputEvent` cannot trigger
+  accelerators, and `xdotool` is not installed); **Snap Window after a resize by hand** (no seam
+  resizes a session window); Appearance's visible effect; scale 5 and above drawing.
+- **Mutation:** 12 of 12 killed (stepScale's two clamps, targetScale's two branches, the max bound,
+  both enabled states, the appearance check, the two save rules, `-scale 0`, the missing key).
+
 ## Color mode and IBM-3279-N, against TK5 and VM/370 — 2026-11-24
 
 **15b B2 Part 1's merge gate, passed.** Branch `color-mode`. CLI with `Trace(on)` and `TraceText`.
