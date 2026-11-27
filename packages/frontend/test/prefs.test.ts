@@ -115,6 +115,12 @@ describe('B2 Part 2a keys', () => {
     expect(key(GUI_PREF_KEYS, 'cursorcolor')).toEqual({ key: 'cursorcolor', flag: '-cursorcolor', type: 'bare' });
     expect(key(TUI_PREF_KEYS, 'cursorcolor')).toBeUndefined();
   });
+  it('scale and appearance are the GUI\'s alone (B2 Part 2b): a terminal has no window to size', () => {
+    expect(key(GUI_PREF_KEYS, 'scale')).toEqual({ key: 'scale', flag: '-scale', type: 'number' });
+    expect(key(GUI_PREF_KEYS, 'appearance')).toEqual({ key: 'appearance', flag: '-appearance', type: 'string' });
+    expect(key(TUI_PREF_KEYS, 'scale')).toBeUndefined();
+    expect(key(TUI_PREF_KEYS, 'appearance')).toBeUndefined();
+  });
   it('both round-trip', () => {
     const argv = prefsToArgv({ highlightbold: true, cursorcolor: true }, GUI_PREF_KEYS).argv;
     expect(argv).toEqual(['-highlightbold', '-cursorcolor']);

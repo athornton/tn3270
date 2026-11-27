@@ -488,3 +488,32 @@ describe('-highlightbold, -cursorcolor and the scheme name', () => {
     expect([a.highlightBold, a.cursorColor]).toEqual([true, true]);
   });
 });
+
+describe('-scale and -appearance (B2 Part 2b)', () => {
+  it('-scale takes a whole number, 1 or more; absent means fit', () => {
+    expect(parseGuiArgs(['-scale', '3', 'vm']).scale).toBe(3);
+    expect(parseGuiArgs(['vm']).scale).toBeUndefined();
+    for (const bad of ['0', '1.5', 'x', '-2', '']) {
+      expect(() => parseGuiArgs(['-scale', bad, 'vm'])).toThrow(/-scale takes a whole number, 1 or more/);
+    }
+    expect(() => parseGuiArgs(['-scale'])).toThrow(/-scale needs a value/);
+  });
+  it('-appearance takes system, light or dark; absent means system', () => {
+    for (const a of ['system', 'light', 'dark'] as const) {
+      expect(parseGuiArgs(['-appearance', a, 'vm']).appearance).toBe(a);
+    }
+    expect(parseGuiArgs(['vm']).appearance).toBeUndefined();
+    expect(() => parseGuiArgs(['-appearance', 'Dark', 'vm'])).toThrow(/system, light or dark/);
+    expect(() => parseGuiArgs(['-appearance'])).toThrow(/-appearance needs a value/);
+  });
+  it('both from the file', () => {
+    const file = prefsToArgv({ scale: 2, appearance: 'light' }, GUI_PREF_KEYS).argv;
+    expect(file).toEqual(['-scale', '2', '-appearance', 'light']);
+    const a = parseGuiArgs([...file, 'vm']);
+    expect([a.scale, a.appearance]).toEqual([2, 'light']);
+  });
+  it('the usage names both', () => {
+    expect(USAGE).toContain('[-scale N]');
+    expect(USAGE).toContain('[-appearance system|light|dark]');
+  });
+});
