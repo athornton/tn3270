@@ -927,6 +927,16 @@ and the Recording log says what happened when they were run.
   we hardcode.** Not a TN3270E problem — `IBM-3278-2-E` reaches TSO with the TN3270E
   option never negotiated. See the Recording log. `record-mvs.txt` remains a draft.
 
+## The action funnel's guard, under Xvfb — 2026-11-27
+
+Branch `action-funnel`. `keys.mjs` passed with the guard (25 chords, 23 actions). Then, with the
+`requestCopy` arm REMOVED so a kind that `applyAction` throws on reached it, keys
+`Ctrl+B,kbd:Ctrl+Shift+C,Ctrl+A` on the replayed VM trace logged
+`action dropped: requestCopy: applyAction does not handle requestCopy: …`, followed by
+`action: {"kind":"attn"}`: the process stayed alive. **The control**, with the arm removed and
+the guard removed too, logged `requestCopy` and then nothing at all until `timeout -s KILL 45`
+killed it (rc 137): the 2026-10-27 freeze, reproduced.
+
 ## About's Model line after a menu change, under Xvfb — 2026-11-27
 
 Branch `about-model`. Replayed `vm370-logon-logoff.trace` with `-model 3279-2-E`, keys
