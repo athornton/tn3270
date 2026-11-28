@@ -31,6 +31,7 @@ import { createTransferController, saveDialogOptions, suggestedNameFrom } from '
 import { layoutFor } from './appRoot.js';
 import { userArgv } from './electronSwitches.js';
 import { aboutModel, aboutText } from './about.js';
+import { applyGuarded, isActionShaped } from './actionFunnel.js';
 import { guiEffectiveArgv, guiPrefsToSave, startupAppearance, startupModel } from './guiPrefs.js';
 import { quitOnChord } from './quitChord.js';
 import { probeLine } from './probe.js';
@@ -1902,7 +1903,14 @@ async function startSession(
    */
   const logActions = SEAM.keys !== '' && SEAM.replay !== '';
 
-  ipcMain.on('action', (_e, action: Action) => {
+  ipcMain.on('action', (_e, raw: unknown) => {
+    // THE SHAPE FIRST (two-branch rule, memory: validate the fields too): `action.kind` on a
+    // malformed payload would throw right here, in the listener whose throws froze the process.
+    if (!isActionShaped(raw)) {
+      process.stdout.write('action dropped: malformed payload\n');
+      return;
+    }
+    const action = raw as Action;
     // Nothing reaches the session before it is live (see `live`); `quit` still quits.
     if (!live && action.kind !== 'quit') return;
     if (logActions) process.stdout.write(`action: ${JSON.stringify(action)}\n`);
@@ -2156,8 +2164,11 @@ async function startSession(
       });
       return;
     }
-    applyAction(session, action);
-    send();
+    // GUARDED, so the next kind `applyAction` throws on is reported and dropped instead of freezing
+    // the main process (actionFunnel.ts). Every kind known to throw today has its arm above.
+    if (applyGuarded((a) => { applyAction(session, a); }, action, (l) => { process.stdout.write(`${l}\n`); })) {
+      send();
+    }
   });
 
   /**
